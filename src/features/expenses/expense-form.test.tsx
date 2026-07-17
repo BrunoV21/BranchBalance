@@ -29,4 +29,15 @@ describe('ExpenseForm', () => {
     expect(view.getByText('€5.01 share')).toBeTruthy();
     expect(view.getByText('€5.00 share')).toBeTruthy();
   });
+
+  it('selects an expense date with the in-app themed calendar', async () => {
+    const view = await render(<ThemeProvider><ExpenseForm currency="EUR" members={members} initial={{ description: 'Dinner', amount: '10.00', paidBy: 'alice', splitType: 'equal', participants: ['alice', 'bob'], expenseDate: '2026-07-16' }} submitLabel="Save expense" onSubmit={async () => undefined} /></ThemeProvider>);
+
+    await fireEvent.press(view.getByRole('button', { name: '2026-07-16' }));
+    await view.findByText('July 2026');
+    await fireEvent.press(view.getByRole('button', { name: new Date(2026, 6, 17).toLocaleDateString() }));
+    await fireEvent.press(view.getByRole('button', { name: 'Use date' }));
+
+    expect(view.getByRole('button', { name: '2026-07-17' })).toBeTruthy();
+  });
 });

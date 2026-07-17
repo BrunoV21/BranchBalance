@@ -1,7 +1,7 @@
 import { DomainValidationError } from '@/domain/errors';
 import { allocateEqual, allocateFull, parseAmountToMinor } from '@/domain/money';
 import type { Clock } from '@/features/auth/contracts';
-import type { CurrencyCode, Expense, Member, SplitType } from '@/domain/types';
+import type { CalendarDate, CurrencyCode, Expense, Member, SplitType } from '@/domain/types';
 
 export interface ExpenseDraft {
   description: string;
@@ -9,7 +9,7 @@ export interface ExpenseDraft {
   paidBy: string;
   splitType: SplitType;
   participants: string[];
-  expenseDate: string;
+  expenseDate: CalendarDate;
 }
 
 function validateDraft(draft: ExpenseDraft, currency: CurrencyCode, members: Member[]) {
@@ -44,7 +44,7 @@ export function buildUpdatedExpense(original: Expense, draft: ExpenseDraft, memb
   };
 }
 
-export function localCalendarDate(date = new Date()): string {
+export function localCalendarDate(date = new Date()): CalendarDate {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
