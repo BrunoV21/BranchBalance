@@ -1,7 +1,7 @@
+import { useState } from 'react';
 import * as Linking from 'expo-linking';
-import { Alert } from 'react-native';
 
-import { Avatar, Body, Button, Card, Screen, Title } from '@/components/ui';
+import { Avatar, Body, Button, Card, ConfirmDialog, Screen, Title } from '@/components/ui';
 import { githubInstallationUrl } from '@/config/app';
 import { useSession } from '@/providers/session-provider';
 import { useTheme } from '@/providers/theme-provider';
@@ -9,6 +9,8 @@ import { useTheme } from '@/providers/theme-provider';
 export default function AccountScreen() {
   const { session, signOut } = useSession();
   const { preference, setPreference } = useTheme();
+  const [showSignOut, setShowSignOut] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   if (!session.account) return null;
   const account = session.account;
   return <Screen>
@@ -20,6 +22,7 @@ export default function AccountScreen() {
       <Button variant="secondary" onPress={() => void setPreference('dark')}>Use dark theme</Button>
     </Card>
     <Button variant="secondary" onPress={() => void Linking.openURL(githubInstallationUrl)}>Manage GitHub App installation</Button>
-    <Button variant="danger" onPress={() => Alert.alert('Sign out?', 'Tokens and cached group data will be removed from this device.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Sign out', style: 'destructive', onPress: () => void signOut() }])}>Sign out</Button>
+    <Button variant="danger" onPress={() => setShowSignOut(true)}>Sign out</Button>
+    <ConfirmDialog visible={showSignOut} title="Sign out?" message="Tokens and cached group data will be removed from this device." confirmLabel="Sign out" loading={signingOut} onCancel={() => setShowSignOut(false)} onConfirm={() => { setSigningOut(true); void signOut().finally(() => setSigningOut(false)); }} />
   </Screen>;
 }

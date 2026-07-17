@@ -1,5 +1,5 @@
 import type { PropsWithChildren, ReactNode } from 'react';
-import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, type TextInputProps, type TextStyle, View, type ViewStyle } from 'react-native';
+import { ActivityIndicator, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, type TextInputProps, type TextStyle, View, type ViewStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/providers/theme-provider';
@@ -47,6 +47,22 @@ export function Banner({ children, tone = 'warning', action }: PropsWithChildren
   return <View accessibilityLiveRegion="polite" style={[styles.banner, { borderColor: color, backgroundColor: colors.surface }]}><Text style={[styles.body, styles.bannerText, { color }]}>{children}</Text>{action}</View>;
 }
 
+export function ConfirmDialog({ visible, title, message, confirmLabel, loading = false, onCancel, onConfirm }: { visible: boolean; title: string; message: string; confirmLabel: string; loading?: boolean; onCancel(): void; onConfirm(): void }) {
+  const { colors } = useTheme();
+  return <Modal visible={visible} transparent animationType="fade" statusBarTranslucent onRequestClose={() => { if (!loading) onCancel(); }}>
+    <View style={[styles.modalOverlay, { backgroundColor: colors.overlay }]}>
+      <View accessibilityRole="alert" accessibilityViewIsModal style={[styles.dialog, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <Text style={[styles.dialogTitle, { color: colors.text }]}>{title}</Text>
+        <Text style={[styles.body, { color: colors.muted }]}>{message}</Text>
+        <View style={styles.dialogActions}>
+          <View style={styles.dialogAction}><Button variant="secondary" disabled={loading} onPress={onCancel}>Cancel</Button></View>
+          <View style={styles.dialogAction}><Button variant="danger" loading={loading} onPress={onConfirm}>{confirmLabel}</Button></View>
+        </View>
+      </View>
+    </View>
+  </Modal>;
+}
+
 export function Avatar({ login, uri, size = 44 }: { login: string; uri?: string | null; size?: number }) {
   const { colors } = useTheme();
   const initials = login.slice(0, 2).toUpperCase();
@@ -65,4 +81,5 @@ const styles = StyleSheet.create({
   body: { fontSize: 15, lineHeight: 22 }, card: { borderWidth: 1, borderRadius: 16, padding: 16, gap: 12 }, button: { minHeight: 48, borderRadius: 12, borderWidth: 1, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center' }, buttonText: { fontSize: 15, fontWeight: '800' },
   field: { gap: 7 }, label: { fontSize: 14, fontWeight: '700' }, input: { minHeight: 50, borderRadius: 11, borderWidth: 1, paddingHorizontal: 14, fontSize: 16 }, help: { fontSize: 12, lineHeight: 17 },
   banner: { borderLeftWidth: 4, borderRadius: 10, padding: 13, gap: 10 }, bannerText: { flex: 1 }, avatar: { alignItems: 'center', justifyContent: 'center' }, empty: { flex: 1, minHeight: 280, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 10 },
+  modalOverlay: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }, dialog: { width: '100%', maxWidth: 440, borderRadius: 18, borderWidth: 1, padding: 20, gap: 16, elevation: 12 }, dialogTitle: { fontSize: 22, lineHeight: 28, fontWeight: '800' }, dialogActions: { flexDirection: 'row', gap: 10, marginTop: 4 }, dialogAction: { flex: 1 },
 });
