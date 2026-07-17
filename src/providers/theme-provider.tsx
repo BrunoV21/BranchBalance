@@ -24,7 +24,7 @@ export function ThemeProvider({ children }: PropsWithChildren) {
   const system: 'light' | 'dark' = systemValue === 'dark' ? 'dark' : 'light';
   const [preference, setPreferenceState] = useState<ThemePreference>('system');
   useEffect(() => { snapshotStore.readTheme().then(setPreferenceState); }, []);
-  useEffect(() => { Appearance.setColorScheme(preference === 'system' ? null : preference); }, [preference]);
+  useEffect(() => { Appearance.setColorScheme(preference === 'system' ? 'unspecified' : preference); }, [preference]);
   const mode = preference === 'system' ? system : preference;
   const value = useMemo<ThemeContextValue>(() => ({
     preference, mode, colors: palettes[mode],
