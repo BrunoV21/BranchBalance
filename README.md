@@ -2,7 +2,7 @@
 
 BranchBalance is a peer-distributed expense splitter backed by private GitHub repositories. GitHub provides authentication, storage, and group membership, so Phase 1 does not require an application server.
 
-This repository currently contains the Expo/React Native foundation and GitHub device-flow wiring described in [`docs/PRD.md`](docs/PRD.md). Expense and group workflows remain to be implemented.
+The Expo application implements the Android Phase 1 described by [`docs/PRD.md`](docs/PRD.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Phase 1
 
@@ -11,18 +11,20 @@ The Android-first Phase 1 is intended to support this complete flow:
 1. Sign in through a GitHub App using device flow.
 2. Create a group as a private `branch-balance-<slug>` repository.
 3. Invite GitHub collaborators as group members.
-4. Store each expense as an append-only JSON file in `expenses/`.
+4. Add, edit, and delete expense JSON files in `expenses/` using GitHub blob SHAs for conflict detection.
 5. Compute balances and simplified settlements on the device.
-6. Refresh repository data manually from GitHub.
+6. Refresh on screen focus, app foreground, and pull-to-refresh while preserving cached data on transient failure.
 
-Offline Git sync, edit/delete, settle-up records, percentage splits, currency conversion, notifications, and iOS release builds are outside Phase 1.
+Offline Git sync, settle-up records, percentage splits, currency conversion, notifications, and iOS release builds are outside Phase 1.
 
 ## Stack
 
 - Expo SDK 57 and React Native 0.86
 - TypeScript and Expo Router
-- `@octokit/rest` and `@octokit/auth-oauth-device`
-- `expo-secure-store` for the GitHub access token
+- `@octokit/rest` with a directly controlled GitHub device-flow transport
+- `expo-secure-store` for one atomic rotating access/refresh credential record
+- AsyncStorage for versioned non-secret account and group snapshots
+- Zod for GitHub-backed document and cache validation
 - React Context and hooks for application state as features are added
 
 ## Prerequisites
@@ -39,8 +41,8 @@ Create a GitHub App in **GitHub Settings > Developer settings > GitHub Apps**.
 1. Enable **Device Flow**.
 2. Grant repository **Administration** and **Contents** read/write permissions.
 3. Configure the app installation to cover repositories created for BranchBalance.
-4. For Phase 1, disable expiring user authorization tokens. A client-only app cannot safely hold the client secret needed to refresh them.
-5. Copy the app's client ID. Do not copy or expose its client secret.
+4. Keep expiring user authorization tokens enabled. GitHub App device-flow refresh does not require shipping a client secret.
+5. Copy the app's client ID and app slug. Do not copy or expose its client secret.
 
 Create the local environment file:
 
@@ -48,7 +50,7 @@ Create the local environment file:
 cp .env.example .env
 ```
 
-Set `EXPO_PUBLIC_GITHUB_CLIENT_ID` in `.env`. Expo public variables are embedded in the application bundle, which is appropriate for a client ID but never for a client secret.
+Set `EXPO_PUBLIC_GITHUB_CLIENT_ID` and `EXPO_PUBLIC_GITHUB_APP_SLUG` in `.env`. Expo public variables are embedded in the application bundle, which is appropriate for this public metadata but never for a client secret.
 
 ## Install and run
 
@@ -64,11 +66,26 @@ npm run android
 npm run web
 ```
 
+### Android device over USB
+
+The default Expo connection uses the local network. If the Android device is using mobile data, has Wi-Fi disabled, or cannot reach the Mac on the same network, Expo Go may report `Failed to download remote update`.
+
+With USB debugging enabled and the device connected, route Metro through USB and start Expo in localhost mode:
+
+```sh
+adb devices
+adb reverse tcp:8081 tcp:8081
+npx expo start --localhost --android
+```
+
+Run `adb reverse` again after reconnecting or restarting the device. If the device and Mac are on the same Wi-Fi network, `npm run android` is sufficient.
+
 ## Validation
 
 ```sh
 npm run typecheck
 npm run lint
+npm test -- --runInBand
 npm run doctor
 ```
 
@@ -89,17 +106,16 @@ Each group is a private repository named `branch-balance-<group-slug>`. It conta
 ```text
 group.json
 expenses/
-  .gitkeep
   <uuid>.json
 ```
 
-`group.json` holds the display name, currency, creator, and creation time. Every expense is a separate immutable JSON document containing its payer, positive amount, split type, participants, creator, and timestamp. GitHub's live collaborator list is the source of truth for membership.
+`group.json` holds the display name, currency, creator, and creation time. Every expense is a separate JSON document containing its amount, date, payer, deterministic shares, and audit fields. GitHub's live collaborator list is the source of truth for membership. No empty expenses directory is created; the first expense creates it.
 
-See the [Phase 1 PRD](docs/PRD.md) for schemas, API endpoints, balance computation, acceptance criteria, and deferred decisions.
+See the [Phase 1 PRD](docs/PRD.md) for product requirements, the [architecture guide](docs/ARCHITECTURE.md) for implementation decisions, and the [testing guide](docs/TESTING.md) for automated and physical-device acceptance.
 
 ## Security
 
-Access tokens are stored with `expo-secure-store`. Environment files and signing artifacts are ignored by Git. Never add a GitHub client secret, access token, keystore, or service credential to the application source or repository.
+Access and refresh tokens are stored together with their expiries in `expo-secure-store`. Environment files and signing artifacts are ignored by Git. Never add a GitHub client secret, token, keystore, or service credential to the application source or repository.
 
 ## License
 
