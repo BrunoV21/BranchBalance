@@ -91,6 +91,18 @@ npm test -- --runInBand
 npm run doctor
 ```
 
+## Product site and documentation
+
+The product website, user guides, source-document reference, and release history are implemented as an isolated VitePress site in [`docs/official`](docs/official). Run it locally with:
+
+```sh
+cd docs/official
+npm ci
+npm run docs:dev
+```
+
+Build the exact GitHub Pages output with `npm run docs:build`. Releases use Markdown notes from `docs/official/releases`; see the [release process](docs/official/releases/releasing.md) before creating a version tag.
+
 ## Android APK
 
 The `preview` EAS profile produces a sideloadable APK. Install the EAS CLI, authenticate, and build locally on macOS:
