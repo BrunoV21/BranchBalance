@@ -1,5 +1,5 @@
 import { type ReactNode, useMemo, useState } from 'react';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { type NativeStackNavigationProp, useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { ListFilter, UserRound, UsersRound } from 'lucide-react-native';
 
@@ -13,8 +13,14 @@ import { BudgetSummaryCard, FilterChip, MetadataItem, ProgressBar } from '@/feat
 import { useGroup } from '@/providers/group-provider';
 import { useTheme } from '@/providers/theme-provider';
 
+type GroupStackRoutes = {
+  '(tabs)': undefined;
+  'spending-plan/edit': undefined;
+};
+
 export default function SpendingScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const { owner, repo } = useLocalSearchParams<{ owner: string; repo: string }>();
   const { colors } = useTheme();
   const { state } = useGroup();
@@ -34,7 +40,7 @@ export default function SpendingScreen() {
   }, [filters, snapshot]);
   const patchFilter = <K extends keyof SpendingFilters>(key: K, value: SpendingFilters[K]) => setFilters((current) => ({ ...current, [key]: value }));
   const openExpense = (file: ExpenseFile) => router.push({ pathname: '/groups/[owner]/[repo]/expenses/[id]', params: { owner, repo, id: file.expense.id } } as never);
-  const openPlan = () => router.push({ pathname: '/groups/[owner]/[repo]/spending-plan/edit', params: { owner, repo } } as never);
+  const openPlan = () => navigation.getParent<NativeStackNavigationProp<GroupStackRoutes>>()?.push('spending-plan/edit');
   const addExpense = () => router.push({ pathname: '/groups/[owner]/[repo]/expenses/new', params: { owner, repo } } as never);
 
   if (!snapshot) return <Screen><Title>Spending</Title><EmptyState title="Loading spending…" body="Spending insights appear after the group refreshes." /></Screen>;

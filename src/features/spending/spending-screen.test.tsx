@@ -1,5 +1,5 @@
 import { fireEvent, render } from '@testing-library/react-native';
-import { useRouter } from 'expo-router';
+import { useNavigation, useRouter } from 'expo-router';
 
 import { calculateBalances } from '@/domain/balances';
 import { deriveSpendingSummary } from '@/domain/spending';
@@ -9,7 +9,7 @@ import { ThemeProvider } from '@/providers/theme-provider';
 
 import SpendingScreen from '../../app/(app)/groups/[owner]/[repo]/(tabs)/spending';
 
-jest.mock('expo-router', () => ({ useRouter: jest.fn(), useLocalSearchParams: () => ({ owner: 'owner', repo: 'branch-balance-trip' }) }));
+jest.mock('expo-router', () => ({ useNavigation: jest.fn(), useRouter: jest.fn(), useLocalSearchParams: () => ({ owner: 'owner', repo: 'branch-balance-trip' }) }));
 jest.mock('@/features/groups/use-group-refresh', () => ({ useGroupRefresh: () => jest.fn() }));
 jest.mock('@/providers/group-provider', () => ({ useGroup: jest.fn() }));
 
@@ -33,7 +33,11 @@ const snapshot: RemoteGroupSnapshot = {
 };
 
 describe('Spending screen', () => {
+  const pushGroupScreen = jest.fn();
+
   beforeEach(() => {
+    jest.clearAllMocks();
+    jest.mocked(useNavigation).mockReturnValue({ getParent: () => ({ push: pushGroupScreen }) } as never);
     jest.mocked(useRouter).mockReturnValue({ push: jest.fn() } as never);
     jest.mocked(useGroup).mockReturnValue({ state: { data: snapshot, status: 'ready', isRefreshing: false, lastSuccessfulAt: snapshot.syncedAt, error: null } } as never);
   });
@@ -61,6 +65,14 @@ describe('Spending screen', () => {
     expect(view.getByText('1 expense shown')).toBeTruthy();
   });
 
+  it('opens the spending plan on the parent group stack without resetting the active tab', async () => {
+    const view = await render(<ThemeProvider><SpendingScreen /></ThemeProvider>);
+
+    await fireEvent.press(view.getByRole('button', { name: 'Spending plan' }));
+
+    expect(pushGroupScreen).toHaveBeenCalledWith('spending-plan/edit');
+  });
+
   it('shows explicit no-budget and no-expense states', async () => {
     const emptyGroup: Group = { ...group };
     delete emptyGroup.spending_plan;
@@ -78,5 +90,7 @@ describe('Spending screen', () => {
 
     expect(view.getByText('No total budget yet')).toBeTruthy();
     expect(view.getByText('No expenses yet')).toBeTruthy();
+    await fireEvent.press(view.getByRole('button', { name: 'Set up spending plan' }));
+    expect(pushGroupScreen).toHaveBeenCalledWith('spending-plan/edit');
   });
 });

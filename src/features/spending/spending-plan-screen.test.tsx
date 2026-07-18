@@ -2,6 +2,7 @@ import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import { useRouter } from 'expo-router';
 
 import { AppFailure } from '@/domain/errors';
+import { expenseCategories } from '@/domain/spending';
 import type { RemoteGroupSnapshot, SpendingPlan } from '@/domain/types';
 import { useGroup } from '@/providers/group-provider';
 import { useSession } from '@/providers/session-provider';
@@ -41,6 +42,7 @@ describe('Spending plan screen', () => {
 
   it('builds a canonical shared plan and navigates only after the provider confirms it', async () => {
     const view = await render(<ThemeProvider><SpendingPlanScreen /></ThemeProvider>);
+    expect(view.getAllByTestId('lucide-icon')).toHaveLength(expenseCategories.length);
     await fireEvent.changeText(view.getByLabelText('Budget amount (EUR)'), '1000');
     await fireEvent.changeText(view.getByLabelText('Food & drinks (EUR)'), '125.50');
     await fireEvent.press(view.getByRole('button', { name: 'Save spending plan' }));

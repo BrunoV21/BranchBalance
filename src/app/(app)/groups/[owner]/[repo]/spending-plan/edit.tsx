@@ -8,6 +8,7 @@ import { formatMoney } from '@/domain/money';
 import { expenseCategories, expenseCategoryLabels } from '@/domain/spending';
 import type { GroupFile, RemoteGroupSnapshot, SpendingPlan } from '@/domain/types';
 import { DatePickerDialog } from '@/features/expenses/date-picker-dialog';
+import { CategoryIcon } from '@/features/expenses/metadata-icons';
 import { useGroupRefresh } from '@/features/groups/use-group-refresh';
 import { buildSpendingPlan, spendingPlanDraftFrom, type SpendingPlanDraft } from '@/features/spending/model';
 import { systemClock, systemLocalCalendar } from '@/infrastructure/runtime';
@@ -117,7 +118,7 @@ function SpendingPlanEditor({ initialSnapshot: snapshot, accountLogin }: { initi
     <Card>
       <Text style={[styles.heading, { color: colors.text }]}>Category limits</Text>
       <Body muted>Optional guardrails inside the total budget. They do not need to add up to the total.</Body>
-      {expenseCategories.map((category) => <Field key={category} label={`${expenseCategoryLabels[category]} (${snapshot.group.currency})`} editable={canWrite} value={draft.categoryBudgets[category]} onChangeText={(value) => setDraft((current) => ({ ...current, categoryBudgets: { ...current.categoryBudgets, [category]: value } }))} keyboardType="decimal-pad" placeholder="No limit" error={error?.field === category ? error.message : undefined} />)}
+      {expenseCategories.map((category) => <Field key={category} label={`${expenseCategoryLabels[category]} (${snapshot.group.currency})`} labelIcon={<CategoryIcon category={category} size={19} />} editable={canWrite} value={draft.categoryBudgets[category]} onChangeText={(value) => setDraft((current) => ({ ...current, categoryBudgets: { ...current.categoryBudgets, [category]: value } }))} keyboardType="decimal-pad" placeholder="No limit" error={error?.field === category ? error.message : undefined} />)}
     </Card>
     {snapshot.group.spending_plan ? <Banner tone="info">Last updated by @{snapshot.group.spending_plan.updated_by} on {new Date(snapshot.group.spending_plan.updated_at).toLocaleString()}. All accepted members with write access can edit this shared plan.</Banner> : null}
     {error && !error.field ? <Banner tone="error">{error.message}</Banner> : null}
