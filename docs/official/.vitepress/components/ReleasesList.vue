@@ -123,10 +123,17 @@ const releases = Object.entries(releaseFiles)
       html: renderMarkdown(extractReleaseBody(source, file))
     }
   })
-  .sort((left, right) => right.date.localeCompare(left.date) || compareTagsDescending(left.tag, right.tag))
+  .sort((left, right) => {
+    const dateOrder = right.date.localeCompare(left.date)
+    if (dateOrder) return dateOrder
+
+    const statusOrder = Number(right.status === 'stable') - Number(left.status === 'stable')
+    return statusOrder || compareTagsDescending(left.tag, right.tag)
+  })
 
 const latest = releases[0]
 const stableReleases = computed(() => releases.filter((release) => release.status === 'stable'))
+const latestIsStable = computed(() => latest?.status === 'stable')
 
 function readableDate(value: string) {
   if (!value) return 'Date pending'
@@ -152,7 +159,7 @@ function readableDate(value: string) {
         </header>
 
         <div class="release-body">
-          <h2>What is in this preview</h2>
+          <h2>What is in this release</h2>
           <div class="highlight-grid">
             <section class="highlight"><div class="point-icon">▣</div><h3>GitHub-backed groups</h3><p>Device-flow sign-in, rotating credentials, private repositories, and collaborator invitations.</p></section>
             <section class="highlight"><div class="point-icon">▤</div><h3>Complete expense lifecycle</h3><p>Add, edit, and delete dated expenses with conflict detection and deterministic shares.</p></section>
@@ -169,8 +176,8 @@ function readableDate(value: string) {
           <div class="status-list">
             <div class="status-row"><span>Phase 1 implementation</span><strong>Complete</strong></div>
             <div class="status-row"><span>Spending increment</span><strong>Complete</strong></div>
-            <div class="status-row"><span>Physical-device acceptance</span><strong class="pending">Pending</strong></div>
-            <div class="status-row"><span>Stable Git tag</span><strong class="pending">Not published</strong></div>
+            <div class="status-row"><span>Physical-device acceptance</span><strong :class="{ pending: !latestIsStable }">{{ latestIsStable ? 'Complete' : 'Pending' }}</strong></div>
+            <div class="status-row"><span>Stable Git tag</span><strong :class="{ pending: !latestIsStable }">{{ latestIsStable ? 'Published' : 'Not published' }}</strong></div>
           </div>
         </section>
 
