@@ -54,7 +54,7 @@ Use at least two physical app sessions signed in as different GitHub accounts.
 11. Delete an expense with the named amount confirmation and verify both sessions remove it after focus, foreground, or pull-to-refresh.
 12. Disconnect networking during refresh. Cached data must remain visible with retry. Restore networking and retry successfully.
 13. Add a malformed expense file on GitHub. Refresh must show a safe warning and exclude it from balances.
-14. Revoke repository access and confirm the private group snapshot and descriptor are removed on confirmed access loss.
+14. Revoke repository or GitHub App installation access and confirm the selected private snapshot and descriptor are removed, the app returns to the installation-aware groups screen, and no raw private-repository 403/404 is surfaced through LogBox. Reinstall the app and verify the connection screen shows automatic recheck progress, can restart an exhausted check window, and replaces itself with discovered groups without an app reload.
 15. Create cached EUR and USD groups and confirm aggregate owed/owing values remain separated by currency.
 16. Switch Android system theme and each explicit theme override; verify labels, money meaning, and controls remain readable without relying on color alone.
 17. Open a legacy group and confirm expenses without CR-001 metadata remain usable and display Uncategorized and Unspecified without changing balances.
