@@ -12,7 +12,7 @@ import { useSession } from './session-provider';
 jest.mock('@/infrastructure/runtime', () => ({
   githubGateway: { discoverGroups: jest.fn() },
   snapshotStore: {
-    readGroups: jest.fn(), readPendingGroup: jest.fn(), writeGroup: jest.fn(), writeGroups: jest.fn(),
+    readGroups: jest.fn(), readPendingGroup: jest.fn(), writeGroup: jest.fn(), writeGroups: jest.fn(), removeGroup: jest.fn(),
   },
   systemClock: { now: () => new Date('2026-07-17T12:00:00.000Z') },
   systemLocalCalendar: { today: () => '2026-07-17' },
@@ -48,6 +48,7 @@ describe('GroupsProvider snapshot summaries', () => {
     jest.mocked(snapshotStore.readPendingGroup).mockResolvedValue(null);
     jest.mocked(snapshotStore.writeGroup).mockResolvedValue(undefined);
     jest.mocked(snapshotStore.writeGroups).mockResolvedValue(undefined);
+    jest.mocked(snapshotStore.removeGroup).mockResolvedValue(undefined);
   });
 
   it('updates the in-memory summary before persisting the confirmed snapshot', async () => {
@@ -96,5 +97,17 @@ describe('GroupsProvider snapshot summaries', () => {
     const acknowledged = { ...snapshot(), group: nextGroup, groupFile: confirmed, spending: deriveSpendingSummary([expense], plan, 'owner', '2026-07-17') };
     expect(view.result.current.reconcileRemoteGroupSnapshot(acknowledged).groupFile?.blobSha).toBe('plan-sha');
     expect(view.result.current.reconcileRemoteGroupSnapshot(snapshot()).group.spending_plan).toBeUndefined();
+  });
+
+  it('removes both the private snapshot and group descriptor after access loss', async () => {
+    const wrapper = ({ children }: PropsWithChildren) => <GroupsProvider>{children}</GroupsProvider>;
+    const view = await renderHook(() => useGroups(), { wrapper });
+    await waitFor(() => expect(view.result.current.state.data).toHaveLength(1));
+
+    await act(() => view.result.current.removeGroup('owner/branch-balance-trip'));
+
+    expect(view.result.current.state.data).toEqual([]);
+    expect(snapshotStore.removeGroup).toHaveBeenCalledWith(7, 'owner/branch-balance-trip');
+    expect(snapshotStore.writeGroups).toHaveBeenLastCalledWith(7, []);
   });
 });

@@ -11,6 +11,7 @@ import { isTerminalAuthError, useSession } from './session-provider';
 
 type GroupContextValue = {
   state: ResourceState<RemoteGroupSnapshot | null>;
+  accessLost: boolean;
   refresh(): Promise<RemoteGroupSnapshot>;
   invite(login: string): Promise<void>;
   createExpense(expense: WritableExpense): Promise<void>;
@@ -30,6 +31,7 @@ export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ own
   const descriptor = groupsState.data.find((group) => group.key === key);
   const descriptorRef = useRef(descriptor);
   const [state, setState] = useState<ResourceState<RemoteGroupSnapshot | null>>({ data: null, status: 'idle', isRefreshing: false, lastSuccessfulAt: null, error: null });
+  const [accessLost, setAccessLost] = useState(false);
   const stateRef = useRef(state);
   const inFlight = useRef<Promise<RemoteGroupSnapshot> | null>(null);
   const snapshotRevision = useRef(0);
@@ -68,12 +70,19 @@ export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ own
       try {
         const snapshot = reconcileRemoteGroupSnapshot(await githubGateway.refreshGroup(currentDescriptor.repository, account.login));
         snapshotRevision.current += 1;
+        setAccessLost(false);
         replaceState({ data: snapshot, status: 'ready', isRefreshing: false, lastSuccessfulAt: snapshot.syncedAt, error: null });
         await applyGroupSnapshot(snapshot);
         return snapshot;
       } catch (error) {
         if (isTerminalAuthError(error)) await expire(error.detail.reason === 'missing' ? 'revoked' : error.detail.reason);
-        if (error instanceof AppFailure && (error.detail.kind === 'not_found' || error.detail.kind === 'permission')) await removeGroup(key);
+        if (error instanceof AppFailure && (error.detail.kind === 'not_found' || error.detail.kind === 'permission')) {
+          snapshotRevision.current += 1;
+          setAccessLost(true);
+          replaceState({ data: null, status: 'error', isRefreshing: false, lastSuccessfulAt: null, error: 'This group is no longer available through the current GitHub App access.' });
+          await removeGroup(key);
+          throw error;
+        }
         const message = error instanceof AppFailure ? messageForError(error.detail) : error instanceof Error ? error.message : 'Unable to refresh this group.';
         patchState((value) => ({ ...value, status: value.data ? 'ready' : 'error', isRefreshing: false, error: message }));
         throw error;
@@ -178,7 +187,7 @@ export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ own
     await applyGroupSnapshot(snapshot);
   }, [account, applyGroupSnapshot, replaceState]);
 
-  const value = useMemo(() => ({ state, refresh, invite, createExpense, updateExpense, deleteExpense, updateSpendingPlan, removeSpendingPlan, acceptSpendingPlanFile }), [acceptSpendingPlanFile, createExpense, deleteExpense, invite, refresh, removeSpendingPlan, state, updateExpense, updateSpendingPlan]);
+  const value = useMemo(() => ({ state, accessLost, refresh, invite, createExpense, updateExpense, deleteExpense, updateSpendingPlan, removeSpendingPlan, acceptSpendingPlanFile }), [acceptSpendingPlanFile, accessLost, createExpense, deleteExpense, invite, refresh, removeSpendingPlan, state, updateExpense, updateSpendingPlan]);
   return <GroupContext.Provider value={value}>{children}</GroupContext.Provider>;
 }
 

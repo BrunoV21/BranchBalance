@@ -2,6 +2,7 @@ import type { PropsWithChildren } from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 
 import { calculateBalances, simplifySettlements } from '@/domain/balances';
+import { AppFailure } from '@/domain/errors';
 import { deriveSpendingSummary } from '@/domain/spending';
 import type { Expense, RemoteGroupSnapshot, WritableExpense } from '@/domain/types';
 import { type ConfirmedExpenseMutation, reconcileConfirmedExpenseMutations } from '@/features/expenses/snapshot-reconciliation';
@@ -226,5 +227,19 @@ describe('GroupProvider expense mutations', () => {
     expect(next.spending?.trip).toMatchObject({ phase: 'during', currentDay: 1, availableDays: 2, dailyAvailableMinor: 2000 });
     expect(recordConfirmedSpendingPlanMutation).toHaveBeenCalledWith(next.key, next.groupFile);
     expect(applyGroupSnapshot).toHaveBeenLastCalledWith(next);
+  });
+
+  it('clears private selected-group state after confirmed GitHub access loss', async () => {
+    jest.mocked(githubGateway.refreshGroup).mockRejectedValueOnce(new AppFailure({ kind: 'not_found', resource: 'GitHub resource' }));
+    const wrapper = ({ children }: PropsWithChildren) => <GroupProvider owner="owner" repo="branch-balance-trip">{children}</GroupProvider>;
+    const view = await renderHook(() => useGroup(), { wrapper });
+    await waitFor(() => expect(view.result.current.state.data).not.toBeNull());
+
+    await act(async () => { await view.result.current.refresh().catch(() => undefined); });
+
+    expect(view.result.current.accessLost).toBe(true);
+    expect(view.result.current.state.data).toBeNull();
+    expect(view.result.current.state.error).toMatch(/no longer available/i);
+    expect(removeGroup).toHaveBeenCalledWith('owner/branch-balance-trip');
   });
 });

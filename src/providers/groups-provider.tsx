@@ -158,8 +158,10 @@ export function GroupsProvider({ children }: PropsWithChildren) {
     confirmedSpendingPlans.current.delete(key);
     const groups = stateRef.current.data.filter((group) => group.key !== key);
     patchState((value) => ({ ...value, data: groups }));
-    await snapshotStore.writeGroups(account.id, groups);
-    await snapshotStore.removeGroup(account.id, key as `${string}/${string}`);
+    await Promise.all([
+      snapshotStore.removeGroup(account.id, key as `${string}/${string}`),
+      snapshotStore.writeGroups(account.id, groups),
+    ]);
   }, [account, patchState]);
 
   const aggregates = useMemo(() => calculateGroupAggregates(state.data), [state.data]);
