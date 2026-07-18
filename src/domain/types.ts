@@ -1,3 +1,5 @@
+import type { CategoryBucket, ExpenseCategory, PaymentMethod, PaymentMethodBucket } from './spending/catalog';
+
 export type CurrencyCode = 'EUR' | 'USD' | 'GBP';
 export type SplitType = 'equal' | 'full';
 export type IsoInstant = string;
@@ -26,8 +28,25 @@ export interface Group {
   schema_version: 1;
   name: string;
   currency: CurrencyCode;
+  spending_plan?: SpendingPlan;
   created_by: string;
   created_at: IsoInstant;
+}
+
+export interface SpendingPlan {
+  budget_minor?: number;
+  category_budgets_minor?: Partial<Record<ExpenseCategory, number>>;
+  starts_on?: CalendarDate;
+  ends_on?: CalendarDate;
+  updated_by: string;
+  updated_at: IsoInstant;
+}
+
+export interface GroupFile {
+  group: Group;
+  blobSha: string;
+  path: 'group.json';
+  sourceDocument: Record<string, unknown>;
 }
 
 export interface Expense {
@@ -36,6 +55,8 @@ export interface Expense {
   description: string;
   amount_minor: number;
   currency: CurrencyCode;
+  category: ExpenseCategory | null;
+  payment_method: PaymentMethod | null;
   paid_by: string;
   split_type: SplitType;
   participants: string[];
@@ -47,10 +68,16 @@ export interface Expense {
   updated_at: IsoInstant | null;
 }
 
+export type WritableExpense = Omit<Expense, 'category' | 'payment_method'> & {
+  category: ExpenseCategory;
+  payment_method: PaymentMethod;
+};
+
 export interface ExpenseFile {
   expense: Expense;
   blobSha: string;
   path: `expenses/${string}.json`;
+  sourceDocument: Record<string, unknown>;
 }
 
 export interface Member {
@@ -98,6 +125,34 @@ export interface GroupSummary {
   syncedAt: IsoInstant;
 }
 
+export interface SpendingSummary {
+  totalSpentMinor: number;
+  currentUserPaidMinor: number;
+  currentUserShareMinor: number;
+  categorySpentMinor: Record<CategoryBucket, number>;
+  paymentMethodSpentMinor: Record<PaymentMethodBucket, number>;
+  budget: null | {
+    budgetMinor: number;
+    remainingMinor: number;
+    status: 'under' | 'at' | 'over';
+    percentageUsed: number;
+    categoryLimits: Partial<Record<ExpenseCategory, {
+      limitMinor: number;
+      spentMinor: number;
+      remainingMinor: number;
+      status: 'under' | 'at' | 'over';
+      percentageUsed: number;
+    }>>;
+  };
+  trip: null | {
+    phase: 'before' | 'during' | 'after';
+    totalDays: number;
+    currentDay: number | null;
+    availableDays: number;
+    dailyAvailableMinor: number | null;
+  };
+}
+
 export interface DiscoveredGroup {
   key: GroupKey;
   repository: RepositoryRef;
@@ -109,11 +164,13 @@ export interface RemoteGroupSnapshot {
   key: GroupKey;
   repository: RepositoryRef;
   group: Group;
+  groupFile: GroupFile | null;
   members: Member[];
   pendingMembers: PendingMember[] | null;
   expenses: ExpenseFile[];
   balances: BalanceResult;
   settlements: Settlement[];
+  spending: SpendingSummary | null;
   warnings: DataWarning[];
   syncedAt: IsoInstant;
 }

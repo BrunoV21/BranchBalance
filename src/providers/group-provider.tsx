@@ -1,9 +1,9 @@
 import { createContext, type PropsWithChildren, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { AppFailure, DomainValidationError, messageForError } from '@/domain/errors';
-import { normalizeLogin, type Expense, type ExpenseFile, type GroupKey, type RemoteGroupSnapshot } from '@/domain/types';
-import { type ConfirmedExpenseMutation, withExpenses } from '@/features/expenses/snapshot-reconciliation';
-import { githubGateway, snapshotStore, systemClock } from '@/infrastructure/runtime';
+import { normalizeLogin, type ExpenseFile, type GroupFile, type GroupKey, type RemoteGroupSnapshot, type SpendingPlan, type WritableExpense } from '@/domain/types';
+import { hydrateCachedSnapshot, type ConfirmedExpenseMutation, withExpenses, withGroupFile } from '@/features/expenses/snapshot-reconciliation';
+import { githubGateway, snapshotStore, systemClock, systemLocalCalendar } from '@/infrastructure/runtime';
 
 import { useGroups } from './groups-provider';
 import type { ResourceState } from './resource';
@@ -13,15 +13,18 @@ type GroupContextValue = {
   state: ResourceState<RemoteGroupSnapshot | null>;
   refresh(): Promise<RemoteGroupSnapshot>;
   invite(login: string): Promise<void>;
-  createExpense(expense: Expense): Promise<void>;
-  updateExpense(expense: Expense, sha: string): Promise<void>;
-  deleteExpense(expense: Expense, sha: string): Promise<void>;
+  createExpense(expense: WritableExpense): Promise<void>;
+  updateExpense(expense: WritableExpense, current: ExpenseFile): Promise<void>;
+  deleteExpense(current: ExpenseFile): Promise<void>;
+  updateSpendingPlan(plan: SpendingPlan, current?: GroupFile): Promise<void>;
+  removeSpendingPlan(current?: GroupFile): Promise<void>;
+  acceptSpendingPlanFile(file: GroupFile): Promise<void>;
 };
 const GroupContext = createContext<GroupContextValue | null>(null);
 
 export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ owner: string; repo: string }>) {
   const { session, expire } = useSession();
-  const { state: groupsState, applyGroupSnapshot, recordConfirmedExpenseMutation, reconcileRemoteGroupSnapshot, removeGroup } = useGroups();
+  const { state: groupsState, applyGroupSnapshot, recordConfirmedExpenseMutation, recordConfirmedSpendingPlanMutation, reconcileRemoteGroupSnapshot, removeGroup } = useGroups();
   const account = session.account;
   const key = `${owner.toLowerCase()}/${repo.toLowerCase()}` as GroupKey;
   const descriptor = groupsState.data.find((group) => group.key === key);
@@ -45,7 +48,10 @@ export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ own
     if (!account) return;
     let active = true;
     const startedAtRevision = snapshotRevision.current;
-    void snapshotStore.readGroup(account.id, key).then((snapshot) => {
+    void snapshotStore.readGroup(account.id, key).then(async (cached) => {
+      let snapshot: RemoteGroupSnapshot | null = null;
+      try { snapshot = cached ? hydrateCachedSnapshot(cached, account.login, systemLocalCalendar.today()) : null; }
+      catch { await snapshotStore.removeGroup(account.id, key); }
       if (!active || !snapshot || snapshotRevision.current !== startedAtRevision || stateRef.current.data) return;
       snapshotRevision.current += 1;
       replaceState({ data: snapshot, status: 'ready', isRefreshing: false, lastSuccessfulAt: snapshot.syncedAt, error: null });
@@ -85,7 +91,7 @@ export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ own
     const files = mutation.kind === 'upsert'
       ? [...current.expenses.filter((item) => item.expense.id !== expenseId), mutation.file]
       : current.expenses.filter((item) => item.expense.id !== expenseId);
-    const snapshot = withExpenses(current, files, systemClock.now().toISOString());
+    const snapshot = withExpenses(current, files, account!.login, systemLocalCalendar.today(), systemClock.now().toISOString());
     const nextState = { data: snapshot, status: 'ready' as const, isRefreshing: false, lastSuccessfulAt: snapshot.syncedAt, error: null };
     snapshotRevision.current += 1;
     replaceState(nextState);
@@ -93,7 +99,7 @@ export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ own
     catch {
       patchState((value) => ({ ...value, error: 'Expense saved, but the offline cache could not be updated.' }));
     }
-  }, [applyGroupSnapshot, key, patchState, recordConfirmedExpenseMutation, replaceState]);
+  }, [account, applyGroupSnapshot, key, patchState, recordConfirmedExpenseMutation, replaceState]);
 
   const invite = useCallback(async (login: string) => {
     const normalized = normalizeLogin(login);
@@ -107,7 +113,7 @@ export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ own
     patchState((value) => ({ ...value, data: snapshot }));
   }, [patchState, refresh]);
 
-  const createExpense = useCallback(async (expense: Expense) => {
+  const createExpense = useCallback(async (expense: WritableExpense) => {
     const current = stateRef.current.data;
     if (!current) throw new DomainValidationError('Refresh the group before adding an expense.');
     let file: ExpenseFile;
@@ -122,21 +128,57 @@ export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ own
     await commitExpenseMutation({ kind: 'upsert', file });
   }, [commitExpenseMutation]);
 
-  const updateExpense = useCallback(async (expense: Expense, sha: string) => {
+  const updateExpense = useCallback(async (expense: WritableExpense, target: ExpenseFile) => {
     const current = stateRef.current.data;
     if (!current) throw new DomainValidationError('Refresh the group before editing an expense.');
-    const file = await githubGateway.updateExpense(current.repository, expense, sha);
+    const file = await githubGateway.updateExpense(current.repository, target, expense);
     await commitExpenseMutation({ kind: 'upsert', file });
   }, [commitExpenseMutation]);
 
-  const deleteExpense = useCallback(async (expense: Expense, sha: string) => {
+  const deleteExpense = useCallback(async (target: ExpenseFile) => {
     const current = stateRef.current.data;
     if (!current) throw new DomainValidationError('Refresh the group before deleting an expense.');
-    await githubGateway.deleteExpense(current.repository, expense, sha);
-    await commitExpenseMutation({ kind: 'delete', expenseId: expense.id });
+    await githubGateway.deleteExpense(current.repository, target);
+    await commitExpenseMutation({ kind: 'delete', expenseId: target.expense.id });
   }, [commitExpenseMutation]);
 
-  const value = useMemo(() => ({ state, refresh, invite, createExpense, updateExpense, deleteExpense }), [createExpense, deleteExpense, invite, refresh, state, updateExpense]);
+  const commitSpendingPlanMutation = useCallback(async (groupFile: GroupFile) => {
+    const current = stateRef.current.data;
+    if (!current || !account) throw new DomainValidationError('Refresh the group before changing its spending plan.');
+    recordConfirmedSpendingPlanMutation(key, groupFile);
+    const snapshot = withGroupFile(current, groupFile, account.login, systemLocalCalendar.today(), systemClock.now().toISOString());
+    snapshotRevision.current += 1;
+    replaceState({ data: snapshot, status: 'ready', isRefreshing: false, lastSuccessfulAt: snapshot.syncedAt, error: null });
+    try { await applyGroupSnapshot(snapshot); }
+    catch { patchState((value) => ({ ...value, error: 'Spending plan saved, but the offline cache could not be updated.' })); }
+  }, [account, applyGroupSnapshot, key, patchState, recordConfirmedSpendingPlanMutation, replaceState]);
+
+  const updateSpendingPlan = useCallback(async (plan: SpendingPlan, target?: GroupFile) => {
+    const current = stateRef.current.data;
+    const groupFile = target ?? current?.groupFile;
+    if (!current || !groupFile) throw new DomainValidationError('Refresh the group before changing its spending plan.');
+    if (!current.repository.canWrite) throw new DomainValidationError('Your GitHub account cannot update this spending plan.');
+    await commitSpendingPlanMutation(await githubGateway.updateSpendingPlan(current.repository, groupFile, plan));
+  }, [commitSpendingPlanMutation]);
+
+  const removeSpendingPlan = useCallback(async (target?: GroupFile) => {
+    const current = stateRef.current.data;
+    const groupFile = target ?? current?.groupFile;
+    if (!current || !groupFile) throw new DomainValidationError('Refresh the group before changing its spending plan.');
+    if (!current.repository.canWrite) throw new DomainValidationError('Your GitHub account cannot update this spending plan.');
+    await commitSpendingPlanMutation(await githubGateway.updateSpendingPlan(current.repository, groupFile, null));
+  }, [commitSpendingPlanMutation]);
+
+  const acceptSpendingPlanFile = useCallback(async (groupFile: GroupFile) => {
+    const current = stateRef.current.data;
+    if (!current || !account) throw new DomainValidationError('Refresh the group before reviewing its spending plan.');
+    const snapshot = withGroupFile(current, groupFile, account.login, systemLocalCalendar.today(), systemClock.now().toISOString());
+    snapshotRevision.current += 1;
+    replaceState({ data: snapshot, status: 'ready', isRefreshing: false, lastSuccessfulAt: snapshot.syncedAt, error: null });
+    await applyGroupSnapshot(snapshot);
+  }, [account, applyGroupSnapshot, replaceState]);
+
+  const value = useMemo(() => ({ state, refresh, invite, createExpense, updateExpense, deleteExpense, updateSpendingPlan, removeSpendingPlan, acceptSpendingPlanFile }), [acceptSpendingPlanFile, createExpense, deleteExpense, invite, refresh, removeSpendingPlan, state, updateExpense, updateSpendingPlan]);
   return <GroupContext.Provider value={value}>{children}</GroupContext.Provider>;
 }
 

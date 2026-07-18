@@ -8,11 +8,12 @@ describe('SnapshotStore', () => {
     const store = new SnapshotStoreImpl(keyValue);
     const snapshot = {
       key: 'owner/repo',
-      repository: { id: 1 },
-      group: { schema_version: 1 },
-      expenses: [],
+      repository: { id: 1, owner: 'owner', name: 'repo', defaultBranch: 'main', installationId: 10, private: true, canAdmin: true, canWrite: true },
+      group: { schema_version: 1, name: 'Trip', currency: 'EUR', created_by: 'owner', created_at: '2026-07-16T00:00:00.000Z' },
+      groupFile: null, members: [], pendingMembers: [], expenses: [],
+      balances: { totalSpentMinor: 0, members: [], zeroSum: true }, settlements: [], spending: null, warnings: [],
       syncedAt: '2026-07-16T00:00:00.000Z',
-    } as unknown as RemoteGroupSnapshot;
+    } satisfies RemoteGroupSnapshot;
     await store.writeGroup(7, 'owner/repo', snapshot);
     expect(await store.readGroup(7, 'owner/repo')).toEqual(snapshot);
   });

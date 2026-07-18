@@ -33,13 +33,13 @@ describe('GitHubGateway group refresh', () => {
   it('excludes malformed expenses and calculates one atomic snapshot', async () => {
     const expense = {
       schema_version: 1, id: '6f2c1a3e-2b1d-4a3a-9c3e-9d2f9a0b1234', description: 'Dinner', amount_minor: 1000,
-      currency: 'EUR', paid_by: 'owner', split_type: 'equal', participants: ['owner', 'friend'],
+      currency: 'EUR', category: 'food_drink', payment_method: 'card', paid_by: 'owner', split_type: 'equal', participants: ['owner', 'friend'],
       shares_minor: { owner: 500, friend: 500 }, expense_date: '2026-07-16', created_by: 'owner',
       created_at: '2026-07-16T00:00:00.000Z', updated_by: null, updated_at: null,
     };
     const client = clientWith((route, parameters) => {
       if (route === 'GET /repos/{owner}/{repo}') return { data: { id: 1, name: 'branch-balance-trip', private: true, default_branch: 'main', owner: { login: 'owner' }, permissions: { admin: true, push: true } }, headers: {}, status: 200 };
-      if (route === 'GET /repos/{owner}/{repo}/contents/{path}') return { data: { type: 'file', sha: 'g', content: encoded(group) }, headers: {}, status: 200 };
+      if (route === 'GET /repos/{owner}/{repo}/contents/{path}') return { data: { type: 'file', sha: 'g', content: encoded({ ...group, spending_plan: { budget_minor: 0, updated_by: 'owner', updated_at: '2026-07-16T00:00:00.000Z' } }) }, headers: {}, status: 200 };
       if (route === 'GET /repos/{owner}/{repo}/collaborators') return { data: [{ login: 'owner', avatar_url: null, permissions: { admin: true } }, { login: 'friend', avatar_url: null, permissions: { push: true } }], headers: {}, status: 200 };
       if (route === 'GET /repos/{owner}/{repo}/invitations') return { data: [], headers: {}, status: 200 };
       if (route === 'GET /repos/{owner}/{repo}/git/trees/{tree_sha}') return { data: { truncated: false, tree: [
@@ -53,7 +53,11 @@ describe('GitHubGateway group refresh', () => {
     const gateway = new GitHubGatewayImpl(client, { now: () => new Date('2026-07-16T12:00:00.000Z') });
     const snapshot = await gateway.refreshGroup({ id: 1, owner: 'owner', name: 'branch-balance-trip', defaultBranch: 'main', installationId: 10, private: true, canAdmin: true, canWrite: true }, 'owner');
     expect(snapshot.expenses).toHaveLength(1);
-    expect(snapshot.warnings).toHaveLength(1);
+    expect(snapshot.warnings).toHaveLength(2);
+    expect(snapshot.warnings).toContainEqual(expect.objectContaining({ path: 'group.json#spending_plan' }));
+    expect(snapshot.group.spending_plan).toBeUndefined();
+    expect(snapshot.groupFile?.blobSha).toBe('g');
+    expect(snapshot.spending).toMatchObject({ totalSpentMinor: 1000, currentUserPaidMinor: 1000, currentUserShareMinor: 500 });
     expect(snapshot.balances.zeroSum).toBe(true);
     expect(snapshot.settlements).toEqual([{ from: 'friend', to: 'owner', amountMinor: 500 }]);
   });
@@ -63,7 +67,7 @@ describe('GitHubGateway expense writes', () => {
   const repository = { id: 1, owner: 'owner', name: 'branch-balance-trip', defaultBranch: 'main', installationId: 10, private: true as const, canAdmin: true, canWrite: true };
   const expense = {
     schema_version: 1 as const, id: '6f2c1a3e-2b1d-4a3a-9c3e-9d2f9a0b1234', description: 'Dinner', amount_minor: 1000,
-    currency: 'EUR' as const, paid_by: 'owner', split_type: 'equal' as const, participants: ['owner', 'friend'],
+    currency: 'EUR' as const, category: 'food_drink' as const, payment_method: 'card' as const, paid_by: 'owner', split_type: 'equal' as const, participants: ['owner', 'friend'],
     shares_minor: { owner: 500, friend: 500 }, expense_date: '2026-07-16', created_by: 'owner',
     created_at: '2026-07-16T00:00:00.000Z', updated_by: null, updated_at: null,
   };
@@ -83,7 +87,7 @@ describe('GitHubGateway expense writes', () => {
       throw new Error(`Unexpected ${route}`);
     });
     const gateway = new GitHubGatewayImpl(client, { now: () => new Date() });
-    await expect(gateway.updateExpense(repository, expense, 'stale-sha')).rejects.toMatchObject({ detail: { kind: 'expense_conflict', operation: 'edit', latest: { blobSha: 'latest-sha' } } });
+    await expect(gateway.updateExpense(repository, { expense, blobSha: 'stale-sha', path: `expenses/${expense.id}.json`, sourceDocument: { ...expense } }, expense)).rejects.toMatchObject({ detail: { kind: 'expense_conflict', operation: 'edit', latest: { blobSha: 'latest-sha' } } });
   });
 
   it('treats an already-absent delete as success after confirmation', async () => {
@@ -93,6 +97,65 @@ describe('GitHubGateway expense writes', () => {
       throw new Error(`Unexpected ${route}`);
     });
     const gateway = new GitHubGatewayImpl(client, { now: () => new Date() });
-    await expect(gateway.deleteExpense(repository, expense, 'old-sha')).resolves.toBeUndefined();
+    await expect(gateway.deleteExpense(repository, { expense, blobSha: 'old-sha', path: `expenses/${expense.id}.json`, sourceDocument: { ...expense } })).resolves.toBeUndefined();
+  });
+
+  it('preserves unrelated passthrough properties during an edit', async () => {
+    const request = jest.fn().mockResolvedValue({ data: { content: { sha: 'updated-sha' } }, headers: {}, status: 200 });
+    const gateway = new GitHubGatewayImpl({ request }, { now: () => new Date() });
+    const updated = { ...expense, description: 'Updated dinner' };
+    const file = await gateway.updateExpense(repository, { expense, blobSha: 'old-sha', path: `expenses/${expense.id}.json`, sourceDocument: { ...expense, future: { retained: true } } }, updated);
+    expect(file.sourceDocument.future).toEqual({ retained: true });
+    const body = JSON.parse(atob(jest.mocked(request).mock.calls[0]?.[1]?.content as string));
+    expect(body).toMatchObject({ description: 'Updated dinner', future: { retained: true } });
+  });
+});
+
+describe('GitHubGateway spending-plan writes', () => {
+  const repository = { id: 1, owner: 'owner', name: 'branch-balance-trip', defaultBranch: 'main', installationId: 10, private: true as const, canAdmin: true, canWrite: true };
+  const current = { group: { ...group, schema_version: 1 as const, currency: 'EUR' as const }, blobSha: 'group-sha', path: 'group.json' as const, sourceDocument: { ...group, future: { retained: true } } };
+  const plan = { budget_minor: 100_000, starts_on: '2026-08-10', ends_on: '2026-08-16', updated_by: 'owner', updated_at: '2026-07-17T14:00:00.000Z' } as const;
+
+  it('merges only the spending plan and retains the returned SHA', async () => {
+    const request = jest.fn().mockResolvedValue({ data: { content: { sha: 'next-group-sha' } }, headers: {}, status: 200 });
+    const gateway = new GitHubGatewayImpl({ request }, { now: () => new Date() });
+    const result = await gateway.updateSpendingPlan(repository, current, plan);
+    expect(result).toMatchObject({ blobSha: 'next-group-sha', group: { spending_plan: plan }, sourceDocument: { future: { retained: true } } });
+    expect(request).toHaveBeenCalledWith('PUT /repos/{owner}/{repo}/contents/{path}', expect.objectContaining({ sha: 'group-sha', message: 'Update spending plan' }));
+  });
+
+  it('removes only the spending plan from the passthrough group document', async () => {
+    const request = jest.fn().mockResolvedValue({ data: { content: { sha: 'removed-plan-sha' } }, headers: {}, status: 200 });
+    const gateway = new GitHubGatewayImpl({ request }, { now: () => new Date() });
+    const currentWithPlan = { ...current, group: { ...current.group, spending_plan: plan }, sourceDocument: { ...current.sourceDocument, spending_plan: plan } };
+
+    const result = await gateway.updateSpendingPlan(repository, currentWithPlan, null);
+
+    expect(result.group.spending_plan).toBeUndefined();
+    expect(result.sourceDocument).toMatchObject({ future: { retained: true } });
+    expect(result.sourceDocument).not.toHaveProperty('spending_plan');
+    expect(request).toHaveBeenCalledWith('PUT /repos/{owner}/{repo}/contents/{path}', expect.objectContaining({ sha: 'group-sha', message: 'Remove spending plan' }));
+  });
+
+  it('returns the latest document and submitted values for stale-SHA review', async () => {
+    const remotePlan = { ...plan, budget_minor: 120_000, updated_at: '2026-07-17T14:01:00.000Z' };
+    const client = clientWith((route) => {
+      if (route.startsWith('PUT ')) throw new AppFailure({ kind: 'github', status: 409, safeMessage: 'Conflict', retryable: false });
+      if (route === 'GET /repos/{owner}/{repo}/contents/{path}') return { data: { type: 'file', sha: 'remote-sha', content: encoded({ ...group, spending_plan: remotePlan }) }, headers: {}, status: 200 };
+      throw new Error(`Unexpected ${route}`);
+    });
+    const gateway = new GitHubGatewayImpl(client, { now: () => new Date() });
+    await expect(gateway.updateSpendingPlan(repository, current, plan)).rejects.toMatchObject({ detail: { kind: 'spending_plan_conflict', latest: { blobSha: 'remote-sha' }, submitted: plan } });
+  });
+
+  it('recognizes an ambiguous write that already committed semantically', async () => {
+    const request = jest.fn(async (route: string) => {
+      if (route.startsWith('PUT ')) throw new AppFailure({ kind: 'network', retryable: true });
+      if (route === 'GET /repos/{owner}/{repo}/contents/{path}') return { data: { type: 'file', sha: 'confirmed-sha', content: encoded({ ...group, spending_plan: plan }) }, headers: {}, status: 200 };
+      throw new Error(`Unexpected ${route}`);
+    });
+    const gateway = new GitHubGatewayImpl({ request: request as never }, { now: () => new Date() });
+    await expect(gateway.updateSpendingPlan(repository, current, plan)).resolves.toMatchObject({ blobSha: 'confirmed-sha', group: { spending_plan: plan } });
+    expect(request).toHaveBeenCalledTimes(2);
   });
 });

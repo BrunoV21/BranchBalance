@@ -12,5 +12,6 @@ export default function SelectedGroupLayout() {
     <Stack.Screen name="expenses/new" options={{ title: 'Add expense' }} />
     <Stack.Screen name="expenses/[id]/index" options={{ title: 'Expense details' }} />
     <Stack.Screen name="expenses/[id]/edit" options={{ title: 'Edit expense' }} />
+    <Stack.Screen name="spending-plan/edit" options={{ title: 'Spending plan' }} />
   </Stack></GroupProvider>;
 }

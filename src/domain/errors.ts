@@ -1,4 +1,4 @@
-import type { ExpenseFile, IsoInstant, RepositoryRef } from './types';
+import type { ExpenseFile, GroupFile, IsoInstant, RepositoryRef, SpendingPlan } from './types';
 
 export type AppError =
   | { kind: 'auth_required'; reason: 'missing' | 'refresh_expired' | 'revoked' }
@@ -12,6 +12,7 @@ export type AppError =
   | { kind: 'repository_name_taken'; repository: string }
   | { kind: 'partial_group_creation'; repository: RepositoryRef }
   | { kind: 'expense_conflict'; latest: ExpenseFile | null; operation: 'edit' | 'delete' }
+  | { kind: 'spending_plan_conflict'; latest: GroupFile; submitted: SpendingPlan | null }
   | { kind: 'repository_too_large' }
   | { kind: 'github'; status: number; safeMessage: string; retryable: boolean };
 
@@ -42,6 +43,7 @@ export function messageForError(error: AppError): string {
     case 'repository_name_taken': return `The repository ${error.repository} already exists. Choose another group name.`;
     case 'partial_group_creation': return 'The private repository was created, but its group file still needs to be added.';
     case 'expense_conflict': return 'This expense changed on GitHub. Review the latest version before trying again.';
+    case 'spending_plan_conflict': return 'The spending plan changed on GitHub. Review both versions before trying again.';
     case 'repository_too_large': return 'This repository is too large to refresh safely.';
     case 'github': return error.safeMessage;
   }

@@ -1,9 +1,9 @@
 import { createContext, type PropsWithChildren, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { AppFailure, DomainValidationError, messageForError } from '@/domain/errors';
-import { groupKey, type CurrencyCode, type DiscoveredGroup, type PendingGroupCreation, type RemoteGroupSnapshot } from '@/domain/types';
-import { githubGateway, snapshotStore, systemClock } from '@/infrastructure/runtime';
-import { type ConfirmedExpenseMutation, reconcileConfirmedExpenseMutations } from '@/features/expenses/snapshot-reconciliation';
+import { groupKey, type CurrencyCode, type DiscoveredGroup, type GroupFile, type PendingGroupCreation, type RemoteGroupSnapshot } from '@/domain/types';
+import { githubGateway, snapshotStore, systemClock, systemLocalCalendar } from '@/infrastructure/runtime';
+import { type ConfirmedExpenseMutation, reconcileConfirmedExpenseMutations, withGroupFile } from '@/features/expenses/snapshot-reconciliation';
 import { calculateGroupAggregates, type GroupAggregate } from '@/features/groups/summaries';
 import { createGroupRepository } from '@/features/groups/create-group';
 
@@ -21,6 +21,7 @@ type GroupsContextValue = {
   retryPendingCreation(): Promise<DiscoveredGroup>;
   applyGroupSnapshot(snapshot: RemoteGroupSnapshot): Promise<void>;
   recordConfirmedExpenseMutation(key: string, mutation: ConfirmedExpenseMutation): void;
+  recordConfirmedSpendingPlanMutation(key: string, file: GroupFile): void;
   reconcileRemoteGroupSnapshot(snapshot: RemoteGroupSnapshot): RemoteGroupSnapshot;
   removeGroup(key: string): Promise<void>;
 };
@@ -38,6 +39,7 @@ export function GroupsProvider({ children }: PropsWithChildren) {
   const [pendingCreation, setPendingCreation] = useState<PendingGroupCreation | null>(null);
   const inFlight = useRef<Promise<DiscoveredGroup[]> | null>(null);
   const confirmedMutations = useRef(new Map<string, Map<string, ConfirmedExpenseMutation>>());
+  const confirmedSpendingPlans = useRef(new Map<string, GroupFile>());
 
   const replaceState = useCallback((next: ResourceState<DiscoveredGroup[]>) => {
     stateRef.current = next;
@@ -50,7 +52,7 @@ export function GroupsProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     if (!account) {
-      queueMicrotask(() => { confirmedMutations.current.clear(); replaceState(initial); setPendingCreation(null); });
+      queueMicrotask(() => { confirmedMutations.current.clear(); confirmedSpendingPlans.current.clear(); replaceState(initial); setPendingCreation(null); });
       return;
     }
     let active = true;
@@ -107,13 +109,21 @@ export function GroupsProvider({ children }: PropsWithChildren) {
     confirmedMutations.current.set(key, mutations);
   }, []);
 
+  const recordConfirmedSpendingPlanMutation = useCallback((key: string, file: GroupFile) => {
+    confirmedSpendingPlans.current.set(key, file);
+  }, []);
+
   const reconcileRemoteGroupSnapshot = useCallback((snapshot: RemoteGroupSnapshot) => {
     const mutations = confirmedMutations.current.get(snapshot.key);
-    if (!mutations) return snapshot;
-    const reconciled = reconcileConfirmedExpenseMutations(snapshot, mutations);
-    if (!mutations.size) confirmedMutations.current.delete(snapshot.key);
+    let reconciled = mutations && account ? reconcileConfirmedExpenseMutations(snapshot, mutations, account.login, systemLocalCalendar.today()) : snapshot;
+    if (mutations && !mutations.size) confirmedMutations.current.delete(snapshot.key);
+    const confirmedPlan = confirmedSpendingPlans.current.get(snapshot.key);
+    if (confirmedPlan && account) {
+      if (snapshot.groupFile?.blobSha === confirmedPlan.blobSha) confirmedSpendingPlans.current.delete(snapshot.key);
+      else reconciled = withGroupFile(reconciled, confirmedPlan, account.login, systemLocalCalendar.today(), reconciled.syncedAt);
+    }
     return reconciled;
-  }, []);
+  }, [account]);
 
   const createGroup = useCallback(async (name: string, currency: CurrencyCode) => {
     if (!account) throw new DomainValidationError('Sign in to create a group.');
@@ -145,6 +155,7 @@ export function GroupsProvider({ children }: PropsWithChildren) {
   const removeGroup = useCallback(async (key: string) => {
     if (!account) return;
     confirmedMutations.current.delete(key);
+    confirmedSpendingPlans.current.delete(key);
     const groups = stateRef.current.data.filter((group) => group.key !== key);
     patchState((value) => ({ ...value, data: groups }));
     await snapshotStore.writeGroups(account.id, groups);
@@ -153,7 +164,7 @@ export function GroupsProvider({ children }: PropsWithChildren) {
 
   const aggregates = useMemo(() => calculateGroupAggregates(state.data), [state.data]);
 
-  const value = useMemo<GroupsContextValue>(() => ({ state, aggregates, hasInstallation, canCreateGroups, pendingCreation, refresh, createGroup, retryPendingCreation, applyGroupSnapshot, recordConfirmedExpenseMutation, reconcileRemoteGroupSnapshot, removeGroup }), [aggregates, applyGroupSnapshot, canCreateGroups, createGroup, hasInstallation, pendingCreation, reconcileRemoteGroupSnapshot, recordConfirmedExpenseMutation, refresh, removeGroup, retryPendingCreation, state]);
+  const value = useMemo<GroupsContextValue>(() => ({ state, aggregates, hasInstallation, canCreateGroups, pendingCreation, refresh, createGroup, retryPendingCreation, applyGroupSnapshot, recordConfirmedExpenseMutation, recordConfirmedSpendingPlanMutation, reconcileRemoteGroupSnapshot, removeGroup }), [aggregates, applyGroupSnapshot, canCreateGroups, createGroup, hasInstallation, pendingCreation, reconcileRemoteGroupSnapshot, recordConfirmedExpenseMutation, recordConfirmedSpendingPlanMutation, refresh, removeGroup, retryPendingCreation, state]);
   return <GroupsContext.Provider value={value}>{children}</GroupsContext.Provider>;
 }
 

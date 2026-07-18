@@ -3,9 +3,11 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { Banner, Body, Button, Card, EmptyState, Screen } from '@/components/ui';
 import { AppFailure } from '@/domain/errors';
+import { isJustMeExpense } from '@/domain/spending';
 import type { ExpenseFile } from '@/domain/types';
 import { ExpenseForm } from '@/features/expenses/expense-form';
 import { buildUpdatedExpense, type ExpenseDraft } from '@/features/expenses/model';
+import { minorUnitsForInput } from '@/features/spending/model';
 import { systemClock } from '@/infrastructure/runtime';
 import { useGroup } from '@/providers/group-provider';
 import { useSession } from '@/providers/session-provider';
@@ -18,11 +20,11 @@ export default function EditExpenseScreen() {
   const [conflict, setConflict] = useState<{ latest: ExpenseFile; draft: ExpenseDraft } | null>(null);
   const file = state.data?.expenses.find((item) => item.expense.id === id);
   if (!file || !state.data || !session.account) return <Screen><EmptyState title="Expense unavailable" body="Return to the group and refresh before editing." /></Screen>;
-  const initial: ExpenseDraft = { description: file.expense.description, amount: (file.expense.amount_minor / 100).toFixed(2), paidBy: file.expense.paid_by, splitType: file.expense.split_type, participants: file.expense.participants, expenseDate: file.expense.expense_date };
+  const initial: ExpenseDraft = { description: file.expense.description, amount: minorUnitsForInput(file.expense.amount_minor, file.expense.currency), category: file.expense.category, paymentMethod: file.expense.payment_method, paidBy: file.expense.paid_by, splitType: isJustMeExpense(file.expense) ? 'just_me' : file.expense.split_type, participants: file.expense.participants, expenseDate: file.expense.expense_date };
   const save = async (draft: ExpenseDraft, target = file) => {
     try {
       const expense = buildUpdatedExpense(target.expense, draft, state.data!.members, session.account!.login, systemClock);
-      await updateExpense(expense, target.blobSha);
+      await updateExpense(expense, target);
       router.back();
     } catch (cause) {
       if (cause instanceof AppFailure && cause.detail.kind === 'expense_conflict' && cause.detail.latest) {
