@@ -41,6 +41,14 @@ jobs:
       - name: Validate application
         run: npm run validate
 
+      - name: Install documentation dependencies
+        working-directory: docs/official
+        run: npm ci
+
+      - name: Validate documentation
+        working-directory: docs/official
+        run: npm run docs:build
+
       - name: Validate tagged release notes and versions
         env:
           TAG_NAME: ${{ inputs.tag || github.ref_name }}

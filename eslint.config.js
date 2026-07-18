@@ -6,8 +6,7 @@ module.exports = defineConfig([
   {
     ignores: [
       'dist/**',
-      'docs/official/.vitepress/cache/**',
-      'docs/official/.vitepress/dist/**',
+      'docs/official/**',
       '.expo/**',
       'coverage/**',
     ],
