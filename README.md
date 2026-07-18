@@ -105,13 +105,18 @@ Build the exact GitHub Pages output with `npm run docs:build`. Releases use Mark
 
 ## Android APK
 
-The `preview` EAS profile produces a sideloadable APK. Install the EAS CLI, authenticate, and build locally on macOS:
+Generate the native Android project, configure its release signing key, and build a sideloadable APK locally:
 
 ```sh
-npx eas-cli build --platform android --profile preview --local
+npm ci
+CI=1 npx expo prebuild --platform android --no-install
+node scripts/configure-android-release-signing.mjs
+(cd android && NODE_ENV=production ./gradlew :app:assembleRelease)
 ```
 
-Local Android builds also require the Android SDK and Java toolchain expected by Expo. The app identifier is `com.branchbalance.app`.
+The signing configurator reads `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD` from the environment. The APK is written to `android/app/build/outputs/apk/release/app-release.apk`. Local Android builds require the Android SDK, NDK, and Java 17. The app identifier is `com.branchbalance.app`.
+
+Tagged releases run the same Expo prebuild and Gradle flow on the GitHub-hosted runner and attach the signed APK to a draft GitHub release. Complete the one-time keystore and GitHub Actions secret setup described in the [release process](docs/official/releases/releasing.md) before pushing a stable release tag.
 
 ## Repository data
 
