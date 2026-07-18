@@ -2,6 +2,8 @@
 
 Open `index.html` in a browser to view all screens. Each screen is also a standalone HTML file and shares `styles.css` and `script.js`.
 
+The responsive product website and documentation prototype starts at `website/index.html`. It includes a product landing page, searchable documentation hub, data-ownership article, and truthful `v1.0.0 Preview` releases page. The website shares its own `website/styles.css` and `website/script.js` while reusing the current brand assets and mobile mockups.
+
 ## Included screens
 
 1. Sign in

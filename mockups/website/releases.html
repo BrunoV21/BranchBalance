@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="BranchBalance release notes and current Android preview status.">
+  <title>Releases — BranchBalance</title>
+  <link rel="icon" href="../../assets/images/favicon.png">
+  <link rel="stylesheet" href="styles.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="nav-shell">
+      <a class="brand" href="index.html" aria-label="BranchBalance home"><img class="brand-mark" src="../../assets/brand/branch-balance-icon.svg" alt=""><span class="brand-word">BranchBalance</span></a>
+      <nav class="site-nav" id="main-navigation" data-site-nav aria-label="Main navigation">
+        <a class="nav-link" href="index.html">Product</a>
+        <a class="nav-link" href="docs.html">Documentation</a>
+        <a class="nav-link" href="releases.html" aria-current="page">Releases</a>
+        <a class="nav-link" href="index.html#open-source">Open source</a>
+      </nav>
+      <div class="nav-actions">
+        <a class="button button-secondary button-small github-nav" href="https://github.com/BrunoV21/BranchBalance" target="_blank" rel="noreferrer"><svg class="icon-fill" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .7a11.5 11.5 0 0 0-3.64 22.4c.58.1.79-.25.79-.56v-2.2c-3.22.7-3.9-1.36-3.9-1.36-.52-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.71.08-.71 1.17.08 1.78 1.2 1.78 1.2 1.04 1.78 2.72 1.27 3.39.97.1-.75.4-1.27.74-1.56-2.57-.29-5.27-1.29-5.27-5.72 0-1.27.45-2.3 1.2-3.11-.12-.3-.52-1.48.11-3.07 0 0 .98-.31 3.16 1.19a10.9 10.9 0 0 1 5.75 0c2.18-1.5 3.16-1.19 3.16-1.19.63 1.59.23 2.77.11 3.07.75.81 1.2 1.84 1.2 3.11 0 4.45-2.71 5.42-5.29 5.71.42.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .7Z"></path></svg>GitHub</a>
+        <button class="icon-button" type="button" data-theme-toggle aria-label="Switch theme"></button>
+        <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-controls="main-navigation" aria-label="Open navigation"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"></path></svg></button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="release-hero">
+      <div class="shell release-hero-grid">
+        <div><p class="eyebrow">Releases</p><h1 class="display-title">Built in public.<br>Released with care.</h1><p class="section-lede">Follow what is implemented, what still needs proving, and when BranchBalance is ready for everyday use.</p></div>
+        <div class="release-channel"><span>Current channel</span><strong>Android preview</strong></div>
+      </div>
+    </section>
+
+    <div class="shell release-layout">
+      <article class="release-card">
+        <header class="release-card-head">
+          <div class="release-badges"><span class="status-pill"><span class="dot"></span>Latest preview</span><span class="status-pill neutral">Updated 18 Jul 2026</span></div>
+          <h1>v1.0.0 Preview</h1>
+          <p>The first complete BranchBalance product loop, plus trip-aware spending intelligence. The implementation is in place; physical-device acceptance is the remaining release gate.</p>
+        </header>
+
+        <div class="release-body">
+          <h2>What is in this preview</h2>
+          <div class="highlight-grid">
+            <section class="highlight"><div class="point-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 11V7a7 7 0 0 1 14 0v4M4 11h16v10H4Z"></path></svg></div><h3>GitHub-backed groups</h3><p>Device-flow sign-in, rotating credentials, private repositories, and collaborator invitations.</p></section>
+            <section class="highlight"><div class="point-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M6 3v6M18 3v6M5 10h14v10H5Z"></path></svg></div><h3>Complete expense lifecycle</h3><p>Add, edit, and delete dated expenses with conflict detection and deterministic shares.</p></section>
+            <section class="highlight"><div class="point-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"></path></svg></div><h3>Balances and settlements</h3><p>Per-person paid totals, net balances, and a concise deterministic settlement list.</p></section>
+            <section class="highlight"><div class="point-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 3v9l7.5 4.5"></path></svg></div><h3>Spending intelligence</h3><p>Group budgets, category limits, payment methods, filters, trip dates, and daily guidance.</p></section>
+          </div>
+
+          <h2>Highlights</h2>
+          <ul>
+            <li>Create a group as a private <code>branch-balance-&lt;slug&gt;</code> repository and invite GitHub users as members.</li>
+            <li>Split an expense equally, assign it in full to one person, or use the Just me shortcut without creating a debt.</li>
+            <li>Refresh from GitHub on screen focus, app foreground, or pull-to-refresh while retaining the latest valid cached data during transient failures.</li>
+            <li>See spending by category and payment method, follow optional group and category budgets, and calculate remaining-per-day guidance for a trip.</li>
+            <li>Keep legacy expenses valid when category or payment-method metadata is absent, with explicit Uncategorized and Unspecified presentation.</li>
+            <li>Protect edits and deletes with GitHub blob identifiers so a concurrent remote change is never overwritten silently.</li>
+          </ul>
+
+          <h2>Release gate</h2>
+          <p>The code and automated coverage represent Phase 1 plus the CR-001 spending increment. Before this becomes a stable release, the complete product loop must pass on physical Android devices with two real GitHub accounts.</p>
+          <div class="callout warning">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2.5 20h19ZM12 9v4M12 17h.01"></path></svg>
+            <div><strong>No stable APK is published yet</strong><p>This is a development milestone, not a download announcement. Follow the repository for a tagged release after physical-device acceptance.</p></div>
+          </div>
+
+          <h2>Known constraints</h2>
+          <ul class="constraint-list">
+            <li>Android is the only supported release target.</li>
+            <li>Reads and writes require a network connection.</li>
+            <li>Groups are owned by personal GitHub accounts.</li>
+            <li>One currency is used per group.</li>
+            <li>Settlements cannot yet be recorded as paid.</li>
+            <li>There are no receipt images or attachments.</li>
+            <li>There is no percentage or exact-amount split.</li>
+            <li>Push notifications are not included.</li>
+          </ul>
+
+          <h2>For contributors</h2>
+          <p>The repository documents product rules, architecture, automated coverage, and the manual acceptance run. Start with the product requirements if you are changing behavior, then use the architecture and testing guides to preserve the data model and safety guarantees.</p>
+          <div class="hero-actions"><a class="button button-primary" href="../../docs/TESTING.md">Read the testing guide</a><a class="button button-secondary" href="../../docs/PRD.md">Read the PRD</a></div>
+        </div>
+      </article>
+
+      <aside class="release-aside" aria-label="Release summary">
+        <section class="aside-card">
+          <h2>Readiness</h2>
+          <div class="status-list">
+            <div class="status-row"><span>Phase 1 implementation</span><strong>Complete</strong></div>
+            <div class="status-row"><span>Spending increment</span><strong>Complete</strong></div>
+            <div class="status-row"><span>Physical-device acceptance</span><strong class="pending">Pending</strong></div>
+            <div class="status-row"><span>Stable Git tag</span><strong class="pending">Not published</strong></div>
+          </div>
+        </section>
+
+        <section class="aside-card">
+          <h2>Release history</h2>
+          <div class="history-empty"><strong>No stable releases yet.</strong><br>The first tagged release will appear here after the Android acceptance loop passes.</div>
+        </section>
+
+        <section class="aside-card">
+          <h2>Follow progress</h2>
+          <div class="aside-actions">
+            <a class="button button-primary button-small" href="https://github.com/BrunoV21/BranchBalance" target="_blank" rel="noreferrer">View source on GitHub</a>
+            <a class="button button-secondary button-small" href="docs.html">Explore documentation</a>
+            <a class="button button-secondary button-small" href="index.html">Back to product</a>
+          </div>
+        </section>
+      </aside>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="shell footer-grid">
+      <div class="footer-brand"><a class="brand" href="index.html"><img class="brand-mark" src="../../assets/brand/branch-balance-icon.svg" alt=""><span class="brand-word">BranchBalance</span></a><p>Honest release status for an open-source product.</p></div>
+      <nav class="footer-links" aria-label="Footer navigation"><a href="index.html">Product</a><a href="docs.html">Documentation</a><a href="../../docs/TESTING.md">Testing</a><a href="../../LICENSE">MIT License</a><a href="https://github.com/BrunoV21/BranchBalance">GitHub</a></nav>
+    </div>
+  </footer>
+</body>
+</html>
