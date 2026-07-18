@@ -1,0 +1,187 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag, for example v1.0.0"
+        required: true
+        type: string
+      apk_url:
+        description: "HTTPS URL for the physically accepted signed APK"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate app and release notes
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install application dependencies
+        run: npm ci
+
+      - name: Validate application
+        run: npm run validate
+
+      - name: Validate tagged release notes and versions
+        env:
+          TAG_NAME: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          release_version="${TAG_NAME#v}"
+          release_version="${release_version%%-*}"
+          package_version="$(node -p "require('./package.json').version")"
+          app_version="$(node -p "require('./app.json').expo.version")"
+
+          if [ "$release_version" != "$package_version" ] || [ "$release_version" != "$app_version" ]; then
+            echo "Release tag $TAG_NAME must match package.json and app.json version $package_version/$app_version" >&2
+            exit 1
+          fi
+
+          notes_file="docs/official/releases/${TAG_NAME}.md"
+          body_file="/tmp/github-release-notes.md"
+
+          if [ ! -f "$notes_file" ]; then
+            echo "Missing stable release notes file: $notes_file" >&2
+            exit 1
+          fi
+
+          if ! grep -Eq '^status:[[:space:]]*stable[[:space:]]*$' "$notes_file"; then
+            echo "$notes_file must declare status: stable before a release can be staged" >&2
+            exit 1
+          fi
+
+          awk '
+            /<!-- release-notes:start -->/ { emit=1; next }
+            /<!-- release-notes:end -->/ { emit=0 }
+            emit { print }
+          ' "$notes_file" > "$body_file"
+
+          if ! grep -q '[^[:space:]]' "$body_file"; then
+            echo "Release notes must contain content between the release-notes markers" >&2
+            exit 1
+          fi
+
+          github_release_url="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG_NAME}"
+          if ! grep -Fq "$github_release_url" "$body_file"; then
+            echo "Release notes must link to $github_release_url" >&2
+            exit 1
+          fi
+
+  stage-draft:
+    name: Stage draft GitHub release
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    needs: validate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Extract release notes
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          notes_file="docs/official/releases/${TAG_NAME}.md"
+          awk '
+            /<!-- release-notes:start -->/ { emit=1; next }
+            /<!-- release-notes:end -->/ { emit=0 }
+            emit { print }
+          ' "$notes_file" > /tmp/github-release-notes.md
+
+      - name: Create or update draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release edit "$TAG_NAME" --title "BranchBalance $TAG_NAME" --notes-file /tmp/github-release-notes.md
+          else
+            gh release create "$TAG_NAME" --verify-tag --draft --title "BranchBalance $TAG_NAME" --notes-file /tmp/github-release-notes.md
+          fi
+
+  publish-apk:
+    name: Attach accepted APK and publish
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    needs: validate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+
+      - name: Download and validate APK
+        env:
+          APK_URL: ${{ inputs.apk_url }}
+          TAG_NAME: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          asset="BranchBalance-${TAG_NAME}.apk"
+          curl --fail --location --silent --show-error "$APK_URL" --output "$asset"
+          unzip -t "$asset" >/dev/null
+          sha256sum "$asset" > SHA256SUMS
+          ls -lh "$asset" SHA256SUMS
+
+      - name: Extract release notes
+        env:
+          TAG_NAME: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          notes_file="docs/official/releases/${TAG_NAME}.md"
+          awk '
+            /<!-- release-notes:start -->/ { emit=1; next }
+            /<!-- release-notes:end -->/ { emit=0 }
+            emit { print }
+          ' "$notes_file" > /tmp/github-release-notes.md
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          asset="BranchBalance-${TAG_NAME}.apk"
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" "$asset" SHA256SUMS --clobber
+            gh release edit "$TAG_NAME" --title "BranchBalance $TAG_NAME" --notes-file /tmp/github-release-notes.md --draft=false --latest
+          else
+            gh release create "$TAG_NAME" "$asset" SHA256SUMS --verify-tag --latest --title "BranchBalance $TAG_NAME" --notes-file /tmp/github-release-notes.md
+          fi
+
+      - name: Preserve packaged release artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: branchbalance-${{ inputs.tag }}-android
+          path: |
+            BranchBalance-${{ inputs.tag }}.apk
+            SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
