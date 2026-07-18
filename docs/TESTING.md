@@ -57,6 +57,13 @@ Use at least two physical app sessions signed in as different GitHub accounts.
 14. Revoke repository access and confirm the private group snapshot and descriptor are removed on confirmed access loss.
 15. Create cached EUR and USD groups and confirm aggregate owed/owing values remain separated by currency.
 16. Switch Android system theme and each explicit theme override; verify labels, money meaning, and controls remain readable without relying on color alone.
+17. Open a legacy group and confirm expenses without CR-001 metadata remain usable and display Uncategorized and Unspecified without changing balances.
+18. Create card and cash expenses in different categories, then verify the Spending total, category totals, payment-method totals, current-user paid total, and current-user share reconcile with the same expenses shown on Overview and Balances.
+19. Add a Just me expense, change its payer before saving, and confirm it counts toward spending while leaving every member's net balance unchanged.
+20. Add a group budget, category limits, and an inclusive trip date range. Verify textual under-, at-, and over-budget states plus before-, during-, and after-trip daily guidance without relying on color alone.
+21. Combine category, payment-method, payer, and shared/Just me filters; verify logical-AND results and the explicit empty state without changing stored expenses.
+22. Edit the spending plan from both sessions. The stale session must preserve its draft, show the latest remote plan, and require an explicit reapply or discard choice.
+23. Refresh both sessions and confirm identical spending totals and budget states. Inspect the UI and persisted JSON to confirm no card number, suffix, bank, account, or wallet identifier is requested or stored.
 
 ## Local APK
 

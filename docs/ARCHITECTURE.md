@@ -1,9 +1,9 @@
-# BranchBalance — Phase 1 Architecture
+# BranchBalance — Phase 1 Architecture and CR-001 Increment
 
-**Status:** Implementation guide
-**Applies to:** Phase 1 Android application
+**Status:** Phase 1 implementation guide; CR-001 increment implemented
+**Applies to:** Phase 1 Android application and CR-001 trip and group spending intelligence
 **Companion specification:** [`PRD.md`](PRD.md)
-**Last updated:** 2026-07-17
+**Last updated:** 2026-07-18
 
 ## 1. Purpose and decision precedence
 
@@ -667,3 +667,296 @@ At the end of each stage, keep TypeScript, lint, and the accumulated automated s
 The architecture is complete when the PRD acceptance criteria pass through the routes and services above. Do not expand implementation to offline mutation, local Git, settlement recording, group/member deletion, additional split types, currency conversion, receipt storage, notifications, organization-owned groups, iOS release behavior, or a BranchBalance backend.
 
 Any future offline-write work must first replace mutable expense files with an explicit revision/tombstone model or define a merge protocol. The Phase 1 SHA conflict behavior is deliberately online-only and must not be reused as an offline synchronization strategy.
+
+## 16. CR-001 architecture delta — Trip and group spending intelligence
+
+**Increment status:** Implemented; physical-device acceptance pending
+
+Section 15 remains the Phase 1 completion boundary. This section defines the additive architecture for PRD change request CR-001 and authorizes only that increment. Unless explicitly changed below, every Phase 1 decision remains in force: GitHub stays authoritative, writes remain online-only, one group has one currency, integer minor units remain the money representation, and category, payment-method, budget, and trip metadata never affect shares, balances, or settlements.
+
+### 16.1 Source, navigation, and screen ownership
+
+CR-001 adds a spending domain and feature without adding a provider or an independent synchronization path:
+
+```text
+src/
+├── app/(app)/groups/[owner]/[repo]/
+│   ├── (tabs)/spending.tsx
+│   └── spending-plan/edit.tsx
+├── domain/spending/
+└── features/spending/
+```
+
+The existing date picker, Zod validation, reducers, and native layout primitives are sufficient. Do not add a charting, decimal-math, database, or data-fetching dependency for CR-001; optional progress visuals can be composed from accessible native views.
+
+The selected-group tab layout becomes **Overview**, **Spending**, **Balances**, and **Members**. All four tabs and the spending-plan editor consume the existing `GroupProvider` and therefore render one repository snapshot generation.
+
+- **Overview** keeps the expense list and add action. When a total budget exists, it also renders a compact selector-backed summary containing budget, spent, remaining or over-budget amount, percentage used, and available-per-day guidance when defined.
+- **Spending** owns the complete textual spending summary: group total, current-user paid and share totals, budget progress, trip guidance, category totals and limits, payment-method totals, and combined expense filters. Filters are ephemeral feature/UI state and never modify the snapshot or persisted documents.
+- **Spending-plan editor** is a pushed form screen. Any accepted member with repository write access may set, edit, or remove the plan. It retains the `group.json` blob SHA and an immutable copy of the loaded plan for conflict review.
+- **Add/Edit expense** extends the shared Phase 1 form with required category and payment-method controls and a `Just me` split shortcut. Changing payer while that shortcut is selected rewrites the sole participant and share in the draft before validation.
+- **Expense list/detail** display a category and payment-method label. Legacy nulls render as **Uncategorized** and **Unspecified** respectively.
+
+The Spending tab does not fetch on its own. Tab focus requests the same coalesced `GroupProvider.refresh()` used by the other selected-group screens. Charts are optional leaf presentation components; accessible text values are the authoritative UI and must remain available when charts are absent.
+
+### 16.2 Persisted and runtime types
+
+Define the closed taxonomies once in the domain and derive form options, labels, icons, filters, schemas, and exhaustive records from them:
+
+```ts
+const expenseCategories = [
+  'accommodation',
+  'food_drink',
+  'groceries',
+  'transport',
+  'activities',
+  'shopping',
+  'fees',
+  'other',
+] as const;
+
+type ExpenseCategory = (typeof expenseCategories)[number];
+type PaymentMethod = 'card' | 'cash' | 'other';
+type CategoryBucket = ExpenseCategory | 'uncategorized';
+type PaymentMethodBucket = PaymentMethod | 'unspecified';
+
+interface SpendingPlan {
+  budget_minor?: number;
+  category_budgets_minor?: Partial<Record<ExpenseCategory, number>>;
+  starts_on?: CalendarDate;
+  ends_on?: CalendarDate;
+  updated_by: string;
+  updated_at: IsoInstant;
+}
+
+interface Group {
+  schema_version: 1;
+  name: string;
+  currency: CurrencyCode;
+  spending_plan?: SpendingPlan;
+  created_by: string;
+  created_at: IsoInstant;
+}
+
+interface GroupFile {
+  group: Group;
+  blobSha: string;
+  path: 'group.json';
+  // Validated passthrough document retained so updates preserve unknown keys.
+  sourceDocument: Record<string, unknown>;
+}
+```
+
+Remote `schema_version` remains `1`. Parse `group.json` in two stages: validate the Phase 1 base group first, then validate `spending_plan` independently. An invalid spending plan is omitted from the runtime `Group`, adds a safe `data_warning` for `group.json#spending_plan`, and does not exclude the group or any valid expense. A present plan must satisfy all of these cross-field rules:
+
+- It contains `budget_minor`, a complete date pair, or both.
+- `budget_minor` and every category limit are positive safe integers.
+- `category_budgets_minor` is absent unless `budget_minor` exists, contains only persisted category keys, and contains at least one entry when present.
+- `starts_on` and `ends_on` are both present or both absent, are real `YYYY-MM-DD` calendar dates, and `ends_on` is not before `starts_on`.
+- `updated_by` is a valid normalized-login-equivalent string and `updated_at` is a valid UTC instant.
+- Empty objects, explicit `null` fields, legacy presentation buckets, and unknown category keys are rejected. Removing a plan omits `spending_plan` entirely.
+
+The post-CR canonical expense read model adds nullable metadata:
+
+```ts
+interface Expense {
+  // All Phase 1 Expense fields remain unchanged.
+  category: ExpenseCategory | null;
+  payment_method: PaymentMethod | null;
+}
+
+type WritableExpense = Omit<Expense, 'category' | 'payment_method'> & {
+  category: ExpenseCategory;
+  payment_method: PaymentMethod;
+};
+
+interface ExpenseFile {
+  expense: Expense;
+  blobSha: string;
+  path: `expenses/${string}.json`;
+  // Added in CR-001 for lossless edits of forward-compatible fields.
+  sourceDocument: Record<string, unknown>;
+}
+```
+
+For a schema-version-1 expense, an absent `category` or `payment_method` normalizes to `null` and is the only route to the legacy buckets. A present unknown value, an explicit null, or a value of `uncategorized`/`unspecified` makes the expense invalid under the existing warning-and-exclusion rules. New creates and every successful edit serialize a `WritableExpense`; editing a legacy expense therefore requires both selections. Writers preserve both metadata fields and any unrelated passthrough fields during an edit.
+
+`Just me` adds no persisted enum. It is exactly an equal split whose normalized participants contain only `paid_by`, whose `shares_minor` has only that same login, and whose share equals `amount_minor`. The draft helper is:
+
+```ts
+function applyJustMe(draft: ExpenseDraft, payer: string): ExpenseDraft {
+  return {
+    ...draft,
+    paidBy: payer,
+    splitType: 'equal',
+    participants: [payer],
+  };
+}
+```
+
+The existing draft validator parses `draft.amount` into minor units and deterministically allocates the resulting full share to the sole participant. Any equal expense matching that persisted shape is classified as Just me, including one created without using the shortcut. It remains visible to all members and counts toward spending while contributing zero to every net balance.
+
+### 16.3 Spending derivation and date arithmetic
+
+Add one platform-free selector over the same validated expense array used by balance calculation:
+
+```ts
+interface SpendingSummary {
+  totalSpentMinor: number;
+  currentUserPaidMinor: number;
+  currentUserShareMinor: number;
+  categorySpentMinor: Record<CategoryBucket, number>;
+  paymentMethodSpentMinor: Record<PaymentMethodBucket, number>;
+  budget: null | {
+    budgetMinor: number;
+    remainingMinor: number;
+    status: 'under' | 'at' | 'over';
+    percentageUsed: number;
+    categoryLimits: Partial<Record<ExpenseCategory, {
+      limitMinor: number;
+      spentMinor: number;
+      remainingMinor: number;
+      status: 'under' | 'at' | 'over';
+      percentageUsed: number;
+    }>>;
+  };
+  trip: null | {
+    phase: 'before' | 'during' | 'after';
+    totalDays: number;
+    currentDay: number | null;
+    availableDays: number;
+    dailyAvailableMinor: number | null;
+  };
+}
+
+function deriveSpendingSummary(
+  expenses: readonly Expense[],
+  plan: SpendingPlan | undefined,
+  currentUser: string,
+  today: CalendarDate,
+): SpendingSummary;
+```
+
+The selector obeys these invariants:
+
+1. `totalSpentMinor` sums every active, valid expense, including Just me and legacy expenses. Deleted files and invalid files are absent from its input.
+2. Every expense enters exactly one category bucket and exactly one payment-method bucket, so each bucket record independently sums back to `totalSpentMinor`.
+3. `currentUserPaidMinor` sums expenses whose normalized `paid_by` matches the account; `currentUserShareMinor` sums that login's persisted shares. These values are not inferred from net balance.
+4. Uncategorized expenses count toward the total budget but cannot count against a persisted category limit. Category and payment-method changes leave allocation and `calculateBalances` output byte-for-byte equivalent.
+5. All minor-unit addition is checked against `Number.MAX_SAFE_INTEGER`. An overflow returns a data-integrity warning instead of displaying rounded money.
+6. Percentage is a non-persisted presentation ratio, may exceed 100, and is zero when its spent numerator is zero. The UI applies one shared rounding policy and also exposes exact money values, so progress bars are never the sole result.
+
+For a budget, calculate `remainingMinor = budget_minor - totalSpentMinor`; classify positive, zero, and negative values as `under`, `at`, and `over`. Category-limit status uses the same rule. Budget state is informational and never participates in expense-form validation.
+
+Date arithmetic must not construct stored trip dates at local midnight because daylight-saving transitions can make elapsed-millisecond division incorrect. Validate and convert each date's numeric components to a UTC day ordinal solely for inclusive whole-day subtraction. Supply `today` from a small injected device-local calendar boundary:
+
+```ts
+interface LocalCalendar {
+  today(): CalendarDate; // local year, month, and day from the device clock
+}
+```
+
+Before a trip, `availableDays` is the inclusive full trip length and the label is **Planned per day**. During it, `currentDay` and `availableDays` are inclusive. After it, `availableDays` is zero and no allowance is returned. When a budget and positive available-day count both exist, calculate `dailyAvailableMinor = Math.floor(Math.max(remainingMinor, 0) / availableDays)`; otherwise it is null. Dates without a budget still produce trip phase/context but no allowance. The Overview summary omits trip guidance when the selector returns no allowance and the Spending screen shows final under/over performance after the trip.
+
+Combined filters are a pure predicate over the snapshot's expenses. Category, method, payer, and `all | shared | just_me` scopes compose with logical AND. `shared` means “not derived as Just me”; filters never change any aggregate unless a component is explicitly labelled as a filtered-result view.
+
+### 16.4 GitHub gateway and optimistic concurrency
+
+No new GitHub API family is required. Spending-plan writes use the Contents API on `group.json`, and expense writes keep using their existing files. Extend the product gateway boundary:
+
+```ts
+interface GitHubGateway {
+  updateSpendingPlan(
+    repository: RepositoryRef,
+    current: GroupFile,
+    next: SpendingPlan | null,
+    signal?: AbortSignal,
+  ): Promise<GroupFile>;
+}
+```
+
+The operation merges only `spending_plan` into the validated passthrough `sourceDocument`, updates `updated_by`/`updated_at` from the authenticated account and injected clock, and serializes with the shared UTF-8/two-space/trailing-newline codec. A null plan deletes the property. Use commit message `Update spending plan` or `Remove spending plan`; never put budget amounts in commit messages.
+
+Generate the audit fields once when submission begins and retain that intended plan across transport retries, just as expense creation retains its UUID. Form state never accepts member-supplied audit values.
+
+The PUT includes `current.blobSha`. On a stale-SHA 409/422, fetch and parse the latest `group.json` and return:
+
+```ts
+type SpendingPlanConflict = {
+  kind: 'spending_plan_conflict';
+  latest: GroupFile;
+  submitted: SpendingPlan | null;
+};
+```
+
+The review screen displays the latest remote plan beside the member's unsaved submitted values. **Reapply** merges the submitted plan onto the latest passthrough document and uses its SHA; **Discard** accepts the remote file. Reapply must not overwrite concurrent changes to base group fields or unknown forward-compatible fields. There is no force-write action.
+
+After a timeout or otherwise ambiguous response, read `group.json`: an exact semantic match of the intended plan is success; the unchanged base SHA is safe to retry; any other valid document enters conflict review. A missing or invalid `group.json` is a repository data error, not permission to recreate it. Any accepted member may submit, but GitHub remains the final permission check.
+
+Complete group refresh now retains the `GroupFile` and SHA. Its derivation step computes balances, settlements, and `SpendingSummary` before one reducer commit. Invalid plan data contributes a warning and a missing runtime plan; invalid expense category or payment method excludes that expense from both balance and spending calculations, preserving the rule that all tabs use the same valid-file set.
+
+### 16.5 Provider, snapshot, and cache impact
+
+`GroupProvider` gains `updateSpendingPlan`/`removeSpendingPlan` actions and exposes spending selectors. Do not introduce a `SpendingProvider`: it would create a second resource lifecycle and allow Overview, Spending, and Balances to disagree.
+
+`RemoteGroupSnapshot` and `GroupSnapshotV1` add:
+
+- the validated `GroupFile`, including its latest SHA;
+- the nullable/absent spending plan and safe plan warning;
+- category and payment-method metadata on each normalized expense;
+- the fully derived spending summary; and
+- optional group-list budget progress derived from the same completed snapshot.
+
+After a confirmed expense create/edit/delete, replace the expense file, then recompute balances, settlements, group summary, and spending summary synchronously before publishing and caching one new snapshot. After a confirmed plan update/removal, replace the group file and SHA, recompute spending against the unchanged expense array, and publish once. Neither path waits for a full refresh, and neither exposes a partially recomputed state.
+
+CR-001 does not require an AsyncStorage key-version change. The `GroupSnapshotV1` cache decoder accepts Phase 1 records that lack group-file SHA, expense metadata, or derived spending fields, normalizes missing expense metadata to the legacy buckets, and recomputes all derivable summaries during hydration. A plan mutation remains disabled until a refresh supplies the latest `group.json` SHA. The next successful write stores the enriched snapshot. Cache data remains non-authoritative and can always be discarded.
+
+`GroupsProvider` may cache budget progress per group and currency, but only from a complete selected-group snapshot. Discovery can detect a changed `group.json` SHA and mark that progress stale; it must not combine a freshly discovered budget with old expense totals and present the result as one synchronized generation. All-groups owed/owing aggregates remain currency-separated and unchanged.
+
+### 16.6 Compatibility, security, and failure behavior
+
+- Existing schema-version-1 groups without `spending_plan` load with no budget and no trip guidance.
+- Existing schema-version-1 expenses without the two new keys remain valid, affect balances and total spending, and display explicit legacy labels.
+- New clients continue to ignore unknown fields for calculations and preserve them when rewriting `group.json` or an expense, preventing CR-001 edits from destroying forward-compatible data.
+- Category, payment method, and spending-plan fields are shared repository data. There is no private per-member budget or metadata store.
+- `payment_method` is only the closed `card | cash | other` enum. Forms, domain types, logs, caches, fixtures, and analytics must not accept card suffixes, bank names, account identifiers, wallet credentials, or arbitrary payment-method notes.
+- An invalid spending plan degrades only spending-plan features. An invalid present expense category/payment method excludes that expense everywhere, while an absent legacy field does not.
+- Phase 1 clients can read CR-001 files because remote schema version stays at 1, but release builds predating passthrough preservation may remove new fields when they edit a file. Mixed-version editing must therefore be called out during rollout or prevented with a minimum-supported-client policy if such builds have shipped.
+
+Add `spending_plan_conflict` to `AppError`. Retry semantics follow section 16.4; a generic retry must never silently apply submitted values to a newly fetched SHA. Network, timeout, rate-limit, permission, and access-loss behavior otherwise reuses the Phase 1 error model.
+
+### 16.7 CR-001 test architecture
+
+Extend the platform-free unit suite with table-driven coverage for:
+
+- every category and payment-method value, absent legacy keys, explicit null, unknown values, and writer requirements;
+- valid and invalid spending-plan combinations, safe-integer limits, category keys, empty removal, and inclusive date ranges;
+- total/category/method aggregation reconciliation, current-user paid/share totals, Just me classification, and checked-sum overflow;
+- under/at/over budget and category-limit status, percentage policy, and the invariant that metadata-only edits do not alter balances or settlements;
+- local-calendar trip phases, leap days, month/year boundaries, daylight-saving dates, inclusive day counts, post-trip behavior, and floor rounding of the non-negative daily allowance; and
+- logically ANDed category/method/payer/scope filters and empty results.
+
+Service/integration tests use the existing scripted GitHub transport, fake clock, `LocalCalendar`, and in-memory cache to cover:
+
+- refreshes with no plan, a valid plan, an invalid plan warning, mixed legacy/CR expenses, and identical valid-file input for balance and spending selectors;
+- create/update/remove plan writes, passthrough preservation, returned SHA replacement, ambiguous-success recovery, 409/422 conflict review, reapply on the latest document, and discard;
+- CR expense create/edit, mandatory migration of legacy fields on edit, immediate recomputation after create/edit/delete, and a plan update racing a remote group change;
+- hydration of a Phase 1 cache followed by remote refresh, missing cached group SHA blocking writes, and stale group-list budget progress; and
+- coalesced refreshes across all four tabs with no Spending-specific request.
+
+Component/navigation tests cover the four-tab layout, compact Overview summary, no-budget and no-expense states, spending-plan form permissions and validation, textual under/over states, accessible category/payment controls, payer changes in a Just me draft, legacy labels, combined filters, and conflict review preserving unsaved input.
+
+Extend the physical two-account Android acceptance run exactly as required by PRD section 16.14: configure budget and trip dates, record card and cash expenses across categories, add Just me spending, exceed a category limit, force a concurrent plan conflict, and verify identical totals after refresh on both devices. Also verify that no payment UI requests identifying financial data.
+
+### 16.8 Post-Phase-1 implementation sequence
+
+Implement CR-001 only after the Phase 1 stages in section 14 are green:
+
+1. **Schema and domain delta:** taxonomy constants, two-stage group parsing, legacy-compatible expense parsing, strict writable expense type, plan invariants, Just me helper/classifier, spending/date/filter selectors, and unit tests.
+2. **GitHub write path:** retain `GroupFile` SHA/source document, add plan update/removal with ambiguous-write recovery and conflict review, preserve passthrough fields, and add service tests.
+3. **Atomic state and cache:** enrich snapshots, derive summaries on hydration/refresh/mutation, expose `GroupProvider` plan actions/selectors, add stale group-list progress rules, and test Phase 1 cache compatibility.
+4. **Expense experience:** add category, payment method, and Just me controls to the shared form; update list/detail metadata and legacy presentation; verify balance invariance.
+5. **Spending experience:** add the fourth tab, plan editor, Overview card, category/method/limit summaries, trip guidance, combined filters, accessibility text, and explicit empty/error states.
+6. **Hardening and acceptance:** conflict/race tests, time-boundary tests, accessibility pass, two-account physical-device scenario, and the existing typecheck/lint/test/doctor/APK gates.
+
+Custom categories, recurring budgets, planned expenses, cash wallets, automatic categorization, transaction import, receipt processing, notifications, multi-currency conversion, offline writes, and hidden per-user plans remain outside this increment.
