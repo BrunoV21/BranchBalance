@@ -13,7 +13,7 @@
     "android": {
       "package": "com.branchbalance.app",
       "adaptiveIcon": {
-        "backgroundColor": "#F7F8FA",
+        "backgroundColor": "#C45F4B",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -29,7 +29,7 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#F7F8FA",
+          "backgroundColor": "#F5F1E8",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }

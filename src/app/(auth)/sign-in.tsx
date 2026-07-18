@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { Platform, View } from 'react-native';
+import { Image, Platform } from 'react-native';
 
 import { Body, Button, Card, Screen, Title } from '@/components/ui';
 import { githubConfigurationError, isGitHubConfigured } from '@/config/app';
@@ -9,7 +9,7 @@ export default function SignInScreen() {
   const router = useRouter();
   const { session } = useSession();
   return <Screen contentStyle={{ justifyContent: 'center' }}>
-    <View accessibilityLabel="BranchBalance" style={{ width: 58, height: 58, borderRadius: 16, backgroundColor: '#B94F42', alignItems: 'center', justifyContent: 'center' }}><Body>BB</Body></View>
+    <Image accessibilityLabel="BranchBalance" resizeMode="contain" source={require('../../../assets/images/icon.png')} style={{ width: 72, height: 72 }} />
     <Title eyebrow="Shared expenses, backed by GitHub">Balance life{`\n`}without a backend.</Title>
     <Body muted>Sign in with GitHub to create private expense groups with the people you trust.</Body>
     {session.error ? <Card><Body>{session.error}</Body></Card> : null}

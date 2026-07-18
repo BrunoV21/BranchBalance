@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
+  <defs>
+    <linearGradient id="branch" x1="459" y1="807" x2="632" y2="286" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F3DDD4"/>
+      <stop offset="0.56" stop-color="#FFF8F0"/>
+      <stop offset="1" stop-color="#FFFDF9"/>
+    </linearGradient>
+    <linearGradient id="credit" x1="218" y1="485" x2="344" y2="574" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#A6D3BC"/>
+      <stop offset="1" stop-color="#65A486"/>
+    </linearGradient>
+    <linearGradient id="debit" x1="682" y1="485" x2="818" y2="574" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFE1D5"/>
+      <stop offset="1" stop-color="#F3B29E"/>
+    </linearGradient>
+  </defs>
+  <g stroke="url(#branch)" stroke-width="68" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M466 786C452 666 470 548 512 430"/>
+    <path d="M512 430C424 406 348 369 278 316"/>
+    <path d="M512 430C596 406 675 366 752 296"/>
+  </g>
+  <g stroke="#FFF8F0" stroke-width="30" stroke-linecap="round">
+    <path d="M278 316V493"/>
+    <path d="M752 296V493"/>
+  </g>
+  <g fill="#C45F4B" stroke="#FFF8F0" stroke-width="24">
+    <circle cx="278" cy="316" r="58"/>
+    <circle cx="752" cy="296" r="58"/>
+    <circle cx="466" cy="786" r="62"/>
+  </g>
+  <circle cx="512" cy="430" r="34" fill="#C45F4B" stroke="#FFF8F0" stroke-width="18"/>
+  <path fill="url(#credit)" d="M204 489H352C344 552 316 584 278 584C240 584 212 552 204 489Z"/>
+  <path fill="url(#debit)" d="M674 489H830C822 552 792 584 752 584C712 584 682 552 674 489Z"/>
+</svg>
