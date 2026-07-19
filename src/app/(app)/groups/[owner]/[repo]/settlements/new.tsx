@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import * as Crypto from 'expo-crypto';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { ArrowLeft, ArrowRight, CalendarDays, CircleCheck, HandCoins, Info, MessageSquareText, UserRound, WalletCards } from 'lucide-react-native';
 
 import { Banner, Body, Button, Card, ConfirmDialog, Field, Screen, Title } from '@/components/ui';
 import { AppFailure, messageForError } from '@/domain/errors';
@@ -12,12 +13,14 @@ import { DatePickerDialog } from '@/features/expenses/date-picker-dialog';
 import { systemClock, systemLocalCalendar } from '@/infrastructure/runtime';
 import { useGroup } from '@/providers/group-provider';
 import { useSession } from '@/providers/session-provider';
+import { useTheme } from '@/providers/theme-provider';
 
 export default function NewSettlementPaymentScreen() {
   const params = useLocalSearchParams<{ from: string; to: string }>();
   const router = useRouter();
   const { session } = useSession();
   const { state, recordSettlementPayment } = useGroup();
+  const { colors } = useTheme();
   const snapshot = state.data;
   const from = Array.isArray(params.from) ? params.from[0] : params.from;
   const to = Array.isArray(params.to) ? params.to[0] : params.to;
@@ -45,7 +48,7 @@ export default function NewSettlementPaymentScreen() {
   if (!suggestion || availableMinor <= 0) return <Screen>
     <Title eyebrow={snapshot.group.name}>Record payment</Title>
     <Banner tone="info">This settlement is no longer available, or its full amount is awaiting recipient confirmation.</Banner>
-    <Button variant="secondary" onPress={() => router.back()}>Return to Balances</Button>
+    <Button icon={<ArrowLeft color={colors.text} size={18} />} variant="secondary" onPress={() => router.back()}>Return to Balances</Button>
   </Screen>;
 
   const openReview = () => {
@@ -70,21 +73,24 @@ export default function NewSettlementPaymentScreen() {
 
   return <Screen>
     <Title eyebrow={snapshot.group.name}>Record payment</Title>
-    <Banner tone="info">BranchBalance records money moved elsewhere. The recipient must confirm receipt before balances change.</Banner>
+    <Banner icon={<Info color={colors.text} size={20} />} tone="info">BranchBalance records money moved elsewhere. The recipient must confirm receipt before balances change.</Banner>
     <Card>
-      <Body muted>Sender</Body><Body>@{suggestion.from}</Body>
-      <Body muted>Recipient</Body><Body>@{suggestion.to}</Body>
-      <Body muted>Available to record</Body><Body>{formatMoney(availableMinor, snapshot.group.currency)}</Body>
+      <View style={styles.route}>
+        <View style={styles.participant}><UserRound color={colors.accent} size={22} /><Body muted>Sender</Body><Body>@{suggestion.from}</Body></View>
+        <ArrowRight color={colors.muted} size={22} />
+        <View style={styles.participant}><UserRound color={colors.accent} size={22} /><Body muted>Recipient</Body><Body>@{suggestion.to}</Body></View>
+      </View>
+      <View style={[styles.available, { borderTopColor: colors.border }]}><WalletCards color={colors.accent} size={22} /><View style={styles.flex}><Body muted>Available to record</Body><Body style={styles.availableValue}>{formatMoney(availableMinor, snapshot.group.currency)}</Body></View></View>
     </Card>
-    <Field label={`Amount (${snapshot.group.currency})`} value={amount} onChangeText={(value) => { setAmount(value); setReview(null); }} keyboardType="decimal-pad" placeholder="0.00" />
-    <Body>Payment date</Body>
-    <Button variant="secondary" onPress={() => setShowDate(true)}>{paidOn}</Button>
+    <Field label={`Amount (${snapshot.group.currency})`} labelIcon={<HandCoins color={colors.accent} size={19} />} value={amount} onChangeText={(value) => { setAmount(value); setReview(null); }} keyboardType="decimal-pad" placeholder="0.00" />
+    <View style={styles.fieldLabel}><CalendarDays color={colors.accent} size={19} /><Body>Payment date</Body></View>
+    <Button icon={<CalendarDays color={colors.text} size={18} />} variant="secondary" onPress={() => setShowDate(true)}>{paidOn}</Button>
     {showDate ? <DatePickerDialog value={paidOn} onCancel={() => setShowDate(false)} onConfirm={(value) => { setPaidOn(value); setShowDate(false); setReview(null); }} /> : null}
-    <Field label="Shared note (optional)" value={note} onChangeText={(value) => { setNote(value); setReview(null); }} multiline textAlignVertical="top" maxLength={2_000} style={styles.note} placeholder="Payment context, receipt reference, external transaction ID, or account identifier" />
+    <Field label="Shared note (optional)" labelIcon={<MessageSquareText color={colors.accent} size={19} />} value={note} onChangeText={(value) => { setNote(value); setReview(null); }} multiline textAlignVertical="top" maxLength={2_000} style={styles.note} placeholder="Payment context, receipt reference, external transaction ID, or account identifier" />
     <Body muted>{Array.from(note).length}/2,000 characters. Every repository member can read this note and Git history may retain it. Never enter passwords, PINs, CVVs, tokens, recovery codes, or other authentication secrets.</Body>
     {error ? <Banner tone="error">{error}</Banner> : null}
     {!mutable ? <Banner>Refresh the remote settlement ledger before recording a payment.</Banner> : null}
-    <Button disabled={!mutable} onPress={openReview}>Review payment</Button>
+    <Button icon={<CircleCheck color={colors.accentText} size={18} />} disabled={!mutable} onPress={openReview}>Review payment</Button>
     <ConfirmDialog
       visible={review !== null}
       title="Record pending payment?"
@@ -104,4 +110,12 @@ function amountInput(amountMinor: number, currency: keyof typeof currencies): st
   return `${Math.floor(amountMinor / divisor)}.${String(amountMinor % divisor).padStart(digits, '0')}`;
 }
 
-const styles = StyleSheet.create({ note: { minHeight: 112, paddingTop: 14 } });
+const styles = StyleSheet.create({
+  flex: { flex: 1 },
+  route: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  participant: { minWidth: 0, flex: 1, gap: 3 },
+  available: { flexDirection: 'row', alignItems: 'center', gap: 10, borderTopWidth: 1, paddingTop: 12 },
+  availableValue: { fontSize: 18, lineHeight: 25, fontWeight: '800' },
+  fieldLabel: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  note: { minHeight: 112, paddingTop: 14 },
+});

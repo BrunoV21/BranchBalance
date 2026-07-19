@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { fireEvent, render, waitFor, within } from '@testing-library/react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { calculateBalances, simplifySettlements } from '@/domain/balances';
@@ -69,7 +69,24 @@ describe('settlement screens', () => {
     const view = await render(<ThemeProvider><BalancesScreen /></ThemeProvider>);
     expect(view.getByText(/Awaiting confirmation €3.00/)).toBeTruthy();
     expect(view.getByText(payment.note!)).toBeTruthy();
-    expect(view.getByRole('button', { name: 'Confirm received' })).toBeTruthy();
+    const confirmButton = view.getByRole('button', { name: 'Confirm received' });
+    expect(within(confirmButton).getByText('Confirm received').props.numberOfLines).toBe(1);
+    expect(view.getAllByTestId('lucide-icon').length).toBeGreaterThan(10);
+  });
+
+  it('celebrates when every balance is settled', async () => {
+    const data = snapshot();
+    data.expenses = [];
+    data.balances = calculateBalances([], [], members);
+    data.settlements = simplifySettlements(data.balances.members);
+    data.settlementLedger = { kind: 'missing', payments: [] };
+    data.payments = [];
+    data.reservations = [];
+    jest.mocked(useRouter).mockReturnValue({ push: jest.fn() } as never);
+    jest.mocked(useGroup).mockReturnValue({ state: { data, status: 'ready', isRefreshing: false, lastSuccessfulAt: data.syncedAt, error: null }, confirmSettlementPayment: jest.fn(), deleteSettlementPayment: jest.fn() } as never);
+    const view = await render(<ThemeProvider><BalancesScreen /></ThemeProvider>);
+    expect(view.getByText('All settled')).toBeTruthy();
+    expect(view.getByLabelText('Everything is settled')).toBeTruthy();
   });
 
   it('reviews and records a partial pending payment with a trimmed note', async () => {
@@ -86,7 +103,9 @@ describe('settlement screens', () => {
     await waitFor(() => expect(view.getByLabelText('Shared note (optional)').props.value).toContain('TX-42'));
     await fireEvent.press(view.getByRole('button', { name: 'Review payment' }));
     await waitFor(() => expect(view.getByText(/shared note will be stored/i)).toBeTruthy());
-    await fireEvent.press(view.getByRole('button', { name: 'Record payment' }));
+    const recordButton = view.getByRole('button', { name: 'Record payment' });
+    expect(within(recordButton).getByText('Record payment').props).toMatchObject({ adjustsFontSizeToFit: true, numberOfLines: 1 });
+    await fireEvent.press(recordButton);
     await waitFor(() => expect(recordSettlementPayment).toHaveBeenCalledWith(expect.objectContaining({ amount_minor: 125, note: 'External transaction ID TX-42', status: 'pending', confirmed_by: null })));
     expect(back).toHaveBeenCalledTimes(1);
   });

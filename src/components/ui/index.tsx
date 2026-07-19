@@ -27,12 +27,12 @@ export function Card({ children, style }: PropsWithChildren<{ style?: ViewStyle 
   return <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }, style]}>{children}</View>;
 }
 
-export function Button({ children, onPress, disabled, loading, variant = 'primary', accessibilityLabel }: PropsWithChildren<{ onPress(): void; disabled?: boolean; loading?: boolean; variant?: 'primary' | 'secondary' | 'danger' | 'ghost'; accessibilityLabel?: string }>) {
+export function Button({ children, icon, onPress, disabled, loading, variant = 'primary', accessibilityLabel }: PropsWithChildren<{ icon?: ReactNode; onPress(): void; disabled?: boolean; loading?: boolean; variant?: 'primary' | 'secondary' | 'danger' | 'ghost'; accessibilityLabel?: string }>) {
   const { colors } = useTheme();
   const backgroundColor = variant === 'primary' ? colors.accent : variant === 'danger' ? colors.negative : variant === 'ghost' ? 'transparent' : colors.surfaceStrong;
   const color = variant === 'primary' || variant === 'danger' ? colors.accentText : colors.text;
   return <Pressable accessibilityLabel={accessibilityLabel} accessibilityRole="button" accessibilityState={{ disabled: Boolean(disabled || loading), busy: Boolean(loading) }} disabled={disabled || loading} onPress={onPress} style={({ pressed }) => [styles.button, { backgroundColor, borderColor: colors.border, opacity: disabled ? 0.45 : pressed ? 0.72 : 1 }]}>
-    {loading ? <ActivityIndicator color={color} /> : <Text style={[styles.buttonText, { color }]}>{children}</Text>}
+    {loading ? <ActivityIndicator color={color} /> : <View style={styles.buttonContent}>{icon}<Text adjustsFontSizeToFit minimumFontScale={0.8} numberOfLines={1} style={[styles.buttonText, { color }]}>{children}</Text></View>}
   </Pressable>;
 }
 
@@ -41,10 +41,10 @@ export function Field({ label, labelIcon, error, ...props }: TextInputProps & { 
   return <View style={styles.field}><View style={styles.labelRow}>{labelIcon}<Text style={[styles.label, { color: colors.text }]}>{label}</Text></View><TextInput accessibilityLabel={label} placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceStrong, borderColor: error ? colors.negative : colors.border, color: colors.text }]} {...props} />{error ? <Text accessibilityLiveRegion="polite" style={[styles.help, { color: colors.negative }]}>{error}</Text> : null}</View>;
 }
 
-export function Banner({ children, tone = 'warning', action }: PropsWithChildren<{ tone?: 'warning' | 'error' | 'info'; action?: ReactNode }>) {
+export function Banner({ children, tone = 'warning', action, icon }: PropsWithChildren<{ tone?: 'warning' | 'error' | 'info'; action?: ReactNode; icon?: ReactNode }>) {
   const { colors } = useTheme();
   const color = tone === 'error' ? colors.negative : tone === 'warning' ? colors.warning : colors.text;
-  return <View accessibilityLiveRegion="polite" style={[styles.banner, { borderColor: color, backgroundColor: colors.surface }]}><Text style={[styles.body, styles.bannerText, { color }]}>{children}</Text>{action}</View>;
+  return <View accessibilityLiveRegion="polite" style={[styles.banner, { borderColor: color, backgroundColor: colors.surface }]}><View style={styles.bannerContent}>{icon}<Text style={[styles.body, styles.bannerText, { color }]}>{children}</Text></View>{action}</View>;
 }
 
 export function ConfirmDialog({ visible, title, message, confirmLabel, confirmVariant = 'danger', loading = false, onCancel, onConfirm }: { visible: boolean; title: string; message: string; confirmLabel: string; confirmVariant?: 'primary' | 'danger'; loading?: boolean; onCancel(): void; onConfirm(): void }) {
@@ -55,8 +55,8 @@ export function ConfirmDialog({ visible, title, message, confirmLabel, confirmVa
         <Text style={[styles.dialogTitle, { color: colors.text }]}>{title}</Text>
         <ScrollView style={styles.dialogMessage} contentContainerStyle={styles.dialogMessageContent}><Text selectable style={[styles.body, { color: colors.muted }]}>{message}</Text></ScrollView>
         <View style={styles.dialogActions}>
-          <View style={styles.dialogAction}><Button variant="secondary" disabled={loading} onPress={onCancel}>Cancel</Button></View>
-          <View style={styles.dialogAction}><Button variant={confirmVariant} loading={loading} onPress={onConfirm}>{confirmLabel}</Button></View>
+          <View style={styles.dialogCancelAction}><Button variant="secondary" disabled={loading} onPress={onCancel}>Cancel</Button></View>
+          <View style={styles.dialogConfirmAction}><Button variant={confirmVariant} loading={loading} onPress={onConfirm}>{confirmLabel}</Button></View>
         </View>
       </View>
     </View>
@@ -70,16 +70,16 @@ export function Avatar({ login, uri, size = 44 }: { login: string; uri?: string 
     : <View accessibilityLabel={`${login}'s avatar`} style={[styles.avatar, { width: size, height: size, borderRadius: size / 2, backgroundColor: colors.accent }]}><Text style={{ color: colors.accentText, fontWeight: '800' }}>{initials}</Text></View>;
 }
 
-export function EmptyState({ title, body, action }: { title: string; body: string; action?: ReactNode }) {
+export function EmptyState({ title, body, action, icon }: { title: string; body: string; action?: ReactNode; icon?: ReactNode }) {
   const { colors } = useTheme();
-  return <View style={styles.empty}><Text style={[styles.subtitle, { color: colors.text }]}>{title}</Text><Text style={[styles.body, { color: colors.muted, textAlign: 'center' }]}>{body}</Text>{action}</View>;
+  return <View style={styles.empty}>{icon}<Text style={[styles.subtitle, { color: colors.text }]}>{title}</Text><Text style={[styles.body, { color: colors.muted, textAlign: 'center' }]}>{body}</Text>{action}</View>;
 }
 
 const styles = StyleSheet.create({
   flex: { flex: 1 }, content: { flexGrow: 1, padding: 20, gap: 16 }, titleBlock: { gap: 5, marginBottom: 8 }, eyebrow: { fontSize: 12, fontWeight: '800', letterSpacing: 1.2 },
   title: { fontFamily: Platform.select({ android: 'serif', default: undefined }), fontSize: 32, fontWeight: '700', lineHeight: 38 }, subtitle: { fontSize: 20, fontWeight: '700' },
-  body: { fontSize: 15, lineHeight: 22 }, card: { borderWidth: 1, borderRadius: 16, padding: 16, gap: 12 }, button: { minHeight: 48, borderRadius: 12, borderWidth: 1, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center' }, buttonText: { fontSize: 15, fontWeight: '800' },
+  body: { fontSize: 15, lineHeight: 22 }, card: { borderWidth: 1, borderRadius: 16, padding: 16, gap: 12 }, button: { minHeight: 48, borderRadius: 12, borderWidth: 1, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' }, buttonContent: { maxWidth: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }, buttonText: { flexShrink: 1, fontSize: 15, fontWeight: '800' },
   field: { gap: 7 }, labelRow: { flexDirection: 'row', alignItems: 'center', gap: 8 }, label: { fontSize: 14, fontWeight: '700' }, input: { minHeight: 50, borderRadius: 11, borderWidth: 1, paddingHorizontal: 14, fontSize: 16 }, help: { fontSize: 12, lineHeight: 17 },
-  banner: { borderLeftWidth: 4, borderRadius: 10, padding: 13, gap: 10 }, bannerText: { flex: 1 }, avatar: { alignItems: 'center', justifyContent: 'center' }, empty: { flex: 1, minHeight: 280, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 10 },
-  modalOverlay: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }, dialog: { width: '100%', maxWidth: 440, borderRadius: 18, borderWidth: 1, padding: 20, gap: 16, elevation: 12 }, dialogTitle: { fontSize: 22, lineHeight: 28, fontWeight: '800' }, dialogMessage: { maxHeight: 360 }, dialogMessageContent: { flexGrow: 1 }, dialogActions: { flexDirection: 'row', gap: 10, marginTop: 4 }, dialogAction: { flex: 1 },
+  banner: { borderLeftWidth: 4, borderRadius: 10, padding: 13, gap: 10 }, bannerContent: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 }, bannerText: { flex: 1 }, avatar: { alignItems: 'center', justifyContent: 'center' }, empty: { flex: 1, minHeight: 280, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 10 },
+  modalOverlay: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }, dialog: { width: '100%', maxWidth: 440, borderRadius: 18, borderWidth: 1, padding: 20, gap: 16, elevation: 12 }, dialogTitle: { fontSize: 22, lineHeight: 28, fontWeight: '800' }, dialogMessage: { maxHeight: 360 }, dialogMessageContent: { flexGrow: 1 }, dialogActions: { flexDirection: 'row', gap: 10, marginTop: 4 }, dialogCancelAction: { flex: 0.85 }, dialogConfirmAction: { flex: 1.15 },
 });
