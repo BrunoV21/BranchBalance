@@ -20,7 +20,16 @@ const ownershipUrl = withBase('/documentation/data-ownership')
             </a>
             <a class="button button-secondary" :href="ownershipUrl">How your data works</a>
           </div>
-          <div class="hero-note"><span class="dot" />Android preview in development · no stable download yet</div>
+          <a
+            class="button button-download"
+            href="https://github.com/BrunoV21/BranchBalance/releases/latest"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <svg class="icon button-download-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 20h14" /></svg>
+            <span class="button-download-copy"><strong>Download latest version</strong><small>Android APK · GitHub Releases</small></span>
+            <svg class="icon button-download-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+          </a>
         </div>
 
         <div class="hero-art" aria-label="BranchBalance mobile spending and overview screens beside a private repository structure">

@@ -1,9 +1,9 @@
-# BranchBalance — Phase 1 Architecture and CR-001 Increment
+# BranchBalance — Phase 1 Architecture and CR-001/CR-002/CR-003 Increments
 
-**Status:** Phase 1 implementation guide; CR-001 increment implemented
-**Applies to:** Phase 1 Android application and CR-001 trip and group spending intelligence
+**Status:** Phase 1 implementation guide; CR-001 through CR-003 implemented; CR-003 physical-device acceptance blocked by a known GitHub App token limitation
+**Applies to:** Phase 1 Android application, CR-001 trip and group spending intelligence, CR-002 settlement payment recording, and CR-003 in-app group invitation decisions
 **Companion specification:** [`PRD.md`](PRD.md)
-**Last updated:** 2026-07-18
+**Last updated:** 2026-07-19
 
 ## 1. Purpose and decision precedence
 
@@ -960,3 +960,606 @@ Implement CR-001 only after the Phase 1 stages in section 14 are green:
 6. **Hardening and acceptance:** conflict/race tests, time-boundary tests, accessibility pass, two-account physical-device scenario, and the existing typecheck/lint/test/doctor/APK gates.
 
 Custom categories, recurring budgets, planned expenses, cash wallets, automatic categorization, transaction import, receipt processing, notifications, multi-currency conversion, offline writes, and hidden per-user plans remain outside this increment.
+
+## 17. CR-002 architecture delta — Settlement payment recording
+
+CR-001 and CR-002 are implemented. Section 15 remains the Phase 1 completion boundary, while this section records the additive architecture delivered for PRD change request CR-002. Unless explicitly changed below, every Phase 1 and CR-001 decision remains in force: GitHub is authoritative, writes are online-only, one group has one currency, money uses integer minor units, expenses remain separate files, and spending metadata never affects balances.
+
+### 17.1 Source, navigation, and ownership
+
+Add a platform-free settlement domain under `src/domain/settlements/` and settlement form/use-case code under `src/features/settlements/`. The domain may import shared money, login, date, and balance types but imports neither React Native nor GitHub infrastructure.
+
+The selected-group stack adds a pushed `settlements/new` route opened only from a current suggestion. Normalized sender and recipient route parameters identify the suggestion to reopen from the live `GroupProvider` snapshot; no amount passed through navigation is authoritative. The route derives the unreserved maximum after pending payments. If the pair has no remaining availability, it shows a stale or Awaiting confirmation state and returns to Balances.
+
+The existing **Balances** tab owns:
+
+- expense-paid, expense-share, confirmed-settlement-sent, confirmed-settlement-received, and adjusted net totals;
+- current deterministic suggestions, pending reservations, and Record payment actions;
+- pending recipient-confirmation actions, complete payment history, and delete confirmations; and
+- ledger warnings, empty states, stale-draft recovery, and accessible success announcements.
+
+Overview may consume the adjusted quick-settlement selector. Spending continues to consume expense-only inputs. Do not add a `SettlementProvider`, independent refresh path, financial SDK, database, decimal library, or background service. `GroupProvider` remains the single owner of the selected repository generation.
+
+### 17.2 Persisted and runtime types
+
+CR-002 renames the existing derived `Settlement` concept to `SuggestedSettlement` so recorded facts and calculated advice cannot be confused:
+
+```ts
+interface SuggestedSettlement {
+  from: string;
+  to: string;
+  amountMinor: number;
+}
+
+interface SettlementPayment {
+  id: string;
+  from: string;
+  to: string;
+  amount_minor: number;
+  currency: CurrencyCode;
+  paid_on: CalendarDate;
+  note?: string;
+  status: 'pending' | 'confirmed';
+  recorded_by: string;
+  recorded_at: IsoInstant;
+  confirmed_by: string | null;
+  confirmed_at: IsoInstant | null;
+}
+
+interface SettlementReservation {
+  from: string;
+  to: string;
+  pendingMinor: number;
+  availableToRecordMinor: number;
+}
+
+interface SettlementLedgerFile {
+  payments: SettlementPayment[];
+  blobSha: string;
+  path: 'settlements.json';
+  // Full validated-passthrough document retained for lossless rewrites.
+  sourceDocument: Record<string, unknown>;
+}
+
+type SettlementLedgerState =
+  | { kind: 'unverified' }
+  | { kind: 'missing'; payments: [] }
+  | { kind: 'ready'; file: SettlementLedgerFile }
+  | { kind: 'invalid'; warning: DataWarning };
+```
+
+`unverified` exists only for legacy cache hydration and disables mutation until remote refresh. `missing` means GitHub has confirmed a 404 for `settlements.json`; it is the only state that permits a create-without-SHA operation. `ready` permits SHA-protected append and delete. `invalid` contributes no payments and blocks mutation rather than overwriting data the app cannot safely preserve.
+
+Parse the ledger in two stages. First validate the top-level passthrough object, `schema_version: 1`, and a `payments` array. Then parse entries independently against the PRD invariants, including note length and the pending/confirmed audit-field relationships. Retain the complete source array, including invalid entries and unknown fields, while exposing only valid normalized records to calculations.
+
+Duplicate IDs are unsafe for recovery, confirmation, and deletion. Count IDs before entry parsing and exclude every occurrence of a duplicated ID with a warning. Preserve display logins as recorded, use `normalizeLogin` for identity comparison, require distinct normalized `from` and `to`, and require `currency` to equal the loaded group. A pending record requires null confirmation fields. A confirmed record requires `confirmed_by` to normalize to `to` and `confirmed_at` to be a valid UTC instant not earlier than `recorded_at`. Readers validate `paid_on` as a calendar date without comparing it to today's date; the create use case separately rejects future dates at submission.
+
+Normalize an absent note to `undefined`; a present note must already be trimmed, contain 1–2,000 Unicode characters, and remain plain text. Do not parse Markdown, linkify URLs, or extract financial identifiers. The entire note remains shared opaque content for display and confirmation only.
+
+Sort valid payment history by `paid_on` descending, then `recorded_at` descending, then normalized `id` ascending. Ledger array order never affects balances, recovery, or presentation.
+
+### 17.3 Balance derivation and validation
+
+Extend the existing pure balance boundary:
+
+```ts
+interface MemberBalance {
+  login: string;
+  totalPaidMinor: number;          // expenses paid
+  totalShareMinor: number;         // expense shares
+  settlementSentMinor: number;     // confirmed transfers sent
+  settlementReceivedMinor: number; // confirmed transfers received
+  netMinor: number;                // expenses plus confirmed settlements
+  currentMember: boolean;
+}
+
+function calculateBalances(
+  expenses: readonly Expense[],
+  payments: readonly SettlementPayment[],
+  currentMembers: readonly Member[],
+): BalanceResult;
+
+function simplifySettlements(balances: readonly MemberBalance[]): SuggestedSettlement[];
+function deriveSettlementReservations(
+  suggestions: readonly SuggestedSettlement[],
+  payments: readonly SettlementPayment[],
+): SettlementReservation[];
+```
+
+Seed identities from current members, every expense login, and `from` and `to` logins in valid payments. Expense accumulation remains unchanged. Ignore pending payments for balance arithmetic. For each confirmed payment, checked-add `amount_minor` to the sender's `settlementSentMinor` and `netMinor`, and checked-add it to the recipient's `settlementReceivedMinor` while subtracting it from their `netMinor`. Use checked safe-integer operations throughout; overflow yields no suggestions and a data-integrity warning.
+
+`totalSpentMinor`, `totalPaidMinor`, and `totalShareMinor` remain expense-only. `deriveSpendingSummary` continues to receive only valid expenses and is byte-for-byte independent of the settlement ledger. The sum of all `netMinor` values must remain zero after every valid confirmed payment; otherwise suppress suggestions and surface the existing integrity warning.
+
+Run `simplifySettlements` only after all valid confirmed payments have adjusted the net rows. It keeps the existing largest-debtor/largest-creditor algorithm and normalized-login tie breaks.
+
+`deriveSettlementReservations` groups pending payments by normalized `from`/`to`, checked-sums `pendingMinor`, and joins them to the derived suggestion pair. `availableToRecordMinor` is `max(suggestion.amountMinor - pendingMinor, 0)`. Orphaned or excessive pending records caused by later expense changes remain visible but cannot make availability negative or change net balances.
+
+The create use case validates against the exact `SuggestedSettlement` set derived from the refreshed expense generation and current valid ledger:
+
+```ts
+function validateSettlementDraft(
+  draft: SettlementPaymentDraft,
+  suggestions: readonly SuggestedSettlement[],
+  reservations: readonly SettlementReservation[],
+  currency: CurrencyCode,
+  today: CalendarDate,
+): ValidSettlementPaymentInput;
+```
+
+Match `from` and `to` case-insensitively, require a current matching suggestion, and cap the parsed positive amount at its `availableToRecordMinor`. Trim and validate the optional note without interpreting its content. Build the final UUID and recording timestamp once when submission begins, force `status: 'pending'` with null confirmation fields, and reuse the intended record across every transport retry. A later expense mutation may change the resulting debt direction but does not retroactively invalidate a recipient-confirmed payment.
+
+### 17.4 GitHub gateway and optimistic concurrency
+
+No new GitHub API family is required. Read and write `settlements.json` through the Contents API on the repository's reported default branch. Extend the product gateway boundary with operations equivalent to:
+
+```ts
+interface GitHubGateway {
+  readSettlementLedger(
+    repository: RepositoryRef,
+    currency: CurrencyCode,
+    signal?: AbortSignal,
+  ): Promise<SettlementLedgerState>;
+  recordSettlementPayment(
+    repository: RepositoryRef,
+    current: SettlementLedgerState,
+    intended: SettlementPayment,
+    basis: SettlementValidationBasis,
+    signal?: AbortSignal,
+  ): Promise<SettlementLedgerFile>;
+  confirmSettlementPayment(
+    repository: RepositoryRef,
+    current: SettlementLedgerFile,
+    paymentId: string,
+    recipient: string,
+    confirmedAt: IsoInstant,
+    signal?: AbortSignal,
+  ): Promise<SettlementLedgerFile>;
+  deleteSettlementPayment(
+    repository: RepositoryRef,
+    current: SettlementLedgerFile,
+    paymentId: string,
+    signal?: AbortSignal,
+  ): Promise<SettlementLedgerState>;
+}
+```
+
+A complete group refresh reads repository metadata, `group.json`, collaborators, invitations, the expense tree, and `settlements.json` as one coalesced operation. A not-found response for only the ledger maps to `missing`; permission, rate-limit, network, and malformed-content failures retain their existing distinct error behavior.
+
+For the first append, serialize `{ schema_version: 1, payments: [intended] }` with the shared UTF-8, two-space, trailing-newline codec and omit `sha`. For later appends, clone the passthrough source document, append the intended pending record to its existing source array, and include `blobSha`. Use commit message `Record settlement payment <uuid>`; do not put member names, dates, amounts, notes, or confirmation state in commit messages.
+
+A 409/422 during a missing-file create or SHA-protected append triggers a ledger reread. Reparse valid entries, apply confirmed payments, derive suggestions and pending reservations against the submission's refreshed expense basis, and:
+
+- return success if the intended UUID has the same immutable creation fields and is either still pending or validly confirmed;
+- retry with the latest SHA when the UUID is absent and the requested pair and amount remain within the unreserved availability;
+- return `settlement_stale` with the latest available amount or zero when another pending or confirmed payment consumed the availability; or
+- return `settlement_record_conflict` when the UUID exists with different semantic content.
+
+There is no force append. Permit at most one automatic merge retry per observed SHA; a second changing SHA returns a retryable stale state to avoid an unbounded loop.
+
+On timeout or another ambiguous response, reread the ledger before exposing failure. Matching immutable creation content in a pending or validly confirmed record is success; the unchanged prior state is safe for one retry; a changed state follows the same merge rules. Never regenerate the UUID during recovery.
+
+Confirmation is a SHA-protected transform of exactly one source entry. Before writing, require the authenticated account to be a current accepted write-enabled member whose normalized login equals the pending record's `to`. Preserve every immutable field, including `note`; change only `status` to `confirmed`, set `confirmed_by` from that recipient, and set `confirmed_at` once from the injected UTC clock. Use `Confirm settlement payment <uuid>` without sensitive content in the commit message.
+
+A stale-SHA confirmation rereads the ledger. The same record still pending is safe for one bounded retry using the original `confirmedAt`. The same immutable record already confirmed by the same recipient is idempotent success, regardless of a different remote confirmation timestamp. An absent record, changed immutable content, a different confirmer, or malformed/duplicated ID returns `settlement_confirmation_conflict`; there is no force confirmation. Confirmation does not revalidate the suggestion amount because receipt is an attested historical fact.
+
+Deletion clones the latest passthrough document and removes exactly one valid record with the requested UUID, preserving every other valid or invalid source entry and unknown field. Use `Delete settlement payment <uuid>`. A stale SHA rereads and retries against the latest source; an absent ID is idempotent success. A same-ID malformed or duplicated source entry is not silently removed and instead returns a ledger data error.
+
+If deletion removes the last valid payment, retain a valid empty `settlements.json` rather than deleting the file. This avoids a delete-versus-first-create race and preserves forward-compatible top-level data.
+
+Add typed `settlement_stale`, `settlement_record_conflict`, `settlement_confirmation_conflict`, and `settlement_ledger_invalid` cases to `AppError`. Treat a non-recipient confirmation attempt as a domain authorization error before transport. Map network, timeout, rate-limit, permission, and access loss through the existing error model. A generic retry must never bypass reservation validation, change note content, create a second semantic payment, or confirm on behalf of another login.
+
+### 17.5 Provider, snapshot, and cache impact
+
+`RemoteGroupSnapshot` adds the full ledger state, deterministically sorted valid pending/confirmed history, reservations, adjusted balance result, and `SuggestedSettlement[]`. `GroupSnapshotV1` stores only the non-sensitive payment core needed to reconstruct confirmed balances and pending reservations; it excludes `note`, the passthrough source document, and all unknown ledger content. Spending data remains unchanged. The group summary's current-user balance uses confirmed payments only so the group list and selected group agree after receipt confirmation.
+
+Remote refresh derives these values in order before one reducer commit:
+
+1. Parse the group, members, expenses, and ledger.
+2. Calculate expense balances adjusted by valid confirmed payments.
+3. Verify zero-sum integrity, derive suggestions, and derive pending reservations/availability.
+4. Derive spending from the same expense array without any payments.
+5. Publish balances, suggestions, reservations, pending/confirmed history, spending, and warnings together.
+
+`GroupProvider` gains `recordSettlementPayment`, `confirmSettlementPayment`, and `deleteSettlementPayment` actions. A GitHub-confirmed create replaces the ledger, recomputes reservations without changing balances, and publishes once. A recipient confirmation or confirmed-record deletion recomputes balances, suggestions, reservations, and group summary; a pending-record deletion recomputes reservations only. Every operation publishes one internally consistent snapshot without waiting for full refresh. `GroupsProvider` records the confirmed ledger generation so an older in-flight refresh cannot overwrite current reservations or adjusted balance.
+
+CR-002 does not require an AsyncStorage key-version change. Every cached ledger hydrates as `unverified` because the SHA/source document and sensitive note content are deliberately absent; cached core fields may reconstruct provisional adjusted balances and reservations while the UI marks them refreshing/stale. Record, Confirm received, Delete, and note display remain disabled until remote refresh establishes `missing`, `ready`, or `invalid` and supplies the full in-memory ledger. Phase 1/CR-001 caches without settlement fields hydrate as an unverified empty ledger.
+
+Before every cache write, map payments to the explicit redacted cache DTO rather than serializing `RemoteGroupSnapshot`. If cache persistence fails after GitHub confirms a mutation, retain the complete in-memory remote snapshot and show the existing non-destructive cache warning. Cache content remains non-authoritative and discardable.
+
+### 17.6 UI, permissions, and accessibility
+
+Each suggested-settlement card receives one **Record payment** button when `repository.canWrite` is true, the ledger is verified and mutable, and `availableToRecordMinor` is positive. The card shows total suggested debt, pending reservation, and unreserved availability separately. The pushed form resolves the live suggestion by normalized pair, shows sender and recipient read-only, preloads the unreserved maximum, accepts the existing money input and native calendar-date control plus an optional multiline note, and presents one review confirmation before creating the pending record.
+
+Any accepted write-enabled member can record a suggestion on behalf of its sender; the authenticated member need not equal `from` or `to`. The UI states that BranchBalance records a transfer completed elsewhere, creates a pending claim, and does not move money. `recorded_by` makes that delegation auditable.
+
+The form focuses the first invalid field, preserves amount, date, and note after transport or stale errors, updates the maximum after a stale response, prevents duplicate taps, and announces that confirmation is pending. A non-empty note triggers a shared-sensitive-data warning before submission. If the pair disappears or is fully reserved, the form offers return to Balances rather than arbitrary recipient selection.
+
+Pending rows expose **Confirm received** only when the authenticated normalized login equals `to` and repository write access is current. Confirmation displays immutable transfer fields and the complete note, asks the recipient to attest receipt, and never allows edits. Other members see who must confirm. A confirmed result announces the adjusted remaining debt.
+
+Payment history rows expose status, sender, recipient, formatted amount, payment date, full plain-text note, recording audit, and confirmation audit to accessibility services. URLs in notes are selectable text but never automatic links. Delete uses the shared confirmation dialog and is disabled while the ledger is unverified or invalid. Money direction and status are stated in text and never communicated only by colour or iconography.
+
+An empty verified ledger shows **No payments recorded**. A fully reserved suggestion shows **Awaiting confirmation**, not All settled. **All settled** requires both zero adjusted suggestions and zero pending reservations while retaining history. A malformed ledger shows a data-warning banner, expense-only spending remains available, suggestions are suppressed because the adjusted balance is unknown, and mutation stays disabled.
+
+### 17.7 Compatibility, security, and operational limits
+
+- A missing ledger is the backward-compatible empty state; group and expense schema versions remain unchanged.
+- Pre-CR-002 clients ignore `settlements.json` and therefore show expense-only balances. Once any payment is recorded, rollout must require or clearly coordinate upgrade of every active group member; old and new clients cannot be expected to display the same net balance.
+- Old clients cannot destroy the ledger when editing expenses or `group.json` because it is a separate file.
+- Settlement metadata, including notes, is shared private-repository data and is not end-to-end encrypted by BranchBalance. There is no private payment history.
+- Notes may contain plain-text receipt or attachment references, external transaction IDs, bank names, or financial-account identifiers. They are stored only in the remote ledger and current in-memory snapshot; exclude them from AsyncStorage caches, logs, analytics, telemetry, errors, crash reports, notifications, and commit messages.
+- Before saving a note, warn that all repository members and Git history may retain it. Tell users never to enter passwords, PINs, CVVs, access/refresh tokens, recovery codes, signing keys, or other authentication secrets.
+- Treat note text as opaque untrusted content: trim and length-check it, render it as plain text, do not linkify or execute it, and never include it in an error interpolation.
+- CR-002 uploads no binary receipt or attachment and creates no structured external-transaction or account field. Those may be described or referenced only inside `note`.
+- `from` and `to` describe a reported transfer. Current repository write permission authorizes creation/deletion, while confirmation additionally requires the authenticated normalized login to equal the current accepted recipient.
+- Recording and confirmation IDs/timestamps are generated once by trusted boundaries and all logs redact private file bodies.
+- Never truncate a ledger to satisfy a GitHub size failure. Check the serialized payload before upload and return a safe ledger-capacity error if it exceeds the Contents API limit; archival or sharding requires a later change request because it affects the concurrency boundary.
+- Invalid entries are isolated for reads but preserved during safe rewrites. An invalid top-level document blocks writes so the app never replaces unknown repository data with an empty ledger.
+
+### 17.8 CR-002 test architecture
+
+Extend the platform-free unit suite with table-driven coverage for:
+
+- missing, empty, valid, partially invalid, malformed, forward-compatible, duplicate-ID, wrong-currency, same-party, unsafe-amount, and invalid pending/confirmed ledger inputs;
+- note omission/trimming/length, opaque plain-text handling, writer-only future-date rejection, and time-independent parsing of persisted calendar dates;
+- expense-only totals plus zero, full, partial, chained, historical-member confirmed payments, and balance-neutral pending payments;
+- checked arithmetic, zero-sum preservation, deterministic suggestions/history, pending reservation availability, and unchanged spending summaries;
+- exact pair matching, normalized-login matching, unreserved-amount rejection, recipient-only/idempotent confirmation, and debt reversal after a later expense mutation; and
+- lossless append/confirm/delete source transforms that retain notes, unknown fields, and unrelated invalid entries.
+
+Service/integration tests use the scripted GitHub transport, fake clock, ID generator, local calendar, and in-memory cache to cover:
+
+- group refresh with every ledger state and atomic derivation of pending/confirmed history, adjusted balances, reservations, suggestions, warnings, and expense-only spending;
+- first pending create, note preservation, normal SHA append, returned SHA replacement, capacity failure, and permission errors;
+- recipient confirmation, non-recipient rejection, stale-SHA retry, idempotent already-confirmed success, confirmation conflict, and immutable note preservation;
+- concurrent append that remains within availability, stale over-reservation rejection, concurrent missing-file creation, bounded retry, and UUID collision;
+- ambiguous create/confirm success, unchanged-state retry, and proof that retry never changes UUID or audit timestamps;
+- pending/confirmed delete, stale-SHA delete, already-absent success, ambiguous delete, empty-ledger retention, and malformed-ID refusal;
+- an expense mutation racing a payment mutation followed by one internally consistent remote refresh; and
+- Phase 1/CR-001 cache hydration with disabled writes, redacted payment-core hydration, proof that notes/source documents never persist locally, confirmed-mutation reconciliation, and cache-write failure.
+
+Component/navigation tests cover action visibility, live route resolution, fixed sender/recipient, full/partial amount entry, past/default/future dates, note limits and sensitive-data warning, plain-text rendering without active links, pending creation, recipient-only confirmation, duplicate-submit prevention, stale availability recovery, accessible status, history ordering, pending/confirmed deletion, warnings, no-history, Awaiting confirmation, and All settled with retained history.
+
+Extend the physical two-account Android acceptance run exactly as required by PRD section 17.12: create and synchronize a partial pending payment with a sensitive-data warning and note, verify unchanged balances plus reduced availability, confirm as the recipient, record/confirm the remainder, delete a payment, and verify expense/spending totals remain unchanged. Race two devices against one suggestion so only the unreserved amount can commit, and verify a non-recipient cannot confirm.
+
+### 17.9 Post-v1.0.0 implementation sequence
+
+CR-002 was implemented after the existing Phase 1 and CR-001 validation gates were green, in this order:
+
+1. **Schema and domain delta:** ledger parser, pending/confirmed cross-field validation, optional note, per-entry warnings, payment/history/reservation types, confirmed-only balance derivation, suggestion rename, lossless transforms, and unit tests.
+2. **GitHub ledger path:** verified missing/read states, pending create, SHA append/confirm/delete, recipient authorization, bounded merge, ambiguous-write recovery, typed errors, payload-size guard, and service tests.
+3. **Atomic state and cache:** enrich remote snapshots, persist only redacted payment core, hydrate all caches as unverified, reconcile create/confirm/delete generations, update adjusted group summaries, and test stale-refresh races.
+4. **Balances experience:** add Record payment navigation/form/note warning, pending reservations, recipient confirmation, confirmed settlement totals, status/history/deletion, warning/empty/stale states, and accessibility announcements.
+5. **Hardening and acceptance:** concurrency, corruption, capacity, permission, accessibility, two-account physical-device coverage, and the existing typecheck/lint/test/doctor/APK gates.
+
+Payment-provider integrations, arbitrary or excessive transfers, record editing, per-expense allocation, binary receipt/attachment uploads, structured transaction/account fields outside the optional note, recurring payments, reminders, offline writes, and ledger archival remain outside this increment.
+
+## 18. CR-003 architecture delta — In-app group invitation decisions
+
+CR-003 is implemented; physical two-account Android acceptance remains pending. This section defines the additive architecture delivered for PRD change request CR-003; Phase 1, CR-001, and CR-002 behavior remains in force unless explicitly changed below. GitHub remains authoritative for invitations and repository access. The increment adds no BranchBalance backend, repository document, background task, persistent invitation cache, or new runtime dependency.
+
+The selected-group `PendingMember` model and `GroupProvider` continue to serve the repository owner's view of invitations sent from one accepted group. CR-003 adds a separate `PendingGroupInvitation` model for invitations received by the authenticated user before that user can open the repository. These concepts must not share state or be treated as interchangeable.
+
+### 18.1 Ownership, source organization, and navigation
+
+The top-level `GroupsProvider` owns invitee-side invitation state because the invitation is account-scoped and no valid selected-group route exists before acceptance. Do not add an `InvitationsProvider` or place received invitations in `GroupProvider`.
+
+Add a narrow feature boundary:
+
+```text
+src/
+├── domain/
+│   └── types.ts                         # PendingGroupInvitation transport-independent types
+├── features/
+│   └── invitations/
+│       ├── eligibility.ts               # validate/filter/order/provisional naming
+│       └── reconciliation.ts            # classify post-decision GitHub state
+├── infrastructure/
+│   └── github/
+│       ├── contracts.ts                 # invitation gateway operations
+│       └── gateway.ts                   # Octokit DTO mapping and pagination
+├── providers/
+│   └── groups-provider.tsx              # dashboard refresh and decision actions
+└── app/(app)/groups/
+    └── index.tsx                        # Invited groups section
+```
+
+No new route is required. `/(app)/groups` composes the existing account heading, currency-separated aggregate summary, **Create a group**, the conditional **Invited groups** section, and accepted group cards in that order. An invitation card is not a group link and must not construct or navigate to `/groups/[owner]/[repo]` until accepted discovery returns a valid `DiscoveredGroup`.
+
+The shared confirmation-dialog, button, banner, pill, live-region, and retry primitives are sufficient. Native implementation follows the CR-003 update to mockup 03; the mockup's browser script is presentation guidance and is not application state logic.
+
+### 18.2 Domain and transport-independent types
+
+Add explicit types rather than passing Octokit invitation responses into React:
+
+```ts
+type GroupInvitationPermission = 'write' | 'maintain' | 'admin';
+
+interface PendingGroupInvitation {
+  id: number;
+  repository: {
+    id: number;
+    owner: string;
+    ownerType: 'User';
+    name: string;
+    fullName: string;
+    private: true;
+  };
+  invitee: string;
+  inviter: string;
+  permission: GroupInvitationPermission;
+  createdAt: IsoInstant;
+  provisionalName: string;
+}
+
+interface InvitationDiscoveryResult {
+  invitations: PendingGroupInvitation[];
+  warnings: DataWarning[];
+}
+
+interface AcceptedInvitationPendingDiscovery {
+  invitationId: number;
+  repositoryId: number;
+  repositoryFullName: string;
+  provisionalName: string;
+  acceptedAt: IsoInstant;
+  reason: 'not_loadable' | 'discovery_failed';
+}
+```
+
+`PendingGroupInvitation` is ephemeral GitHub metadata, not a repository-backed entity. It has no `GroupKey`, `Group`, `GroupFile`, balance, members, expenses, spending, or settlement data. `provisionalName` is presentation-only and must never be persisted or later preferred over the validated `group.json` name.
+
+Validate the selected transport fields before constructing the type:
+
+- `id` and repository `id` are positive safe integers;
+- repository owner, repository name/full name, invitee, and inviter are non-empty normalized GitHub identities or names;
+- repository privacy is `true` and owner type is `User`;
+- repository name begins with `branch-balance-`;
+- normalized invitee equals the current authenticated login;
+- permission ranks at least `write`; and
+- `created_at` is a valid instant.
+
+The permission rank is `read < triage < write < maintain < admin`; only the final three map into `GroupInvitationPermission`. Reject malformed or ineligible entries independently and record safe warnings without exposing raw response bodies. Deduplicate by invitation ID, then sort newest `createdAt` first, case-insensitive repository full name second, and ID third. A duplicate ID with semantically different repository data is excluded with a warning instead of choosing one record arbitrarily.
+
+Derive the provisional name by removing exactly one leading `branch-balance-`, replacing internal hyphen runs with spaces, trimming, and applying presentation capitalization. If that produces an empty label, fall back to the repository name. This derivation never proves that the repository is a BranchBalance group.
+
+### 18.3 GitHub gateway contract and endpoint behavior
+
+Extend the product gateway boundary:
+
+```ts
+interface GitHubGateway {
+  listGroupInvitations(
+    currentLogin: string,
+    signal?: AbortSignal,
+  ): Promise<InvitationDiscoveryResult>;
+  acceptGroupInvitation(
+    invitationId: number,
+    signal?: AbortSignal,
+  ): Promise<void>;
+  declineGroupInvitation(
+    invitationId: number,
+    signal?: AbortSignal,
+  ): Promise<void>;
+}
+```
+
+The gateway uses the authenticated GitHub App user token and the shared media type and pinned API version:
+
+| Operation | REST endpoint |
+|---|---|
+| List open invitations for the current user | `GET /user/repository_invitations` |
+| Accept an invitation | `PATCH /user/repository_invitations/{invitation_id}` |
+| Decline an invitation | `DELETE /user/repository_invitations/{invitation_id}` |
+
+`listGroupInvitations` follows pagination to completion before returning one deterministic result. Validate and map one page at a time, but publish only after every page succeeds; a partial page set must never be presented as the authoritative list. The gateway does not request `group.json` or any repository contents while the invitation is pending because repository access has not been accepted.
+
+The existing GitHub App **Administration: read and write** repository permission is the documented permission for these user-token operations. Permission failure maps through the shared typed error model with an invitation-specific operation label. If the installed app or current user authorization lacks the required permission, expose reauthorization guidance rather than converting `403` into an empty list.
+
+Physical-device testing identified a separate GitHub App user-token visibility limitation: `GET /user/repository_invitations` returned `200 OK`, an empty array, and `X-Accepted-GitHub-Permissions: administration=read` while the authenticated account had a pending private-repository invitation visible on GitHub. This response is indistinguishable from a genuine empty invitation list at the API boundary. It is consistent with GitHub's rule that a user access token can access only resources available to both the user and app; the invitee does not have repository access until the invitation is accepted. Do not represent additional repository permissions as a fix for this case.
+
+The account-level **Private repository invitations: read** permission may be tested as a compatibility experiment, but it is not a confirmed requirement for this endpoint. If it does not change the response, resolving pre-acceptance discovery requires an architecture decision between targeted OAuth `repo:invite` authorization and a backend/owner-mediated invitation handoff. Until then, the operational fallback is acceptance through GitHub followed by normal BranchBalance group discovery. The work is tracked in [`ROADMAP.md`](../ROADMAP.md#reliable-pre-acceptance-private-invitation-discovery).
+
+Accept and decline send no request body and require a positive invitation ID. A `204` is a confirmed GitHub decision. Do not automatically replay a decision after timeout, connection loss, `404`, `409`, or another ambiguous result; first run the reconciliation algorithm in section 18.5. The authenticated client's existing one-time replay after an explicit `401` may remain because GitHub rejected the unauthenticated request before normal operation handling.
+
+Map rate limits, network failure, timeout, and terminal authentication through the shared client. Add invitation-specific safe classification where needed:
+
+```ts
+type InvitationDecisionError =
+  | { kind: 'invitation_unavailable'; invitationId: number }
+  | { kind: 'invitation_decision_unknown'; invitationId: number; action: 'accept' | 'decline' }
+  | { kind: 'invitation_permission'; operation: 'list' | 'accept' | 'decline' };
+```
+
+These errors contain IDs and safe operation names only. Repository full names, inviter logins, private response bodies, authorization headers, and tokens stay out of errors, logs, analytics, and crash reports.
+
+### 18.4 GroupsProvider state and dashboard refresh
+
+Keep accepted groups and received invitations as separate resources so either result can succeed while the other fails:
+
+```ts
+interface GroupsContextValue {
+  state: ResourceState<DiscoveredGroup[]>; // existing accepted groups
+  invitationState: ResourceState<PendingGroupInvitation[]>;
+  invitationMutations: ReadonlyMap<number, 'accepting' | 'declining'>;
+  acceptedPendingDiscovery: readonly AcceptedInvitationPendingDiscovery[];
+  refresh(): Promise<void>;
+  acceptInvitation(invitationId: number): Promise<void>;
+  declineInvitation(invitationId: number): Promise<void>;
+  // Existing creation, summary, and mutation-reconciliation members remain.
+}
+```
+
+`GroupsProvider.refresh()` becomes a dashboard refresh with one provider-instance in-flight promise. It starts accepted-group discovery and invitation discovery together and observes them with `Promise.allSettled` semantics:
+
+1. Terminal authentication failure from either branch expires the session and clears both resources.
+2. A successful group result replaces only accepted-group descriptors and persists the existing groups cache.
+3. A failed group result preserves cached/in-memory accepted groups and sets the existing scoped error.
+4. A successful invitation result replaces only in-memory invitations and their timestamp.
+5. A failed invitation result preserves the last in-memory invitation list, marks it stale, and sets an invitation-scoped error.
+6. Pull-to-refresh ends after both branches settle and exposes separate retry copy where only one failed.
+
+Launch, group-list focus, foreground, explicit retry, and pull-to-refresh all call this same method. Concurrent lifecycle triggers join its current promise. Foreground refresh remains limited to the visible resource; it does not refresh every accepted group's contents.
+
+Invitation cards from a stale failed refresh remain visible for context but their decision actions are disabled until a successful invitation reconciliation confirms that their IDs are still open. Accepted group cards remain fully usable when only invitation discovery fails. A first-load invitation failure shows a scoped banner without inventing an empty authoritative invitation list.
+
+`invitationMutations` is keyed by invitation ID. Inserting the ID is atomic before the gateway call, so repeated taps join or ignore the existing operation and cannot send duplicate mutations. A mutation disables only its own card. Sign-out, terminal session expiry, or account change clears invitation data, mutation state, confirmed-decision barriers, and accepted-pending-discovery state.
+
+### 18.5 Decision mutations and reconciliation
+
+Invitation decisions do not use optimistic repository membership. They use a confirmed-decision barrier plus a fresh post-mutation dashboard generation.
+
+Maintain an in-memory map of decision barriers:
+
+```ts
+type ConfirmedInvitationDecision = {
+  invitationId: number;
+  repositoryId: number;
+  action: 'accept' | 'decline';
+  confirmedAt: IsoInstant;
+};
+```
+
+The map prevents an invitation list request that began before a `204` from resurrecting the resolved card. Filter any incoming invitation generation through confirmed barriers until a later invitation-list response confirms that the ID is absent. Barriers are memory-only and account-scoped.
+
+Post-mutation reconciliation must not join a dashboard request that began before the mutation. `refreshAfterInvitationDecision()` first awaits that older request, then starts a new generation. This is the only forced-after-current path; ordinary lifecycle triggers continue to coalesce.
+
+#### 18.5.1 Confirmed acceptance
+
+For **Accept**:
+
+1. Require a fresh invitation in current state and install its `accepting` mutation entry.
+2. Call `acceptGroupInvitation` once.
+3. On `204`, install an `accept` barrier, remove the card from the published invitation list, and announce confirmed GitHub acceptance.
+4. Start a forced post-mutation invitation list plus accepted-group discovery.
+5. Match the accepted repository by numeric repository ID, not mutable owner/name text.
+6. When discovery returns a valid `DiscoveredGroup`, publish it through the normal sorted accepted-group path, remove any accepted-pending-discovery item, and clear the barrier after the invitation list confirms absence.
+
+If `204` is confirmed but the new repository is delayed, inaccessible through the expected installation, excluded for missing/malformed `group.json`, or group discovery fails, store `AcceptedInvitationPendingDiscovery` in memory and show an accepted-but-not-yet-loadable banner with **Retry**. Do not restore the invitation card or call PATCH again. The next normal dashboard refresh retries discovery; it clears the item only when a valid group with the repository ID appears.
+
+An older accepted-group discovery result must not remove a group published by the forced post-mutation generation. Reuse the existing generation/confirmed-mutation reconciliation pattern: only a result at or after the acceptance generation may authoritatively decide whether the newly accepted descriptor exists.
+
+#### 18.5.2 Confirmed decline
+
+For **Decline**, the screen first uses the shared confirmation dialog. Cancelling never enters the provider mutation. After confirmation:
+
+1. Require a fresh invitation and install its `declining` mutation entry.
+2. Call `declineGroupInvitation` once.
+3. On `204`, install a `decline` barrier, remove the card, update the count, and announce success.
+4. Run a forced invitation refresh. Absence clears the barrier; presence is a conflicting remote state and produces a safe retryable error without automatically sending DELETE again.
+
+Decline never starts repository-content discovery on its own, never creates a group descriptor, and never changes cross-group aggregates. A normal dashboard refresh may still run both branches through the shared lifecycle path.
+
+#### 18.5.3 Ambiguous outcomes
+
+After timeout, connection loss, `404`, `409`, or an otherwise ambiguous decision response, do not immediately replay the mutation. Fetch a fresh invitation list; acceptance additionally runs group discovery. Classify the result with a pure function:
+
+```ts
+function reconcileInvitationDecision(
+  intended: { invitation: PendingGroupInvitation; action: 'accept' | 'decline' },
+  openInvitations: readonly PendingGroupInvitation[],
+  discoveredGroups: readonly DiscoveredGroup[] | null,
+):
+  | { kind: 'still_open' }
+  | { kind: 'accepted'; group: DiscoveredGroup }
+  | { kind: 'resolved_decline' }
+  | { kind: 'unknown' }
+  | { kind: 'unavailable' };
+```
+
+- If the same invitation ID remains open with the same repository ID, preserve the card and permit a new explicit user retry.
+- For an intended accept, a valid discovered group with the repository ID is accepted success even though the original response was lost.
+- For an intended decline, absence from the fresh invitation list is treated as resolved, as required by the PRD.
+- For an intended accept, absence while accepted-group discovery failed is `unknown`; retry reconciliation reads without resending PATCH.
+- For an intended accept, absence with no valid discovered group is `unavailable`; explain that the invitation is no longer available without claiming it was accepted, declined, revoked, or expired.
+- A reused invitation ID pointing at different repository data is a conflict and also maps to `unavailable`.
+
+If invitation reconciliation fails, or acceptance reconciliation cannot obtain a successful group-discovery result, retain the card in stale state when it still exists locally, clear the busy indicator, and expose `invitation_decision_unknown` with a reconciliation retry. That retry performs reads first and never silently resends PATCH or DELETE.
+
+### 18.6 Cache, aggregates, and consistency boundaries
+
+CR-003 does not change `SnapshotStore`, AsyncStorage key versions, `GroupSnapshotV1`, or repository schemas. Never persist:
+
+- open invitation lists;
+- provisional invitation names;
+- invitation decision barriers;
+- per-card mutation state; or
+- accepted-pending-discovery records.
+
+This avoids presenting an old private invitation after process restart or account change. On cold start, hydrate accepted groups exactly as today while invitation state begins as loading and comes only from GitHub. A process restart after confirmed acceptance relies on normal accepted-group discovery; a still-open invitation is fetched again from GitHub.
+
+Invitation cards never contribute to group counts, member previews, currency aggregates, owed/owing totals, spending totals, balances, settlement suggestions, or last-synchronized times. Only a valid `DiscoveredGroup` may enter those selectors. `applyGroupSnapshot` and existing CR-001/CR-002 confirmed-mutation reconciliation remain unchanged.
+
+The owner-side selected-group snapshot may continue caching `PendingMember[] | null` because that data describes one repository already accessible to the current user. This is distinct from the non-persisted account-level received invitation list.
+
+### 18.7 UI, permissions, and accessibility
+
+Place the invitation section in the groups screen list header immediately after the full-width **Create a group** action and before accepted group rows. Omit the entire section when the authoritative fresh list is empty. A stale non-empty list is visibly marked as needing refresh and has no enabled decisions.
+
+Each card renders only validated invitation metadata: provisional name, repository owner/full name, inviter, requested permission, and localized invitation date. Owner, inviter, and repository text are untrusted display strings: render them as plain text, constrain/wrap long values, and never execute or automatically link them.
+
+**Accept** is primary and does not require another confirmation because the labelled button is the explicit decision. **Decline** is secondary and opens a destructive confirmation naming the provisional group and owner and stating that a new invitation will be required to join later. Both buttons include the provisional name in their accessibility label, meet the 44 dp target, expose busy/disabled state, and announce their result through the shared live region.
+
+After confirmed acceptance, keep the user on **Your groups**. When the group validates, insert its normal accepted card in deterministic group order and announce that it was added. When GitHub accepted access but discovery cannot load the group, show the accepted-pending-discovery banner outside **Invited groups** so its state cannot be mistaken for an open invitation.
+
+The screen must distinguish these independent states without replacing the whole list:
+
+- invitations loading while cached groups are visible;
+- no fresh invitations;
+- one invitation mutating while others remain usable;
+- stale invitations awaiting reconciliation;
+- invitation-only permission/network/rate-limit failure;
+- accepted but group not yet loadable; and
+- accepted groups failing refresh while invitations load successfully.
+
+### 18.8 Security, privacy, and operational limits
+
+- Only `GET /user/repository_invitations` for the authenticated token is supported; there is no arbitrary-username invitation lookup.
+- A GitHub App user access token may receive `200 OK` with an empty invitation list for a valid pending private-repository invitation. BranchBalance cannot recover invitation metadata or offer in-app accept/decline when GitHub omits the row; the user must accept through GitHub and refresh until the roadmap item is resolved.
+- The app never reads or previews repository contents before acceptance and never describes a provisional invitation as a validated BranchBalance group.
+- Existing private, personal-account, prefix, invitee, and write-or-greater filters are enforced in the domain boundary even if the UI receives unexpected transport data.
+- Invitation IDs are accepted only from current validated state, not route params, free text, deep links, or persisted storage.
+- The user token remains in SecureStore-backed session infrastructure and is never passed through React props or invitation domain objects.
+- Private repository names and inviter identities are current-screen data. Exclude them from analytics, telemetry, crash breadcrumbs, persistent operation metadata, and user-facing raw errors.
+- Accept/decline changes GitHub collaboration only. It does not write `group.json`, expenses, settlements, caches, or a BranchBalance audit record.
+- CR-003 remains online-only. No offline mutation queue, automatic background polling, push notification, invitation history, membership removal, organization/team invitation, or leave-repository flow is introduced.
+
+### 18.9 CR-003 test architecture
+
+Extend the platform-free unit suite with table-driven coverage for:
+
+- selected invitation DTO validation, positive safe IDs, personal/private/prefix/invitee rules, and malformed-entry isolation;
+- permission ranking and exclusion of read/triage invitations;
+- provisional-name derivation, duplicate agreement/conflict, and deterministic ordering;
+- invitation barrier filtering against older refresh generations;
+- accepted-pending-discovery state transitions; and
+- every branch of pure accept/decline ambiguous-outcome reconciliation.
+
+Service/integration tests use the existing scripted GitHub transport, fake clock, authenticated client, and in-memory provider harness to cover:
+
+- empty, one-page, and paginated invitation lists with no partial publish;
+- mixed eligible/ineligible entries and safe warning output;
+- independent all-settled dashboard refresh outcomes and one shared lifecycle promise;
+- `204` accept followed by valid group discovery, delayed visibility, missing/malformed `group.json`, installation mismatch, and discovery failure;
+- `204` decline, cancelled decline, and invitation-list confirmation;
+- timeout/connection-loss/`404`/`409` reconciliation for still-open, accepted, resolved-decline, unavailable, and read-failure states;
+- an invitation refresh begun before a confirmed decision that cannot resurrect the card;
+- a group refresh begun before acceptance that cannot overwrite the forced post-mutation generation;
+- per-ID duplicate-submit prevention while a different invitation remains actionable;
+- token refresh-once, terminal authentication, permission, primary/secondary rate-limit, and reauthorization behavior; and
+- sign-out/account-switch clearing all invitation memory without writing new AsyncStorage records.
+
+Component tests cover exact section placement below **Create a group**, hidden authoritative empty state, metadata wrapping, fresh/stale cards, count updates, accessible labels, per-card busy state, decline confirmation/cancel, success announcements, accepted-pending-discovery retry, scoped errors, large text, and accepted-group insertion.
+
+Extend the physical two-account Android acceptance run exactly as required by PRD section 18.12: invite, observe below **Create a group**, decline, resend, accept, validate the new group on both devices, then interrupt the network after acceptance submission and verify read-based reconciliation without duplicate mutation or a false pending card.
+
+### 18.10 Implementation sequence
+
+CR-003 was implemented after the existing Phase 1/CR-001/CR-002 gates were green, in this order:
+
+1. **Domain types and pure decisions:** add transport-independent invitation types, DTO schemas, eligibility/permission rules, provisional naming, ordering, decision barriers, reconciliation, and unit tests.
+2. **GitHub gateway:** add paginated list and accept/decline operations, safe typed errors, permission/reauthorization handling, and scripted transport coverage.
+3. **Dashboard state:** extend `GroupsProvider` with separate invitation resource/mutation state, all-settled single-flight refresh, non-persistent account cleanup, forced post-mutation generations, and stale-result barriers.
+4. **Your groups experience:** place the section below **Create a group**, implement accessible cards, decline confirmation, accepted-pending-discovery recovery, scoped refresh states, and component tests.
+5. **Hardening and acceptance:** exercise ambiguous outcomes, pre-mutation refresh races, rate limits, large text, two physical accounts, and the existing typecheck/lint/test/doctor/APK gates.
+
+Organization/team invitations, unrelated GitHub repository invitations, read-only membership, pre-accept repository previews, push/background notifications, invitation history, owner-side cancellation, permission editing, leaving accepted repositories, and offline decisions remain outside CR-003.

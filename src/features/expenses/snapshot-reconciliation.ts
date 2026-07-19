@@ -2,6 +2,7 @@ import { calculateBalances, simplifySettlements, sortExpenses } from '@/domain/b
 import { parseExpenseDocument, parseGroupDocument } from '@/domain/schemas';
 import { deriveSpendingSummary } from '@/domain/spending';
 import type { CalendarDate, ExpenseFile, GroupFile, RemoteGroupSnapshot } from '@/domain/types';
+import { rebuildSettlementData, settlementPayments } from '@/features/settlements/snapshot-reconciliation';
 
 export type ConfirmedExpenseMutation =
   | { kind: 'upsert'; file: ExpenseFile }
@@ -20,24 +21,26 @@ export function withGroupFile(snapshot: RemoteGroupSnapshot, groupFile: GroupFil
 
 export function rebuildSnapshot(snapshot: RemoteGroupSnapshot, files: ExpenseFile[], groupFile: GroupFile | null, currentUser: string, today: CalendarDate, syncedAt: string): RemoteGroupSnapshot {
   const expenses = sortExpenses(files);
-  const balances = calculateBalances(expenses.map((file) => file.expense), snapshot.members);
+  const ledger = snapshot.settlementLedger ?? { kind: 'unverified' as const };
+  const payments = settlementPayments(ledger, snapshot.payments);
+  const balances = calculateBalances(expenses.map((file) => file.expense), payments, snapshot.members);
   const warnings = snapshot.warnings.filter((warning) => warning.path !== 'expenses/' || (warning.reason !== balanceWarning && !warning.reason.startsWith(spendingWarningPrefix)));
   if (!balances.zeroSum) warnings.push({ path: 'expenses/', reason: balanceWarning });
   const group = groupFile?.group ?? snapshot.group;
   let spending = null;
   try { spending = deriveSpendingSummary(expenses.map((file) => file.expense), group.spending_plan, currentUser, today); }
   catch (error) { warnings.push({ path: 'expenses/', reason: `${spendingWarningPrefix} ${error instanceof Error ? error.message : 'data integrity error'}` }); }
-  return {
+  return rebuildSettlementData({
     ...snapshot,
     group,
     groupFile,
     expenses,
     balances,
-    settlements: balances.zeroSum ? simplifySettlements(balances.members) : [],
+    settlements: balances.zeroSum && ledger.kind !== 'invalid' ? simplifySettlements(balances.members) : [],
     spending,
     warnings,
     syncedAt,
-  };
+  }, ledger, payments, syncedAt);
 }
 
 export function hydrateCachedSnapshot(snapshot: RemoteGroupSnapshot, currentUser: string, today: CalendarDate): RemoteGroupSnapshot {
@@ -60,7 +63,7 @@ export function hydrateCachedSnapshot(snapshot: RemoteGroupSnapshot, currentUser
       warnings.push({ path: file.path, reason: error instanceof Error ? error.message : 'Invalid cached expense file.' });
     }
   }
-  return rebuildSnapshot({ ...snapshot, group: parsedGroup.group, groupFile, warnings }, expenses, groupFile, currentUser, today, snapshot.syncedAt);
+  return rebuildSnapshot({ ...snapshot, group: parsedGroup.group, groupFile, settlementLedger: { kind: 'unverified' }, payments: snapshot.payments ?? [], warnings }, expenses, groupFile, currentUser, today, snapshot.syncedAt);
 }
 
 export function reconcileConfirmedExpenseMutations(remote: RemoteGroupSnapshot, mutations: Map<string, ConfirmedExpenseMutation>, currentUser: string, today: CalendarDate) {

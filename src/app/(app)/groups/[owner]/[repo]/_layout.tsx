@@ -19,5 +19,6 @@ function SelectedGroupNavigator() {
     <Stack.Screen name="expenses/[id]/index" options={{ title: 'Expense details' }} />
     <Stack.Screen name="expenses/[id]/edit" options={{ title: 'Edit expense' }} />
     <Stack.Screen name="spending-plan/edit" options={{ title: 'Spending plan' }} />
+    <Stack.Screen name="settlements/new" options={{ title: 'Record payment' }} />
   </Stack>;
 }

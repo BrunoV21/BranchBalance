@@ -48,6 +48,7 @@ const snapshotSchema = z.object({
   groupFile: groupFileSchema.nullable().optional(),
   members: z.array(memberSchema), pendingMembers: z.array(pendingMemberSchema).nullable(), expenses: z.array(expenseFileSchema),
   balances: z.unknown(), settlements: z.array(z.unknown()), spending: z.unknown().nullable().optional(),
+  settlementLedger: z.unknown().optional(), payments: z.array(z.unknown()).optional(), reservations: z.array(z.unknown()).optional(),
   warnings: z.array(z.object({ path: z.string(), reason: z.string() })), syncedAt: z.string(),
 }).passthrough().transform((value) => ({ ...value, groupFile: value.groupFile ?? null, spending: null }));
 const pendingSchema = z.object({ repository: z.object({ id: z.number() }).passthrough(), group: z.object({ schema_version: z.literal(1) }).passthrough() }).passthrough();
@@ -86,7 +87,17 @@ export class SnapshotStoreImpl implements SnapshotStore {
   async readGroups(accountId: number) { return this.readJson(groupsKey(accountId), groupsSchema) as Promise<DiscoveredGroup[] | null>; }
   writeGroups(accountId: number, value: DiscoveredGroup[]) { return this.writeJson(groupsKey(accountId), value); }
   async readGroup(accountId: number, key: GroupKey) { return this.readJson(groupStorageKey(accountId, key), snapshotSchema) as Promise<RemoteGroupSnapshot | null>; }
-  writeGroup(accountId: number, key: GroupKey, value: RemoteGroupSnapshot) { return this.writeJson(groupStorageKey(accountId, key), value); }
+  writeGroup(accountId: number, key: GroupKey, value: RemoteGroupSnapshot) {
+    const hasSettlementData = value.settlementLedger !== undefined || value.payments !== undefined || value.reservations !== undefined;
+    if (!hasSettlementData) return this.writeJson(groupStorageKey(accountId, key), value);
+    const payments = (value.payments ?? []).map(({ note, ...payment }) => ({ ...payment, hasNote: Boolean(note) }));
+    return this.writeJson(groupStorageKey(accountId, key), {
+      ...value,
+      settlementLedger: { kind: 'unverified' },
+      payments,
+      reservations: value.reservations ?? [],
+    });
+  }
   removeGroup(accountId: number, key: GroupKey) { return this.storage.remove(groupStorageKey(accountId, key)); }
   async readPendingGroup(accountId: number) { return this.readJson(pendingKey(accountId), pendingSchema) as Promise<PendingGroupCreation | null>; }
   writePendingGroup(accountId: number, value: PendingGroupCreation | null) { return value ? this.writeJson(pendingKey(accountId), value) : this.storage.remove(pendingKey(accountId)); }
