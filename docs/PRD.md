@@ -156,6 +156,7 @@ An empty `expenses/` directory is not required. GitHub creates the path when the
 - The app reads pending invitations from `GET /repos/{owner}/{repo}/invitations` and accepted members from `GET /repos/{owner}/{repo}/collaborators`.
 - The UI distinguishes **Pending** from **Member**.
 - The invitee accepts through GitHub's notification, email, or website.
+- After GitHub confirms that an owner sent an invitation, the Members screen shows a live confirmation naming the repository and directs the owner to ask the invitee to visit `github.com`, accept the collaboration invitation, and then refresh **Your groups** in BranchBalance. This fallback remains visible even though in-app invitee-side discovery may work for some accounts.
 - The next automatic or manual refresh reflects the accepted membership.
 
 The form rejects the owner's username, an accepted member, and an already-pending username. GitHub errors such as unknown users, permission restrictions, and invitation rate limits are shown in plain language.

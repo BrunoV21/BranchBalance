@@ -472,7 +472,7 @@ If the root recursive tree is truncated, locate the `expenses` subtree from a no
 
 Accepted membership includes the personal repository owner and collaborators whose permissions include write/push, maintain, or admin. Pending invitations never enter expense forms or balances. A non-owner may receive 403 for pending invitations; represent pending data as unavailable, not as an empty authoritative list.
 
-Before sending an invitation, trim and normalize the entered login and reject the repository owner, an accepted member, or a login already present in pending invitations. Revalidate against a refreshed member snapshot before a retry. Map unknown-user, permission, and invitation rate-limit failures to plain-language typed errors.
+Before sending an invitation, trim and normalize the entered login and reject the repository owner, an accepted member, or a login already present in pending invitations. Revalidate against a refreshed member snapshot before a retry. Map unknown-user, permission, and invitation rate-limit failures to plain-language typed errors. After GitHub confirms the write, the Members screen owns an ephemeral polite live-region notice that names the invited login and repository, directs the invitee to accept at `github.com`, and tells them to refresh **Your groups** afterward. Do not show this success notice for a rejected or ambiguous invitation write.
 
 ### 9.5 Profile enrichment
 
