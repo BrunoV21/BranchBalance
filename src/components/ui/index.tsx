@@ -1,13 +1,13 @@
-import type { PropsWithChildren, ReactNode } from 'react';
+import type { PropsWithChildren, ReactNode, Ref } from 'react';
 import { ActivityIndicator, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, type TextInputProps, type TextStyle, View, type ViewStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/providers/theme-provider';
 
-export function Screen({ children, scroll = true, contentStyle }: PropsWithChildren<{ scroll?: boolean; contentStyle?: ViewStyle }>) {
+export function Screen({ children, scroll = true, contentStyle, scrollViewRef }: PropsWithChildren<{ scroll?: boolean; contentStyle?: ViewStyle; scrollViewRef?: Ref<ScrollView> }>) {
   const { colors } = useTheme();
   const content = scroll
-    ? <ScrollView contentContainerStyle={[styles.content, contentStyle]} keyboardShouldPersistTaps="handled">{children}</ScrollView>
+    ? <ScrollView ref={scrollViewRef} contentContainerStyle={[styles.content, contentStyle]} keyboardShouldPersistTaps="handled">{children}</ScrollView>
     : <View style={[styles.flex, contentStyle]}>{children}</View>;
   return <SafeAreaView style={[styles.flex, { backgroundColor: colors.background }]}><KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>{content}</KeyboardAvoidingView></SafeAreaView>;
 }

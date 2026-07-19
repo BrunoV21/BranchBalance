@@ -7,10 +7,12 @@ import { formatPercentage } from '@/domain/spending';
 import type { CurrencyCode, SpendingSummary } from '@/domain/types';
 import { useTheme } from '@/providers/theme-provider';
 
-export function ProgressBar({ percentage, label, tone = 'accent' }: { percentage: number; label: string; tone?: 'accent' | 'negative' }) {
+import { CompactPaceSummary } from './analytics-components';
+
+export function ProgressBar({ percentage, label, tone = 'accent' }: { percentage: number; label: string; tone?: 'accent' | 'positive' | 'negative' }) {
   const { colors } = useTheme();
   const width = `${Math.max(0, Math.min(percentage, 100))}%` as `${number}%`;
-  return <View accessibilityRole="progressbar" accessibilityLabel={label} accessibilityValue={{ min: 0, max: 100, now: Math.max(0, Math.min(Math.round(percentage), 100)), text: label }} style={[styles.track, { backgroundColor: colors.border }]}><View style={[styles.fill, { width, backgroundColor: tone === 'negative' ? colors.negative : colors.accent }]} /></View>;
+  return <View accessibilityRole="progressbar" accessibilityLabel={label} accessibilityValue={{ min: 0, max: 100, now: Math.max(0, Math.min(Math.round(percentage), 100)), text: label }} style={[styles.track, { backgroundColor: colors.border }]}><View style={[styles.fill, { width, backgroundColor: tone === 'negative' ? colors.negative : tone === 'positive' ? colors.positive : colors.accent }]} /></View>;
 }
 
 export function BudgetSummaryCard({ summary, currency, compact = false }: { summary: SpendingSummary; currency: CurrencyCode; compact?: boolean }) {
@@ -31,6 +33,7 @@ export function BudgetSummaryCard({ summary, currency, compact = false }: { summ
     <View style={styles.between}><Body muted>{formatPercentage(budget.percentageUsed)} used</Body><Body style={{ color: budget.status === 'over' ? colors.negative : colors.text }}>{remainingLabel}</Body></View>
     {trip ? <Body muted>{trip.phase === 'during' ? `Day ${trip.currentDay} of ${trip.totalDays}` : trip.phase === 'before' ? `${trip.totalDays}-day period has not started` : `${trip.totalDays}-day period completed`}</Body> : null}
     {dailyLabel ? <Body>{dailyLabel}</Body> : null}
+    {compact ? <CompactPaceSummary analytics={summary.analytics} currency={currency} /> : null}
   </Card>;
 }
 
@@ -48,6 +51,6 @@ const styles = StyleSheet.create({
   track: { height: 9, borderRadius: 999, overflow: 'hidden' }, fill: { height: '100%', borderRadius: 999 },
   compactCard: { gap: 9 }, between: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   budgetAmount: { fontSize: 24, fontWeight: '800', marginTop: 4 }, budgetOf: { fontSize: 13, fontWeight: '600' },
-  chip: { minHeight: 42, borderRadius: 999, borderWidth: 1, paddingHorizontal: 13, flexDirection: 'row', gap: 7, alignItems: 'center', justifyContent: 'center' },
+  chip: { minHeight: 44, borderRadius: 999, borderWidth: 1, paddingHorizontal: 13, flexDirection: 'row', gap: 7, alignItems: 'center', justifyContent: 'center' },
   metadataItem: { flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: '100%' }, metadataText: { fontSize: 14, lineHeight: 20, flexShrink: 1 },
 });

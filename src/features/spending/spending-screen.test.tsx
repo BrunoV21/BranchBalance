@@ -1,5 +1,6 @@
-import { fireEvent, render } from '@testing-library/react-native';
+import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import { useNavigation, useRouter } from 'expo-router';
+import { AccessibilityInfo } from 'react-native';
 
 import { calculateBalances } from '@/domain/balances';
 import { deriveSpendingSummary } from '@/domain/spending';
@@ -42,9 +43,17 @@ describe('Spending screen', () => {
     jest.mocked(useGroup).mockReturnValue({ state: { data: snapshot, status: 'ready', isRefreshing: false, lastSuccessfulAt: snapshot.syncedAt, error: null } } as never);
   });
 
+  afterEach(() => jest.restoreAllMocks());
+
   it('renders accessible full-snapshot budget, category, payment, and legacy summaries', async () => {
     const view = await render(<ThemeProvider><SpendingScreen /></ThemeProvider>);
-    expect(view.getByText('€15.00')).toBeTruthy();
+    expect(view.getAllByText('€15.00').length).toBeGreaterThan(0);
+    expect(view.getByText('Budget pace')).toBeTruthy();
+    expect(view.getByText('Day by day')).toBeTruthy();
+    expect(view.getByText('Spending pulse')).toBeTruthy();
+    expect(view.getByText('Category mix')).toBeTruthy();
+    expect(view.getByText('Shared vs Just me')).toBeTruthy();
+    expect(view.getByLabelText(/Cumulative tracked spending is €15.00/i)).toBeTruthy();
     expect(view.getAllByText('Uncategorized').length).toBeGreaterThan(0);
     expect(view.getAllByText(/Unspecified/).length).toBeGreaterThan(0);
     expect(view.getByLabelText(/75% of the total budget used/i)).toBeTruthy();
@@ -53,6 +62,61 @@ describe('Spending screen', () => {
     expect(view.getAllByLabelText('Paid by @owner').length).toBeGreaterThan(0);
     expect(view.getAllByTestId('lucide-icon').length).toBeGreaterThan(20);
     expect(view.getByText('€2.00 over category limit')).toBeTruthy();
+  });
+
+  it('drills from daily, category, and scope analytics into the expense explorer', async () => {
+    const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation(() => undefined);
+    const view = await render(<ThemeProvider><SpendingScreen /></ThemeProvider>);
+
+    await fireEvent.press(view.getByRole('button', { name: /Filter expenses to .*Jul 15.*€2.00 tracked/i }));
+    await waitFor(() => expect(view.getByText('1 expense shown')).toBeTruthy());
+    expect(announce).toHaveBeenCalledWith(expect.stringMatching(/Filtered to .*Jul 15.*1 expense shown/i));
+    expect(view.getByText('Legacy toll')).toBeTruthy();
+    expect(view.queryByText('Dinner')).toBeNull();
+
+    await fireEvent.press(view.getByRole('button', { name: 'Clear filters' }));
+    await fireEvent.press(view.getByRole('button', { name: /Food & drinks, €10.00.*Filter expenses to Food & drinks/i }));
+    await waitFor(() => expect(view.getByText('1 expense shown')).toBeTruthy());
+    expect(view.getByText('Dinner')).toBeTruthy();
+
+    await fireEvent.press(view.getByRole('button', { name: 'Clear filters' }));
+    await fireEvent.press(view.getByRole('button', { name: /Just me.*€3.00/i }));
+    await waitFor(() => expect(view.getByText('1 expense shown')).toBeTruthy());
+    expect(view.getByText('Taxi')).toBeTruthy();
+  });
+
+  it('offers an exact-date control and clears that date with every other filter', async () => {
+    const view = await render(<ThemeProvider><SpendingScreen /></ThemeProvider>);
+
+    await fireEvent.press(view.getByRole('radio', { name: 'Choose date' }));
+    expect(view.getByText('Selected date: 2026-07-17')).toBeTruthy();
+    await fireEvent.press(view.getByRole('button', { name: 'Use date' }));
+    expect(view.getByRole('radio', { name: /Selected date .*Jul 17/i })).toBeTruthy();
+    expect(view.getByText('0 expenses shown')).toBeTruthy();
+    expect(view.getByText('No matching expenses')).toBeTruthy();
+
+    await fireEvent.press(view.getAllByRole('button', { name: 'Clear filters' })[0]!);
+    expect(view.getByRole('radio', { name: 'All dates' }).props.accessibilityState).toEqual({ selected: true });
+    expect(view.getByText('3 expenses shown')).toBeTruthy();
+  });
+
+  it('labels future-dated tracked spending without adding it to the current cumulative point', async () => {
+    const futureExpenses = expenses.map((expense) => expense.description === 'Taxi' ? { ...expense, expense_date: '2026-07-18' } : expense);
+    const futureSnapshot: RemoteGroupSnapshot = {
+      ...snapshot,
+      expenses: snapshot.expenses.map((file) => {
+        const next = futureExpenses.find((expense) => expense.id === file.expense.id)!;
+        return { ...file, expense: next, sourceDocument: { ...next } };
+      }),
+      spending: deriveSpendingSummary(futureExpenses, plan, 'owner', '2026-07-17'),
+    };
+    jest.mocked(useGroup).mockReturnValue({ state: { data: futureSnapshot, status: 'ready', isRefreshing: false, lastSuccessfulAt: futureSnapshot.syncedAt, error: null } } as never);
+
+    const view = await render(<ThemeProvider><SpendingScreen /></ThemeProvider>);
+
+    expect(view.getByText(/€3.00 is recorded on future expense dates and is included in the total budget/i)).toBeTruthy();
+    expect(view.getByRole('button', { name: /€3.00 tracked, future date/i })).toBeTruthy();
+    expect(futureSnapshot.spending?.analytics.pace?.actualToDateMinor).toBe(1_200);
   });
 
   it('combines category and Just me filters without changing aggregate cards', async () => {

@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react-native';
+import { fireEvent, render } from '@testing-library/react-native';
 import { useRouter } from 'expo-router';
 
 import { calculateBalances } from '@/domain/balances';
@@ -43,5 +43,25 @@ describe('Group overview expense metadata', () => {
     expect(view.queryByLabelText('Updated by @owner')).toBeNull();
     expect(view.getAllByTestId('lucide-icon').length).toBe(3);
     expect(view.queryByText(/Activities · Cash · paid by/)).toBeNull();
+  });
+
+  it('summarizes active pace and opens the Spending analytics screen', async () => {
+    const push = jest.fn();
+    const spendingPlan = { budget_minor: 10_000, starts_on: '2026-07-17', ends_on: '2026-07-20', updated_by: 'owner', updated_at: '2026-07-17T12:00:00.000Z' } as const;
+    const plannedGroup = { ...group, spending_plan: spendingPlan };
+    const plannedSnapshot: RemoteGroupSnapshot = {
+      ...snapshot,
+      group: plannedGroup,
+      groupFile: { ...snapshot.groupFile!, group: plannedGroup, sourceDocument: { ...plannedGroup } },
+      spending: deriveSpendingSummary([expense], spendingPlan, 'owner', '2026-07-18'),
+    };
+    jest.mocked(useRouter).mockReturnValue({ push } as never);
+    jest.mocked(useGroup).mockReturnValue({ state: { data: plannedSnapshot, status: 'ready', isRefreshing: false, lastSuccessfulAt: plannedSnapshot.syncedAt, error: null } } as never);
+
+    const view = await render(<ThemeProvider><GroupOverviewScreen /></ThemeProvider>);
+
+    expect(view.getByText('€20.00 above even pace')).toBeTruthy();
+    await fireEvent.press(view.getByRole('button', { name: /Open spending analytics.*€20.00 above even budget pace/i }));
+    expect(push).toHaveBeenCalledWith({ pathname: '/groups/[owner]/[repo]/spending', params: { owner: 'owner', repo: 'branch-balance-trip' } });
   });
 });

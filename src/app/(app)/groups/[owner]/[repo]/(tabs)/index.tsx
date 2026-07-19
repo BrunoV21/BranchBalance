@@ -21,15 +21,16 @@ export default function GroupOverviewScreen() {
   const refresh = useGroupRefresh();
   const snapshot = state.data;
   const open = (file: ExpenseFile) => router.push({ pathname: '/groups/[owner]/[repo]/expenses/[id]', params: { owner, repo, id: file.expense.id } } as never);
+  const viewSpending = () => router.push({ pathname: '/groups/[owner]/[repo]/spending', params: { owner, repo } } as never);
   return <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]}>
     <FlatList data={snapshot?.expenses ?? []} keyExtractor={(item) => item.expense.id} contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={state.isRefreshing} onRefresh={refresh} tintColor={colors.accent} />}
       ListHeaderComponent={<View style={styles.header}><Title eyebrow={snapshot?.group.name ?? 'BranchBalance'}>Group overview</Title>
         {snapshot ? <Card><Body muted>Total group spending</Body><Text style={[styles.heroMoney, { color: colors.text }]}>{formatMoney(snapshot.spending?.totalSpentMinor ?? snapshot.balances.totalSpentMinor, snapshot.group.currency)}</Text><Body muted>{snapshot.members.length} accepted members · synced {new Date(snapshot.syncedAt).toLocaleString()}</Body></Card> : null}
-        {snapshot?.spending?.budget ? <BudgetSummaryCard compact summary={snapshot.spending} currency={snapshot.group.currency} /> : null}
+        {snapshot?.spending?.budget ? <Pressable accessibilityRole="button" accessibilityLabel={`Open spending analytics${snapshot.spending.analytics.pace ? `. ${formatMoney(Math.abs(snapshot.spending.analytics.pace.deltaMinor), snapshot.group.currency)} ${snapshot.spending.analytics.pace.direction} even budget pace` : ''}.`} onPress={viewSpending}><BudgetSummaryCard compact summary={snapshot.spending} currency={snapshot.group.currency} /></Pressable> : null}
         {state.error ? <Banner tone="warning" action={<Button variant="ghost" onPress={refresh}>Retry</Button>}>{state.error}</Banner> : null}
         {snapshot?.warnings.map((warning) => <Banner key={`${warning.path}:${warning.reason}`}>Skipped {warning.path}: {warning.reason}</Banner>)}
-        <View style={styles.actions}><View style={{ flex: 1 }}><Button disabled={!snapshot} onPress={() => router.push({ pathname: '/groups/[owner]/[repo]/expenses/new', params: { owner, repo } } as never)}>Add expense</Button></View><View style={{ flex: 1 }}><Button variant="secondary" disabled={!snapshot} onPress={() => router.push({ pathname: '/groups/[owner]/[repo]/spending', params: { owner, repo } } as never)}>View spending</Button></View></View>
+        <View style={styles.actions}><View style={{ flex: 1 }}><Button disabled={!snapshot} onPress={() => router.push({ pathname: '/groups/[owner]/[repo]/expenses/new', params: { owner, repo } } as never)}>Add expense</Button></View><View style={{ flex: 1 }}><Button variant="secondary" disabled={!snapshot} onPress={viewSpending}>View analytics</Button></View></View>
         {snapshot && snapshot.members.length < 2 ? <Body muted>Invite another member to use full-to-one splits.</Body> : null}
       </View>}
       renderItem={({ item }) => <Pressable accessibilityRole="button" accessibilityLabel={`Open ${item.expense.description}`} onPress={() => open(item)}><Card>

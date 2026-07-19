@@ -1,6 +1,6 @@
 # BranchBalance — Phase 1 Product Requirements Document
 
-**Status:** Phase 1 and CR-001 through CR-003 implemented; CR-004 specified and ready for implementation; CR-003 physical-device acceptance blocked by a known GitHub App token limitation
+**Status:** Phase 1 and CR-001 through CR-005 implemented; CR-003 physical-device acceptance blocked by a known GitHub App token limitation and CR-004/CR-005 physical-device acceptance pending
 
 **Last updated:** 2026-07-19
 
@@ -8,7 +8,7 @@
 
 **Repository prefix:** `branch-balance`
 
-**Active change requests:** CR-004 — On-device activity inbox
+**Active change requests:** None; CR-004 and CR-005 await physical-device acceptance
 
 ## 1. Product summary
 
@@ -625,7 +625,7 @@ The full Spending tab shows:
 - Filters for category, payment method, payer, and shared versus Just me expenses
 - Explicit empty states when no expenses or no budget exist
 
-Charts are optional presentation enhancements. Every value represented graphically must also be available as text and exposed accessibly. The first implementation must prioritize understandable totals and progress over complex visualization.
+For the initial CR-001 implementation, charts are optional presentation enhancements and understandable totals and progress take priority over complex visualization. CR-005 later makes a focused Pace, Mix, and Fairness analytics layer part of the required experience. Under both changes, every value represented graphically must also be available as text and exposed accessibly.
 
 ### 16.10 User stories
 
@@ -1341,7 +1341,7 @@ These require separate product, permission, and synchronization requirements bef
 
 ## 19. Change request CR-004 — On-device activity inbox
 
-**Status:** Specified; ready for implementation
+**Status:** Implemented; physical-device acceptance pending
 
 **Requested:** 2026-07-19
 
@@ -1589,7 +1589,260 @@ The manual physical-device test must use two Android app sessions and two accept
 
 These require separate product, privacy, permission, delivery, and architecture decisions before implementation.
 
-## 20. Technical references
+## 20. Change request CR-005 — Pace, mix, and fairness analytics
+
+**Status:** Implemented; physical-device acceptance pending
+
+**Requested:** 2026-07-19
+
+**Target:** Next product increment; release name to be decided
+
+### 20.1 Context and motivation
+
+CR-001 gives the group accurate spending totals, budget progress, category totals, payment-method totals, and remaining-per-day guidance. Those values answer what the current snapshot contains, but members still need to interpret several cards and lists to understand:
+
+- Whether spending is moving faster or slower than an even use of the trip budget
+- Which days and categories are driving the total
+- How much tracked spending is shared versus payer-only **Just me** spending
+- Which members have funded more or less than their attributable expense shares
+
+CR-005 turns the same authoritative group snapshot into a small analytics layer organized around **Pace**, **Mix**, and **Fairness**. It emphasizes useful explanations over a collection of unrelated charts and connects every visual to the existing expense explorer or balances detail.
+
+This change is presentation and local derivation only. It adds no application backend, analytics service, telemetry, background synchronization, GitHub API endpoint, repository file, schema field, or mutable analytical state. Two devices reading the same valid group snapshot on the same local calendar date must derive the same results.
+
+### 20.2 Product outcome
+
+The Spending tab becomes the primary analytical surface:
+
+1. **Pace** compares cumulative tracked spending with a clearly labelled even-budget reference when a budget and date range make that comparison meaningful.
+2. **Mix** ranks category spending and distinguishes shared from Just me spending.
+3. **Fairness** compares how much each member paid for expenses with how much of those expenses is attributable to them.
+
+Overview shows only a compact pace preview and one conclusion. Balances shows the complete per-member Paid-versus-Share comparison beside settlement-adjusted net balances. Deterministic text callouts summarize the most useful facts so members do not need to interpret a chart to understand the result.
+
+### 20.3 Confirmed decisions
+
+| Area | Decision |
+|---|---|
+| Source of truth | Derive analytics only from the validated current group snapshot and device-local calendar date |
+| Storage | Do not persist chart series, insight text, selections, projections, or analytical caches in the repository |
+| Calculation | Use integer minor units for aggregation and deterministic tie-breaking before formatting display currency |
+| Primary chart | Cumulative tracked spending against an explicitly labelled **Even budget pace** reference |
+| Daily view | Show tracked spending by `expense_date`; days with no expenses appear as zero during the configured period |
+| Category view | Use ranked horizontal comparisons; category-limit status remains visible independently of category share |
+| Personal scope | Show shared and Just me amounts as a complete two-part breakdown of total tracked spending |
+| Fairness terminology | `paid - share` is an **expense funding gap**, not the member's settlement-adjusted net balance |
+| Insight copy | Rule-based, local, and reproducible; no AI generation, external benchmark, or behavioral judgement |
+| Interaction | Selecting a day, category, or scope applies the corresponding existing expense-explorer filter where supported |
+| Accessibility | Every graphical value and conclusion is also available as text; meaning never depends on colour, shape, or gesture alone |
+| Sparse data | Prefer honest totals or an explanatory empty state over drawing a misleading trend from insufficient dates |
+| Currency | Analytics remain inside one group currency; different group currencies are never combined |
+| Forecasting | CR-005 does not present an estimated final total or unrecorded future spending |
+
+### 20.4 Derived analytics
+
+All calculations include active, valid expenses and follow the inclusion rules from CR-001. Settlement payment records never count as spending.
+
+#### 20.4.1 Daily and cumulative spending
+
+Group expenses are bucketed by their calendar `expense_date`:
+
+```text
+daily_spent[date] = sum(expense.amount_minor where expense.expense_date = date)
+cumulative_spent[date] = sum(daily_spent[d] where d <= date)
+```
+
+When valid trip dates exist, the daily chart uses every inclusive date from `starts_on` through `ends_on`. Expenses dated before `starts_on` appear as one **Before trip** amount in the pace context because CR-001 requires them to count against the trip budget. Expenses dated after `ends_on` remain in all-time spending totals and appear as one **After trip** amount when final trip performance is shown; they are not silently assigned to the final trip day.
+
+During an active trip, the cumulative actual value at `today` includes every valid expense dated on or before `today`, including pre-trip spending. Future-dated expenses remain in total tracked spending, but they do not enter a historical cumulative point before their expense date. The UI must disclose when future-dated tracked expenses exist.
+
+#### 20.4.2 Even budget pace
+
+An even-budget reference is available only when both a positive total budget and valid trip dates exist. For a date in the inclusive trip period:
+
+```text
+total_trip_days = inclusive_days(starts_on, ends_on)
+elapsed_trip_days = inclusive_days(starts_on, min(today, ends_on))
+even_pace_to_date = floor(budget_minor * elapsed_trip_days / total_trip_days)
+pace_delta = cumulative_spent[today] - even_pace_to_date
+```
+
+- A negative `pace_delta` is labelled **below even pace** by its absolute amount.
+- A positive `pace_delta` is labelled **above even pace**.
+- Zero is labelled **on even pace**.
+- Before the trip, the UI shows pre-trip committed spending and the existing planned-per-day guidance but does not claim that the group is above or below pace.
+- After the trip, the UI shows final under-budget or over-budget performance rather than a current pace claim.
+
+The reference assumes the budget is used evenly. It is not a recommendation, prediction, saving, or claim that front-loaded purchases such as accommodation are problematic. Copy and accessible descriptions must call it **Even budget pace**, never simply **Expected** or **On track**.
+
+#### 20.4.3 Category mix
+
+Categories are ordered by `category_spent` descending. Ties use the fixed CR-001 taxonomy order, with Uncategorized last. Each row exposes:
+
+```text
+category_share = category_spent / total_spent
+category_remaining = configured_category_limit - category_spent
+```
+
+The ranked amount/share comparison and category-limit progress are distinct concepts. The UI must not use one bar scale while labelling it as the other. A selected category applies the existing category filter and moves focus to the filtered expense results; an explicit control provides the same action without requiring chart interaction.
+
+#### 20.4.4 Shared versus Just me
+
+```text
+just_me_spent = sum(amount_minor for payer-only CR-001 Just me expenses)
+shared_spent = total_spent - just_me_spent
+```
+
+The two values must add exactly to `total_spent`. The visual and text show both amount and percentage when `total_spent` is greater than zero. **Personal** copy must not imply privacy: Just me expenses remain visible to every group member and count against the group budget.
+
+#### 20.4.5 Paid, share, and expense funding gap
+
+For every accepted member represented in the current snapshot:
+
+```text
+member_paid = sum(expense.amount_minor where expense.paid_by = member)
+member_share = sum(expense.shares_minor[member])
+expense_funding_gap = member_paid - member_share
+```
+
+The comparison answers who fronted expense money relative to consumption. It excludes settlement payments. The Balances screen keeps settlement-adjusted net balance visually and verbally separate:
+
+```text
+net_balance = expense_funding_gap + confirmed_settlement_adjustments
+```
+
+Pending settlement payments may reserve suggestions under CR-002 but do not alter either the expense funding gap or confirmed net balance.
+
+### 20.5 Deterministic insight callouts
+
+Spending may show at most three analytical conclusions at once, selected in this priority order when applicable:
+
+1. Current even-pace delta during a configured active trip
+2. Total-budget overage or the largest category-limit overage
+3. Largest category by amount and percentage
+4. Current user's positive or negative expense funding gap
+5. Highest-spending trip day when at least two trip dates contain expenses
+6. Shared versus Just me split when both values are non-zero
+
+The pace conclusion counts toward this limit and appears inside the pace card rather than being repeated in the callout list. The remaining eligible conclusions appear under **Spending pulse**. Ties use the deterministic ordering defined for the underlying data. Copy reports facts such as **Food & drinks is €16.10 over its limit** or **You fronted €84.20 more than your expense share**. It must not use moral or diagnostic language such as excessive, irresponsible, good, bad, normal, unusual, or compared with similar groups.
+
+### 20.6 Spending experience
+
+The Spending tab presents this hierarchy:
+
+1. Existing budget, remaining amount, period, and daily guidance
+2. Existing Group spent, You paid, and Your share totals
+3. **Budget pace** card with cumulative actual and even-budget reference when eligible
+4. **Day by day** tracked-spending bars, including zero-spend dates inside a configured period
+5. Remaining **Spending pulse** callouts, keeping the total number of analytical conclusions at three or fewer
+6. **Category mix**, retaining visible category-limit states
+7. **Shared vs Just me** breakdown
+8. Existing payment-method breakdown
+9. Existing combinable expense explorer
+
+The pace card includes textual actual, even-pace amount, difference, period position, and legend. Selecting a daily point or bar applies a date constraint to the expense explorer. CR-005 extends the explorer with an optional single-date filter when a day is selected; clearing filters removes that selection along with existing filters.
+
+When there are no expenses, the analytics area uses the existing empty-state invitation to add an expense. With only one distinct expense date, the UI shows the recorded day's amount without implying a trend. Without a budget or complete dates, the cumulative/daily actual view may remain available, but the even-budget reference and pace conclusion are omitted with no error.
+
+### 20.7 Overview and Balances experience
+
+Overview keeps the selected group scannable. Its compact budget card may show a non-interactive cumulative sparkline only when at least two dated points exist, followed by one accessible textual conclusion. Tapping anywhere in that card opens Spending; Overview does not duplicate the full legend, filters, category chart, or insight list.
+
+Balances adds an **Expense funding** card before the member breakdown. For each member it shows Paid and Share on a common scale, both values as text, and the signed expense funding gap. The card explains that it covers expenses only and that confirmed settlement payments are reflected in the net balances below. The existing **Who owes whom**, settlement history, and member net-balance surfaces remain authoritative for settling up.
+
+### 20.8 Interaction and accessibility
+
+- Charts are supplementary. Screen-reader users receive the chart title, conclusion, period, legend meaning, and an ordered textual data summary.
+- The visual order and accessible order match. Decorative grid lines, fills, and points are hidden from assistive technology.
+- Actual, reference, Paid, and Share series use labels plus differing line or fill treatments; colour is never their only distinction.
+- Interactive data targets meet the minimum touch-target requirement. A chart is not the only way to set or clear a filter.
+- Selecting chart data updates the visible filter state, result count, and accessible live announcement.
+- Currency formatting, negative values, percentages, calendar dates, and absolute accessible dates follow the existing locale and currency helpers.
+- Large text may replace the graphical plot with the same textual summary when preserving both would make the data unreadable.
+- Reduced-motion preference disables animated line drawing, bar growth, or metric counting; no animation is required for comprehension.
+
+### 20.9 Synchronization, architecture, and privacy impact
+
+CR-005 runs only after normal snapshot validation and aggregation. It performs no independent refresh and never derives financial analytics from CR-004's bounded activity inbox or from Git commit timestamps. Refresh, foreground, and mutation flows replace the base snapshot first and then recompute all visible analytics as one state update so Overview, Spending, and Balances cannot temporarily disagree.
+
+Pure domain derivation receives the validated expenses, spending plan, members, confirmed settlement adjustments where net balance is required, current user, and injected device-local `today`. Rendering code must not reimplement formulas. Implementations may use the existing native SVG dependency for lightweight charts; adding a general charting library requires separate justification for bundle size, accessibility, and maintenance.
+
+No raw financial values, derived insight values, chart interactions, or viewing behavior are sent to telemetry or external analytics. Existing local snapshot retention and sign-out behavior are unchanged.
+
+### 20.10 User stories
+
+#### US-CR005-01 — Understand budget pace
+
+As a group member, I want to compare cumulative spending with an even use of our trip budget so that I can understand our current pace without treating it as a forecast.
+
+#### US-CR005-02 — Find spending drivers
+
+As a group member, I want ranked category and daily views so that I can identify which expenses drive the total and inspect them quickly.
+
+#### US-CR005-03 — Separate shared and personal spending
+
+As a group member, I want to see shared and Just me spending separately so that I understand how the group budget is composed.
+
+#### US-CR005-04 — Understand group funding
+
+As a group member, I want to compare each member's paid total with their expense share so that I can see who fronted costs without confusing that comparison with settled balances.
+
+#### US-CR005-05 — Access the same meaning without a chart
+
+As a screen-reader or large-text user, I want every analytical conclusion and value in text so that charts do not exclude me from the spending picture.
+
+### 20.11 Acceptance criteria
+
+- [ ] Analytics are derived from the current validated snapshot without new GitHub requests, persistence fields, backend work, telemetry, or background execution.
+- [ ] Daily buckets use `expense_date`, represent zero-spend dates inside a configured trip period, and keep pre-trip and after-trip spending distinct.
+- [ ] Cumulative actual values reconcile exactly to the eligible included expenses at every plotted date.
+- [ ] Even-budget pace follows section 20.4.2 and appears only with a positive budget and complete valid trip dates.
+- [ ] Pace is explicitly labelled as even budget use and is never presented as a forecast, recommendation, or expected spending.
+- [ ] Future-dated expenses do not appear in an earlier cumulative point and are disclosed when present.
+- [ ] Category ranking, percentage, and limit values reconcile with CR-001 totals and use separate clearly labelled scales.
+- [ ] Shared plus Just me spending equals total tracked spending exactly.
+- [ ] Paid, Share, and expense funding gap reconcile for every member and exclude settlement payments.
+- [ ] Balances distinguishes the expense funding gap from the settlement-adjusted net balance.
+- [ ] Spending displays no more than three deterministic analytical conclusions, including the pace-card conclusion, using the documented priority and tie-breaking rules.
+- [ ] Selecting an eligible day, category, or scope applies a visible explorer filter, updates results, and has a non-chart alternative.
+- [ ] Overview exposes only the compact pace preview and conclusion and opens the complete Spending view.
+- [ ] Empty and sparse datasets never draw or describe a misleading trend.
+- [ ] Every chart has an equivalent textual summary and does not rely on colour, shape, gesture, or animation alone.
+- [ ] Different group currencies are never aggregated into one analytical value or chart.
+- [ ] Adding, editing, deleting, or refreshing an expense recomputes totals and analytics in one coherent state update.
+- [ ] Two devices with the same snapshot and injected local date derive identical integer series, ordering, gaps, and callouts.
+
+### 20.12 Test requirements
+
+Unit coverage must include:
+
+- Daily aggregation, missing calendar days, cumulative series, and deterministic ordering
+- Pre-trip, in-period, after-trip, and future-dated expense handling
+- Even-budget pace before, during, and after the period, including integer rounding
+- Category ranking ties, percentages, configured limits, Uncategorized, and zero totals
+- Shared/Just me reconciliation
+- Per-member Paid, Share, funding-gap calculations, and separation from confirmed and pending settlements
+- Insight eligibility, priority, tie-breaking, formatting inputs, and the three-callout limit
+- No-budget, no-date, empty, one-date, and malformed-data-safe states
+
+Component and navigation coverage must verify graphical and textual parity, legends, accessible descriptions, large-text behavior, reduced motion, selected filters, result counts, live announcements, clear-filter behavior, Overview-to-Spending navigation, and the expense-only explanation on Balances.
+
+The manual physical-device test must use two Android app sessions reading the same group. Include pre-trip spending, at least three trip dates, one zero-spend day, shared and Just me expenses, one exceeded category limit, four members with different paid/share amounts, a pending settlement, and a confirmed settlement. Verify identical analytics after refresh, correct date/category/scope filtering, TalkBack descriptions, large text, light/dark themes, and recomputation after add, edit, delete, and confirmation actions.
+
+### 20.13 Explicitly deferred from CR-005
+
+- Estimated final trip spend, burn-rate forecasting, anomaly detection, and predictive alerts
+- Planned or unrecorded future expenses
+- External benchmarks or comparisons with other groups or users
+- Historical period comparisons, recurring-budget reports, and year-over-year analytics
+- Cross-group totals unless each currency remains separate and a later change request defines the experience
+- Exportable analytical reports, spreadsheets, images, or share cards
+- User-configurable dashboards, chart types, thresholds, or insight priorities
+- Server-side analytics, telemetry pipelines, background calculations, push alerts, or scheduled summaries
+
+These require separate product and privacy decisions before implementation.
+
+## 21. Technical references
 
 - [Generating a user access token for a GitHub App](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)
 - [Refreshing GitHub App user access tokens](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/refreshing-user-access-tokens)

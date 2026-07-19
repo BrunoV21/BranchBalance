@@ -67,6 +67,10 @@ describe('settlement screens', () => {
     jest.mocked(useRouter).mockReturnValue({ push: jest.fn() } as never);
     jest.mocked(useGroup).mockReturnValue({ state: { data, status: 'ready', isRefreshing: false, lastSuccessfulAt: data.syncedAt, error: null }, confirmSettlementPayment: jest.fn(), deleteSettlementPayment: jest.fn() } as never);
     const view = await render(<ThemeProvider><BalancesScreen /></ThemeProvider>);
+    expect(view.getByText('Expense funding')).toBeTruthy();
+    expect(view.getByText('Who fronted the group?')).toBeTruthy();
+    expect(view.getByLabelText(/You, @owner: paid €10.00, share €5.00, expense funding gap \+€5.00/i)).toBeTruthy();
+    expect(view.getByText(/Confirmed settlement payments affect the net balances below, not this chart/i)).toBeTruthy();
     expect(view.getByText(/Awaiting confirmation €3.00/)).toBeTruthy();
     expect(view.getByText(payment.note!)).toBeTruthy();
     const confirmButton = view.getByRole('button', { name: 'Confirm received' });

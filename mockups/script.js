@@ -66,6 +66,16 @@
     });
   }
 
+  function applyChartFilter(filterName, value, label) {
+    const filter = document.querySelector(`[data-expense-filter="${filterName}"]`);
+    if (!filter) return;
+    filter.value = value;
+    applyExpenseFilters();
+    const explorer = document.querySelector('#expenses');
+    if (explorer) explorer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    showToast(`${label} expenses shown`);
+  }
+
   document.addEventListener('click', (event) => {
     const themeButton = event.target.closest('[data-theme-toggle]');
     if (themeButton) {
@@ -94,6 +104,24 @@
     if (resetFilters) {
       document.querySelectorAll('[data-expense-filter]').forEach((select) => { select.value = 'all'; });
       applyExpenseFilters();
+    }
+
+    const categoryFilter = event.target.closest('[data-chart-filter-category]');
+    if (categoryFilter) {
+      const label = categoryFilter.querySelector('.spending-row-title')?.textContent || 'Category';
+      applyChartFilter('category', categoryFilter.dataset.chartFilterCategory, label);
+    }
+
+    const scopeFilter = event.target.closest('[data-chart-filter-scope]');
+    if (scopeFilter) {
+      const label = scopeFilter.dataset.chartFilterScope === 'just_me' ? 'Just me' : 'Shared';
+      applyChartFilter('scope', scopeFilter.dataset.chartFilterScope, label);
+    }
+
+    const dateFilter = event.target.closest('[data-chart-filter-date]');
+    if (dateFilter) {
+      const label = dateFilter.querySelector('.daily-date')?.textContent || 'Selected date';
+      applyChartFilter('date', dateFilter.dataset.chartFilterDate, label);
     }
 
     const toastTrigger = event.target.closest('[data-toast-message]');
@@ -161,6 +189,13 @@
 
   document.addEventListener('change', (event) => {
     if (event.target.matches('[data-expense-filter]')) applyExpenseFilters();
+  });
+
+  document.addEventListener('keydown', (event) => {
+    const categoryFilter = event.target.closest('[data-chart-filter-category]');
+    if (!categoryFilter || (event.key !== 'Enter' && event.key !== ' ')) return;
+    event.preventDefault();
+    categoryFilter.click();
   });
 
   window.addEventListener('storage', (event) => {

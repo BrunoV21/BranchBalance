@@ -5,8 +5,10 @@ import { ArrowRight, CircleCheck, Clock3, HandCoins, History, ReceiptText, Scale
 
 import { Banner, Body, Button, Card, ConfirmDialog, EmptyState, Screen, Title } from '@/components/ui';
 import { formatMoney } from '@/domain/money';
+import { deriveExpenseFundingAnalytics } from '@/domain/spending';
 import { normalizeLogin, type SettlementPayment } from '@/domain/types';
 import { useGroupRefresh } from '@/features/groups/use-group-refresh';
+import { ExpenseFundingCard } from '@/features/spending/analytics-components';
 import { useGroup } from '@/providers/group-provider';
 import { useSession } from '@/providers/session-provider';
 import { useTheme } from '@/providers/theme-provider';
@@ -45,6 +47,7 @@ export default function BalancesScreen() {
   const pending = payments.filter((payment) => payment.status === 'pending');
   const verified = ledger.kind === 'missing' || ledger.kind === 'ready';
   const currentLogin = session.account?.login ?? '';
+  const fundingAnalytics = deriveExpenseFundingAnalytics(snapshot.balances.members, currentLogin);
   const acceptedCurrentUser = snapshot.members.some((member) => normalizeLogin(member.login) === normalizeLogin(currentLogin));
   const mutable = snapshot.repository.canWrite && acceptedCurrentUser && verified;
   const allSuggestionsReserved = snapshot.settlements.length > 0 && snapshot.settlements.every((settlement) => {
@@ -61,6 +64,9 @@ export default function BalancesScreen() {
     {!snapshot.balances.zeroSum ? <Banner tone="error">Balances do not sum to zero, so settlements are hidden.</Banner> : null}
     {ledger.kind === 'unverified' ? <Banner>Cached payment totals are provisional. Refresh GitHub before viewing notes or changing payments.</Banner> : null}
     {ledger.kind === 'invalid' ? <Banner tone="error">The settlement ledger is invalid. Payment-adjusted suggestions and payment actions are disabled until it is repaired on GitHub.</Banner> : null}
+
+    <SectionHeading icon={<WalletCards color={colors.accent} size={20} />}>Expense funding</SectionHeading>
+    <ExpenseFundingCard analytics={fundingAnalytics} currency={snapshot.group.currency} currentLogin={currentLogin} />
 
     <SectionHeading icon={<UsersRound color={colors.accent} size={20} />}>{ledger.kind === 'invalid' ? 'Expense-only totals (payment adjustment unavailable)' : 'Member totals'}</SectionHeading>
     {snapshot.balances.members.map((member) => <Card key={member.login}>

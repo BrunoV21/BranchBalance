@@ -1,7 +1,7 @@
-# BranchBalance — Phase 1 Architecture and CR-001/CR-002/CR-003/CR-004 Increments
+# BranchBalance — Phase 1 Architecture and CR-001/CR-002/CR-003/CR-004/CR-005 Increments
 
-**Status:** Phase 1 implementation guide; CR-001 through CR-003 implemented; CR-004 specified and ready for implementation; CR-003 physical-device acceptance blocked by a known GitHub App token limitation
-**Applies to:** Phase 1 Android application, CR-001 trip and group spending intelligence, CR-002 settlement payment recording, CR-003 in-app group invitation decisions, and CR-004 on-device activity inbox
+**Status:** Phase 1 implementation guide; CR-001 through CR-005 implemented; CR-003 physical-device acceptance blocked by a known GitHub App token limitation and CR-004/CR-005 physical-device acceptance pending
+**Applies to:** Phase 1 Android application, CR-001 trip and group spending intelligence, CR-002 settlement payment recording, CR-003 in-app group invitation decisions, CR-004 on-device activity inbox, and CR-005 pace, mix, and fairness analytics
 **Companion specification:** [`PRD.md`](PRD.md)
 **Last updated:** 2026-07-19
 
@@ -697,7 +697,7 @@ The selected-group tab layout becomes **Overview**, **Spending**, **Balances**, 
 - **Add/Edit expense** extends the shared Phase 1 form with required category and payment-method controls and a `Just me` split shortcut. Changing payer while that shortcut is selected rewrites the sole participant and share in the draft before validation.
 - **Expense list/detail** display a category and payment-method label. Legacy nulls render as **Uncategorized** and **Unspecified** respectively.
 
-The Spending tab does not fetch on its own. Tab focus requests the same coalesced `GroupProvider.refresh()` used by the other selected-group screens. Charts are optional leaf presentation components; accessible text values are the authoritative UI and must remain available when charts are absent.
+The Spending tab does not fetch on its own. Tab focus requests the same coalesced `GroupProvider.refresh()` used by the other selected-group screens. For the initial CR-001 increment, charts are optional leaf presentation components; CR-005 later makes the focused Pace, Mix, and Fairness analytics components required. Accessible text values remain the authoritative UI and must be available when charts are absent or visually unsuitable.
 
 ### 16.2 Persisted and runtime types
 
@@ -1949,3 +1949,165 @@ Implement CR-004 after the PRD and this architecture are approved, in this order
 7. **Hardening and acceptance:** retention and large-history cases, rate usage, privacy inspection, background network proof, two-device manual flow, and the existing typecheck/lint/test/doctor/docs/APK gates.
 
 Push notifications, background fetch/polling, webhooks, a backend, cross-device read/dismiss synchronization, complete audit history, reminders/digests, custom notification preferences, diff-derived content summaries, and GitHub notification-center parity remain outside CR-004.
+
+## 20. CR-005 architecture delta — Pace, mix, and fairness analytics
+
+**Increment status:** Implemented; physical-device acceptance pending
+
+CR-005 is a derived presentation increment over the existing CR-001 spending snapshot and CR-002 balance result. GitHub remains authoritative, all money remains integer minor units, and the application retains one selected-group refresh lifecycle. CR-005 adds no remote schema field, GitHub request, background task, telemetry event, backend service, database, cache-key migration, or charting dependency.
+
+### 20.1 Ownership and dependency boundaries
+
+Keep the new platform-free logic under `domain/spending/` and the native visual components under `features/spending/`. Overview, Spending, and Balances consume the same committed `RemoteGroupSnapshot` generation:
+
+- `SpendingSummary` owns expense-derived analytics because the snapshot cache already treats spending as non-authoritative and reconstructs it during hydration.
+- The Balances funding chart uses a pure selector over `BalanceResult.members`. It reads only `totalPaidMinor` and `totalShareMinor`; `netMinor` remains the confirmed-settlement-adjusted result shown by the existing member cards.
+- Screen components format values and draw geometry but do not aggregate expense money, rank categories, choose insights, or calculate pace.
+- `GroupProvider` remains the sole selected-repository owner. Do not add an analytics provider, store, reducer, refresh hook, or mutation action.
+
+Use the installed `react-native-svg` package directly. A general-purpose chart package is not justified for the required line, bar, and stacked comparisons. Charts do not animate, which satisfies reduced-motion behavior and avoids animation state becoming part of comprehension.
+
+### 20.2 Runtime analytics contracts
+
+Extend the existing runtime-only summary with structured values rather than formatted sentences:
+
+```ts
+interface SpendingSummary {
+  // Existing CR-001 totals, budget, and trip fields remain unchanged.
+  analytics: SpendingAnalytics;
+}
+
+interface SpendingAnalytics {
+  today: CalendarDate;
+  daily: {
+    buckets: Array<{ date: CalendarDate; amountMinor: number }>;
+    period: null | {
+      startsOn: CalendarDate;
+      endsOn: CalendarDate;
+      totalDays: number;
+    };
+    preTripMinor: number;
+    afterTripMinor: number;
+    futureDatedMinor: number;
+    distinctExpenseDateCount: number;
+  };
+  pace: null | {
+    actualToDateMinor: number;
+    evenPaceMinor: number;
+    deltaMinor: number;
+    direction: 'below' | 'on' | 'above';
+    elapsedDays: number;
+    totalDays: number;
+    events: Array<{ date: CalendarDate; cumulativeMinor: number }>;
+    referenceEvents: Array<{ date: CalendarDate; cumulativeMinor: number }>;
+  };
+  categoryMix: Array<{
+    category: CategoryBucket;
+    spentMinor: number;
+    sharePercentage: number;
+  }>;
+  scopeMix: {
+    sharedMinor: number;
+    justMeMinor: number;
+  };
+  insights: SpendingInsight[]; // maximum three, including pace
+}
+
+interface ExpenseFundingAnalytics {
+  scaleMaxMinor: number;
+  rows: Array<{
+    login: string;
+    paidMinor: number;
+    shareMinor: number;
+    gapMinor: number;
+    currentMember: boolean;
+  }>;
+}
+```
+
+`SpendingInsight` is a closed discriminated union carrying the values needed to format pace delta, total/category overage, largest category, current-user funding gap, highest day, or scope split. Domain logic selects insights; React components own localized money, date, and percentage formatting.
+
+Add an exact-date dimension to the ephemeral filter contract:
+
+```ts
+interface SpendingFilters {
+  date: 'all' | CalendarDate;
+  category: 'all' | CategoryBucket;
+  paymentMethod: 'all' | PaymentMethodBucket;
+  payer: 'all' | string;
+  scope: 'all' | 'shared' | 'just_me';
+}
+```
+
+`deriveExpenseFundingAnalytics(balanceMembers, currentLogin)` orders the current user first and every other row by normalized login. It uses one common scale equal to the greatest Paid or Share value, falling back to one minor unit for an all-zero result. It never derives gap from `netMinor`.
+
+### 20.3 Sparse daily and pace derivation
+
+`deriveSpendingSummary` performs one checked pass over valid expenses. Alongside the existing totals it accumulates a sorted date-to-amount map and Shared/Just me totals. Do not allocate an array containing every configured calendar date: valid plans can span a long period. The runtime summary stores sparse non-zero date buckets plus period bounds.
+
+The Day-by-day component uses a horizontal `VirtualizedList` for a configured period. `getItemCount` is `totalDays`, and `getItem` derives the date at an index with domain calendar helpers and looks up the sparse amount, defaulting to zero. Without configured dates, it displays the sorted distinct expense-date buckets only. Pre-trip and after-trip amounts are separate aggregate summaries and are not silently assigned to the first or last trip day.
+
+During an active trip, cumulative events contain:
+
+1. The trip start with all pre-trip spending plus spending on the first day.
+2. Each later non-zero trip date on or before `today`, after applying that date's amount.
+3. A `today` endpoint when the last spending event occurred earlier, so the plotted line visibly stays flat.
+
+Future-dated expenses remain in total/category/scope analytics and their daily buckets, but are excluded from `actualToDateMinor` and active-trip cumulative events. `futureDatedMinor` activates explicit tracked-future copy. The actual plot stops at today and never resembles a forecast.
+
+Even pace exists only while `today` is inside a complete dated plan with a positive budget:
+
+```text
+quotient = floor(budgetMinor / totalDays)
+remainder = budgetMinor % totalDays
+evenPaceMinor = quotient * elapsedDays
+              + floor(remainder * elapsedDays / totalDays)
+deltaMinor = actualToDateMinor - evenPaceMinor
+```
+
+This is algebraically equivalent to flooring `budgetMinor * elapsedDays / totalDays` without unsafe multiplication. Before the period, use existing planned-per-day copy and omit pace. After it, use existing final budget performance and omit a current-pace claim.
+
+Category mix is sorted by amount descending, then the CR-001 taxonomy order with Uncategorized last. Scope totals must satisfy `sharedMinor + justMeMinor = totalSpentMinor`. Insight eligibility follows PRD section 20.5; total-budget overage wins priority two, otherwise choose the largest category overage by amount and taxonomy, and highest-day ties choose the earliest date. With no expenses, return no insights. The pace conclusion is the first insight and appears in the pace card rather than being duplicated by Spending Pulse.
+
+### 20.4 Snapshot and synchronization behavior
+
+Capture `today` once per refresh or local rebuild and pass that same value to the complete spending derivation. Extend all existing paths rather than creating an analytics-specific path:
+
+- Gateway refresh derives balances and spending analytics before returning one snapshot.
+- Cache hydration discards cached derived spending as it does today and recomputes analytics using the current local date.
+- Expense add/edit/delete and spending-plan update/removal call the existing snapshot rebuild and publish totals, balances, and analytics together.
+- Settlement confirmation changes `netMinor` but leaves expense-derived spending analytics and funding Paid/Share values unchanged; the Balances screen still rerenders both from one new snapshot generation.
+
+An unsafe analytical sum follows the existing spending-integrity failure: set `spending` to null, add the scoped warning, and render no financial chart from partial values. Filtering and chart selections are local component state and never enter the snapshot cache.
+
+### 20.5 Native UI and accessibility
+
+Spending follows this order: existing budget summary, Group spent/You paid/Your share, Budget pace, Day by day, remaining Spending Pulse insights, Category mix, Shared vs Just me, payment methods, and expense explorer.
+
+- Budget pace draws a solid actual path, dashed even-reference path, today marker, labels, and a textual actual/reference/difference summary. Geometry normalizes against the greater of budget and actual values and does not perform business calculations.
+- Day by day renders every configured day through the sparse lookup. Each real calendar-day bar is an accessible button with amount/date text and applies the exact-date filter. Pre/after aggregates are descriptive rather than date-filter buttons.
+- Category rows expose separate, labelled share-of-total and category-limit progress tracks. Pressing a row applies the category filter; the explorer chips remain the non-chart alternative.
+- Shared vs Just me uses a labelled stacked bar plus two explicit scope-filter buttons and reminds users that Just me is shared group data.
+- Balances inserts Expense funding before Member totals. Paid and Share use labelled paired bars on one scale; the card states that confirmed settlements affect net balances below, not this expense-only gap.
+
+Selecting a day, category, or scope updates the corresponding visible filter, scrolls to the explorer through an optional `Screen` scroll-view ref, moves accessibility focus to the result heading, and announces the new result count. The explorer adds an All dates/Choose date control using the existing date-picker dialog. Clear filters resets every dimension including date.
+
+Charts use `accessibilityRole="image"` and a complete accessible label while decorative SVG elements are hidden. All visible series also have ordinary scalable text. Solid/dashed treatment, labels, icons, and status words ensure that colour is never the only distinction. Large text may wrap chart summaries and horizontally scroll day bars; no essential value is embedded only in fixed-size SVG text.
+
+Overview wraps its compact budget summary in one accessible button that opens Spending. During an active dated budget, it adds the textual pace conclusion and a non-interactive sparkline only when at least two distinct expense dates exist. Before/after, missing-budget, and sparse states keep textual budget behavior without manufacturing a trend.
+
+### 20.6 Test architecture and implementation sequence
+
+Add platform-free unit coverage for sparse buckets, missing days, long periods, pre/after/future expenses, cumulative events, overflow-safe even pace, one-day periods, every phase, category/scope reconciliation, insight priority/ties/limit, exact-date filtering, and settlement-independent funding gaps.
+
+Component coverage verifies the three updated mockups: Spending hierarchy and graphical/text parity, daily/category/scope filter interactions, date picker, combined/clear filters, scroll/focus/live announcement behavior, empty/sparse/future states, Overview eligibility/navigation, Balances common-scale funding and settlement explanation, light/dark themes, large text, and minimum touch targets.
+
+Implement in this order:
+
+1. Runtime types, calendar-at-offset helper, sparse analytics derivation, funding selector, date filter, and unit tests.
+2. Accessible SVG/native chart cards with no animation and component-level graphical/text parity tests.
+3. Spending hierarchy and interactive explorer integration.
+4. Overview compact pace and Balances expense-funding integration.
+5. Refresh/hydration/mutation coherence tests, accessibility hardening, full validation, and the PRD section 20.12 physical-device scenario.
+
+Forecasting, planned expenses, external benchmarks, cross-group/cross-currency aggregation, historical comparisons, exports, configurable dashboards, server analytics, telemetry, background work, and predictive alerts remain outside CR-005.

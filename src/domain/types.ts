@@ -238,6 +238,59 @@ export interface SpendingSummary {
     availableDays: number;
     dailyAvailableMinor: number | null;
   };
+  analytics: SpendingAnalytics;
+}
+
+export interface DailySpendingBucket {
+  date: CalendarDate;
+  amountMinor: number;
+}
+
+export interface SpendingPaceAnalytics {
+  actualToDateMinor: number;
+  evenPaceMinor: number;
+  deltaMinor: number;
+  direction: 'below' | 'on' | 'above';
+  elapsedDays: number;
+  totalDays: number;
+  events: { date: CalendarDate; cumulativeMinor: number }[];
+  referenceEvents: { date: CalendarDate; cumulativeMinor: number }[];
+}
+
+export type SpendingInsight =
+  | { kind: 'pace'; actualToDateMinor: number; evenPaceMinor: number; deltaMinor: number; direction: SpendingPaceAnalytics['direction'] }
+  | { kind: 'budget_overage'; overMinor: number }
+  | { kind: 'category_overage'; category: ExpenseCategory; overMinor: number; spentMinor: number; limitMinor: number }
+  | { kind: 'largest_category'; category: CategoryBucket; spentMinor: number; sharePercentage: number }
+  | { kind: 'funding_gap'; gapMinor: number }
+  | { kind: 'highest_day'; date: CalendarDate; amountMinor: number }
+  | { kind: 'scope_split'; sharedMinor: number; justMeMinor: number };
+
+export interface SpendingAnalytics {
+  today: CalendarDate;
+  daily: {
+    buckets: DailySpendingBucket[];
+    period: null | { startsOn: CalendarDate; endsOn: CalendarDate; totalDays: number };
+    preTripMinor: number;
+    afterTripMinor: number;
+    futureDatedMinor: number;
+    distinctExpenseDateCount: number;
+  };
+  pace: SpendingPaceAnalytics | null;
+  categoryMix: { category: CategoryBucket; spentMinor: number; sharePercentage: number }[];
+  scopeMix: { sharedMinor: number; justMeMinor: number };
+  insights: SpendingInsight[];
+}
+
+export interface ExpenseFundingAnalytics {
+  scaleMaxMinor: number;
+  rows: {
+    login: string;
+    paidMinor: number;
+    shareMinor: number;
+    gapMinor: number;
+    currentMember: boolean;
+  }[];
 }
 
 export interface DiscoveredGroup {

@@ -2,7 +2,7 @@ import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import { useRouter } from 'expo-router';
 
 import { AppFailure } from '@/domain/errors';
-import { expenseCategories } from '@/domain/spending';
+import { deriveSpendingSummary, expenseCategories } from '@/domain/spending';
 import type { RemoteGroupSnapshot, SpendingPlan } from '@/domain/types';
 import { useGroup } from '@/providers/group-provider';
 import { useSession } from '@/providers/session-provider';
@@ -24,7 +24,7 @@ const group = { schema_version: 1 as const, name: 'Trip', currency: 'EUR' as con
 const groupFile = { group, blobSha: 'group-sha', path: 'group.json' as const, sourceDocument: { ...group } };
 const snapshot: RemoteGroupSnapshot = {
   key: 'owner/branch-balance-trip', repository, group, groupFile, members: [{ login: 'owner', name: null, avatarUrl: null, role: 'owner' }], pendingMembers: [], expenses: [],
-  balances: { totalSpentMinor: 0, members: [], zeroSum: true }, settlements: [], spending: { totalSpentMinor: 0, currentUserPaidMinor: 0, currentUserShareMinor: 0, categorySpentMinor: { accommodation: 0, food_drink: 0, groceries: 0, transport: 0, activities: 0, shopping: 0, fees: 0, other: 0, uncategorized: 0 }, paymentMethodSpentMinor: { card: 0, cash: 0, other: 0, unspecified: 0 }, budget: null, trip: null }, warnings: [], syncedAt: '2026-07-17T12:00:00.000Z',
+  balances: { totalSpentMinor: 0, members: [], zeroSum: true }, settlements: [], spending: deriveSpendingSummary([], undefined, 'owner', '2026-07-17'), warnings: [], syncedAt: '2026-07-17T12:00:00.000Z',
 };
 
 describe('Spending plan screen', () => {
