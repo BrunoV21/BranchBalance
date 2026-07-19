@@ -29,10 +29,14 @@ Back up the keystore and its passwords securely. Every release must use this sam
 
 Configure these GitHub Actions repository secrets:
 
+- `EXPO_PUBLIC_GITHUB_CLIENT_ID`: Client ID from the BranchBalance GitHub App.
+- `EXPO_PUBLIC_GITHUB_APP_SLUG`: Slug from the GitHub App URL (`github.com/apps/<slug>`).
 - `ANDROID_KEYSTORE_BASE64`: Base64-encoded contents of `branchbalance-release.jks`.
 - `ANDROID_KEYSTORE_PASSWORD`: Keystore password.
 - `ANDROID_KEY_ALIAS`: Key alias, such as `branchbalance`.
 - `ANDROID_KEY_PASSWORD`: Key password.
+
+The Expo-prefixed values are public metadata embedded in the APK despite being stored as repository secrets. Never configure or ship the GitHub App client secret.
 
 ## 1. Finish acceptance
 

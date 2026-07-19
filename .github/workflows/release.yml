@@ -133,6 +133,25 @@ jobs:
             cmake;3.22.1
             ndk;27.1.12297006
 
+      - name: Require GitHub App release configuration
+        env:
+          EXPO_PUBLIC_GITHUB_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GITHUB_CLIENT_ID }}
+          EXPO_PUBLIC_GITHUB_APP_SLUG: ${{ secrets.EXPO_PUBLIC_GITHUB_APP_SLUG }}
+        run: |
+          set -euo pipefail
+
+          missing=()
+          for name in EXPO_PUBLIC_GITHUB_CLIENT_ID EXPO_PUBLIC_GITHUB_APP_SLUG; do
+            if [ -z "${!name:-}" ]; then
+              missing+=("$name")
+            fi
+          done
+
+          if [ "${#missing[@]}" -ne 0 ]; then
+            echo "Missing GitHub App release secrets: ${missing[*]}" >&2
+            exit 1
+          fi
+
       - name: Require and decode Android signing credentials
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -170,6 +189,8 @@ jobs:
         working-directory: android
         env:
           NODE_ENV: production
+          EXPO_PUBLIC_GITHUB_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GITHUB_CLIENT_ID }}
+          EXPO_PUBLIC_GITHUB_APP_SLUG: ${{ secrets.EXPO_PUBLIC_GITHUB_APP_SLUG }}
           ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/branchbalance-release.jks
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
