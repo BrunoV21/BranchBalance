@@ -15,6 +15,36 @@
     });
   }
 
+  function showToast(message) {
+    const toast = document.querySelector('.toast');
+    if (!toast) return;
+    toast.textContent = message;
+    toast.classList.add('show');
+    window.setTimeout(() => toast.classList.remove('show'), 2200);
+  }
+
+  function resolveInvitation(card) {
+    const section = card.closest('[data-invited-section]');
+    card.remove();
+    if (!section) return;
+    const remaining = section.querySelectorAll('[data-invitation]').length;
+    const count = section.querySelector('[data-invitation-count]');
+    if (count) count.innerHTML = `<span class="dot"></span>${remaining} pending`;
+    if (remaining === 0) section.classList.add('hidden');
+  }
+
+  function addAcceptedMockGroup() {
+    const list = document.querySelector('[data-active-groups]');
+    if (!list || list.querySelector('[data-accepted-invitation-group]')) return;
+    const group = document.createElement('a');
+    group.className = 'group-card';
+    group.href = '05-group-overview.html';
+    group.dataset.acceptedInvitationGroup = '';
+    group.innerHTML = '<div class="group-top"><div class="group-icon" style="background:var(--positive-soft);color:var(--positive)"><svg class="icon" viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v10H3z"></path><path d="M3 7V5h6l2 2"></path></svg></div><div style="flex:1"><div class="group-name">Lisbon weekend</div><div class="group-meta">2 members · EUR · joined just now</div></div><span class="pill success"><span class="dot"></span>Joined</span></div><div class="group-balance"><div><div class="value" style="color:var(--positive)">€0.00</div><div class="caption">All settled</div></div><div style="display:flex"><div class="avatar xs">AK</div><div class="avatar xs green" style="margin-left:-6px">MB</div></div></div>';
+    list.prepend(group);
+    document.querySelectorAll('[data-active-group-count]').forEach((count) => { count.textContent = '4'; });
+  }
+
   document.addEventListener('click', (event) => {
     const themeButton = event.target.closest('[data-theme-toggle]');
     if (themeButton) {
@@ -47,12 +77,29 @@
 
     const toastTrigger = event.target.closest('[data-toast-message]');
     if (toastTrigger) {
-      const toast = document.querySelector('.toast');
-      if (toast) {
-        toast.textContent = toastTrigger.dataset.toastMessage;
-        toast.classList.add('show');
-        window.setTimeout(() => toast.classList.remove('show'), 2200);
-      }
+      showToast(toastTrigger.dataset.toastMessage);
+    }
+
+    const invitationAction = event.target.closest('[data-invitation-action]');
+    if (invitationAction) {
+      const card = invitationAction.closest('[data-invitation]');
+      if (!card) return;
+      const groupName = card.dataset.groupName || 'this group';
+      const action = invitationAction.dataset.invitationAction;
+      if (action === 'decline' && !window.confirm(`Decline the invitation to ${groupName}? The owner will need to invite you again if you change your mind.`)) return;
+
+      card.querySelectorAll('[data-invitation-action]').forEach((button) => { button.disabled = true; });
+      invitationAction.textContent = action === 'accept' ? 'Accepting…' : 'Declining…';
+
+      window.setTimeout(() => {
+        if (action === 'accept') {
+          addAcceptedMockGroup();
+          showToast(`${groupName} accepted and added to your groups`);
+        } else {
+          showToast(`${groupName} invitation declined`);
+        }
+        resolveInvitation(card);
+      }, 650);
     }
   });
 

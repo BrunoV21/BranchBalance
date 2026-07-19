@@ -2,6 +2,7 @@ export const appPrefix = 'branch-balance';
 export const githubClientId = process.env.EXPO_PUBLIC_GITHUB_CLIENT_ID?.trim() ?? '';
 export const githubAppSlug = process.env.EXPO_PUBLIC_GITHUB_APP_SLUG?.trim() ?? '';
 export const githubInstallationUrl = githubAppSlug ? `https://github.com/apps/${githubAppSlug}/installations/new` : 'https://github.com/settings/installations';
+export const githubAuthorizationSettingsUrl = 'https://github.com/settings/apps/authorizations';
 export const githubDeviceUrl = 'https://github.com/login/device';
 
 export function configurationErrorFor(clientId: string, appSlug: string): string | null {

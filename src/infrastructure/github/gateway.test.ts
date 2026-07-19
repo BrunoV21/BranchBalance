@@ -29,6 +29,56 @@ describe('GitHubGateway discovery', () => {
   });
 });
 
+describe('GitHubGateway received group invitations', () => {
+  const invitation = (id: number) => ({
+    id,
+    repository: { id: 1000 + id, name: `branch-balance-trip-${id}`, full_name: `owner/branch-balance-trip-${id}`, private: true, owner: { login: 'owner', type: 'User' } },
+    invitee: { login: 'friend' }, inviter: { login: 'owner' }, permissions: 'write', created_at: '2026-07-19T12:00:00Z',
+  });
+
+  it('publishes only after paginating the complete authenticated-user invitation list', async () => {
+    const pageOne = Array.from({ length: 100 }, (_, index) => invitation(index + 1));
+    const request = jest.fn(async (_route: string, parameters: Record<string, unknown>) => ({
+      data: parameters.page === 1 ? pageOne : [invitation(101)], headers: {}, status: 200,
+    }));
+    const gateway = new GitHubGatewayImpl({ request: request as never }, { now: () => new Date() });
+    const result = await gateway.listGroupInvitations('FRIEND');
+
+    expect(result.invitations).toHaveLength(101);
+    expect(request).toHaveBeenNthCalledWith(1, 'GET /user/repository_invitations', expect.objectContaining({ page: 1, per_page: 100 }));
+    expect(request).toHaveBeenNthCalledWith(2, 'GET /user/repository_invitations', expect.objectContaining({ page: 2, per_page: 100 }));
+  });
+
+  it('rejects a later page instead of returning a partial invitation list', async () => {
+    const request = jest.fn(async (_route: string, parameters: Record<string, unknown>) => {
+      if (parameters.page === 1) return { data: Array.from({ length: 100 }, (_, index) => invitation(index + 1)), headers: {}, status: 200 };
+      throw new AppFailure({ kind: 'network', retryable: true });
+    });
+    const gateway = new GitHubGatewayImpl({ request: request as never }, { now: () => new Date() });
+    await expect(gateway.listGroupInvitations('friend')).rejects.toMatchObject({ detail: { kind: 'network' } });
+  });
+
+  it('uses the received-invitation decision endpoints without a request body', async () => {
+    const request = jest.fn().mockResolvedValue({ data: undefined, headers: {}, status: 204 });
+    const gateway = new GitHubGatewayImpl({ request }, { now: () => new Date() });
+
+    await gateway.acceptGroupInvitation(42);
+    await gateway.declineGroupInvitation(43);
+
+    expect(request).toHaveBeenNthCalledWith(1, 'PATCH /user/repository_invitations/{invitation_id}', { invitation_id: 42, request: { signal: undefined } });
+    expect(request).toHaveBeenNthCalledWith(2, 'DELETE /user/repository_invitations/{invitation_id}', { invitation_id: 43, request: { signal: undefined } });
+  });
+
+  it('maps invitation permission and unavailable errors without private repository details', async () => {
+    const permissionGateway = new GitHubGatewayImpl({ request: jest.fn().mockRejectedValue(new AppFailure({ kind: 'permission', operation: 'perform this GitHub operation' })) }, { now: () => new Date() });
+    await expect(permissionGateway.listGroupInvitations('friend')).rejects.toMatchObject({ detail: { kind: 'invitation_permission', operation: 'list' } });
+    await expect(permissionGateway.acceptGroupInvitation(42)).rejects.toMatchObject({ detail: { kind: 'invitation_permission', operation: 'accept' } });
+
+    const unavailableGateway = new GitHubGatewayImpl({ request: jest.fn().mockRejectedValue(new AppFailure({ kind: 'not_found', resource: 'GitHub resource' })) }, { now: () => new Date() });
+    await expect(unavailableGateway.declineGroupInvitation(42)).rejects.toMatchObject({ detail: { kind: 'invitation_unavailable', invitationId: 42 } });
+  });
+});
+
 describe('GitHubGateway group refresh', () => {
   it('excludes malformed expenses and calculates one atomic snapshot', async () => {
     const expense = {

@@ -4,8 +4,9 @@ import { AppFailure, DomainValidationError } from '@/domain/errors';
 import { parseExpenseDocument, parseGroupDocument } from '@/domain/schemas';
 import { deriveSettlementReservations, parseSettlementLedgerDocument, parseSettlementPayment, settlementCreationMatches, sortSettlementPayments } from '@/domain/settlements';
 import { deriveSpendingSummary, systemLocalCalendar, type LocalCalendar } from '@/domain/spending';
-import { groupKey, normalizeLogin, type AccountProfile, type CurrencyCode, type DataWarning, type DiscoveredGroup, type ExpenseFile, type Group, type GroupFile, type IsoInstant, type Member, type PendingMember, type RemoteGroupSnapshot, type RepositoryRef, type SettlementLedgerFile, type SettlementLedgerState, type SettlementPayment, type SettlementReservation, type SettlementValidationBasis, type SpendingPlan, type WritableExpense } from '@/domain/types';
+import { groupKey, normalizeLogin, type AccountProfile, type CurrencyCode, type DataWarning, type DiscoveredGroup, type ExpenseFile, type Group, type GroupFile, type InvitationDiscoveryResult, type IsoInstant, type Member, type PendingMember, type RemoteGroupSnapshot, type RepositoryRef, type SettlementLedgerFile, type SettlementLedgerState, type SettlementPayment, type SettlementReservation, type SettlementValidationBasis, type SpendingPlan, type WritableExpense } from '@/domain/types';
 import type { Clock } from '@/features/auth/contracts';
+import { discoverEligibleGroupInvitations } from '@/features/invitations/eligibility';
 
 import type { DiscoveryResult, GitHubGateway } from './contracts';
 
@@ -52,6 +53,41 @@ export class GitHubGatewayImpl implements GitHubGateway {
     }
     groups.sort((a, b) => a.group.name.localeCompare(b.group.name));
     return { groups, warnings, installationCount: installations.length, hasAllRepositoriesInstallation: installations.some((installation) => installation.repository_selection === 'all') };
+  }
+
+  async listGroupInvitations(currentLogin: string, signal?: AbortSignal): Promise<InvitationDiscoveryResult> {
+    try {
+      const rows = await this.paginate<unknown>('GET /user/repository_invitations', null, {}, signal);
+      return discoverEligibleGroupInvitations(rows, currentLogin);
+    } catch (error) {
+      if (error instanceof AppFailure && error.detail.kind === 'permission') throw new AppFailure({ kind: 'invitation_permission', operation: 'list' });
+      throw error;
+    }
+  }
+
+  async acceptGroupInvitation(invitationId: number, signal?: AbortSignal): Promise<void> {
+    await this.decideGroupInvitation(invitationId, 'accept', signal);
+  }
+
+  async declineGroupInvitation(invitationId: number, signal?: AbortSignal): Promise<void> {
+    await this.decideGroupInvitation(invitationId, 'decline', signal);
+  }
+
+  private async decideGroupInvitation(invitationId: number, action: 'accept' | 'decline', signal?: AbortSignal): Promise<void> {
+    if (!Number.isSafeInteger(invitationId) || invitationId <= 0) throw new DomainValidationError('A valid group invitation is required.');
+    const route = action === 'accept'
+      ? 'PATCH /user/repository_invitations/{invitation_id}'
+      : 'DELETE /user/repository_invitations/{invitation_id}';
+    try {
+      const response = await this.client.request(route, { invitation_id: invitationId, request: { signal } });
+      if (response.status !== 204) throw new AppFailure({ kind: 'github', status: 502, safeMessage: 'GitHub did not confirm the invitation decision.', retryable: true });
+    } catch (error) {
+      if (error instanceof AppFailure && error.detail.kind === 'permission') throw new AppFailure({ kind: 'invitation_permission', operation: action });
+      if (error instanceof AppFailure && (error.detail.kind === 'not_found' || (error.detail.kind === 'github' && error.detail.status === 409))) {
+        throw new AppFailure({ kind: 'invitation_unavailable', invitationId });
+      }
+      throw error;
+    }
   }
 
   async createPrivateRepository(slug: string, signal?: AbortSignal): Promise<RepositoryRef> {

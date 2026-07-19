@@ -17,7 +17,7 @@ Accepted collaborators with write access are group members. They can read the sh
 
 ## Pending invitations
 
-Pending invitees are displayed separately and do not participate in expenses or balances until they accept through GitHub. Invited collaborators authorize BranchBalance, but do not need to install the GitHub App on their own account to access a repository covered by the owner’s installation.
+Pending invitees are displayed separately and do not participate in expenses or balances until they accept. Eligible invitees can accept or decline from **Your groups** in BranchBalance; GitHub remains authoritative for the decision. Invited collaborators authorize BranchBalance, but do not need to install the GitHub App on their own account to access a repository covered by the owner’s installation.
 
 ## Historical usernames
 

@@ -1,14 +1,14 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useFocusEffect, useIsFocused, useRouter } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { ActivityIndicator, AppState, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Avatar, Banner, Body, Button, Card, EmptyState, Title } from '@/components/ui';
+import { Avatar, Banner, Body, Button, Card, ConfirmDialog, EmptyState, Title } from '@/components/ui';
 import { formatMoney } from '@/domain/money';
-import type { DiscoveredGroup } from '@/domain/types';
+import type { DiscoveredGroup, PendingGroupInvitation } from '@/domain/types';
 import { useInstallationRecheck } from '@/features/groups/use-installation-recheck';
-import { githubInstallationUrl } from '@/config/app';
+import { githubAuthorizationSettingsUrl, githubInstallationUrl } from '@/config/app';
 import { useGroups } from '@/providers/groups-provider';
 import { useSession } from '@/providers/session-provider';
 import { useTheme } from '@/providers/theme-provider';
@@ -18,7 +18,12 @@ export default function GroupsScreen() {
   const { session } = useSession();
   const { colors } = useTheme();
   const focused = useIsFocused();
-  const { state, aggregates, hasInstallation, canCreateGroups, pendingCreation, refresh, retryPendingCreation } = useGroups();
+  const [declineTarget, setDeclineTarget] = useState<PendingGroupInvitation | null>(null);
+  const {
+    state, groupWarningCount, aggregates, hasInstallation, canCreateGroups, pendingCreation,
+    invitationState, invitationWarningCount, invitationMutations, acceptedPendingDiscovery, invitationNotice,
+    refresh, acceptInvitation, declineInvitation, retryPendingCreation,
+  } = useGroups();
   const runRefresh = useCallback(() => { void refresh().catch(() => undefined); }, [refresh]);
   useFocusEffect(useCallback(() => { runRefresh(); }, [runRefresh]));
   const installationRecheck = useInstallationRecheck({ focused, hasRequiredAccess: canCreateGroups, refresh });
@@ -29,6 +34,10 @@ export default function GroupsScreen() {
   const waitingForInstallation = state.status !== 'idle' && state.status !== 'loading' && !hasInstallation;
   const recheckInstallation = () => { installationRecheck.restart(); runRefresh(); };
   const openInstallation = () => { installationRecheck.restart(); void Linking.openURL(githubInstallationUrl); };
+  const confirmDecline = () => {
+    if (!declineTarget) return;
+    void declineInvitation(declineTarget.id).catch(() => undefined).finally(() => setDeclineTarget(null));
+  };
 
   const renderGroup = ({ item }: { item: DiscoveredGroup }) => <Pressable accessibilityRole="button" accessibilityLabel={`Open ${item.group.name}`} onPress={() => router.push({ pathname: '/groups/[owner]/[repo]', params: { owner: item.repository.owner, repo: item.repository.name } } as never)}>
     <Card>
@@ -42,19 +51,69 @@ export default function GroupsScreen() {
 
   return <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]}>
     <FlatList data={state.data} keyExtractor={(item) => item.key} renderItem={renderGroup} contentContainerStyle={styles.content} alwaysBounceVertical overScrollMode="always"
-      refreshControl={<RefreshControl refreshing={state.isRefreshing} onRefresh={runRefresh} tintColor={colors.accent} colors={[colors.accent]} progressBackgroundColor={colors.surface} />}
-      ListHeaderComponent={<View style={styles.header}>
+      refreshControl={<RefreshControl refreshing={state.isRefreshing || invitationState.isRefreshing} onRefresh={runRefresh} tintColor={colors.accent} colors={[colors.accent]} progressBackgroundColor={colors.surface} />}
+      ListHeaderComponent={<View testID="groups-list-header" style={styles.header}>
         <View style={styles.accountRow}><View style={{ flex: 1 }}><Title eyebrow={`Hello, ${session.account?.name ?? session.account?.login ?? ''}`}>Your groups</Title></View><Pressable accessibilityLabel="Open account" accessibilityRole="button" onPress={() => router.push('/account' as never)}><Avatar login={session.account?.login ?? '?'} uri={session.account?.avatarUrl} /></Pressable></View>
         {aggregates.map((aggregate) => <Card key={aggregate.currency}><Body>{aggregate.currency}</Body><View style={styles.totals}><View><Body muted>You are owed</Body><Text style={[styles.total, { color: colors.positive }]}>{formatMoney(aggregate.owedMinor, aggregate.currency)}</Text></View><View><Body muted>You owe</Body><Text style={[styles.total, { color: colors.negative }]}>{formatMoney(aggregate.owingMinor, aggregate.currency)}</Text></View></View><Body muted>As of {new Date(aggregate.asOf).toLocaleString()}</Body></Card>)}
         {state.error ? <Banner tone="warning" action={<Button variant="ghost" onPress={runRefresh}>Retry</Button>}>{state.error}</Banner> : null}
+        {groupWarningCount ? <Banner tone="warning">{groupWarningCount} candidate {groupWarningCount === 1 ? 'repository was' : 'repositories were'} skipped because {groupWarningCount === 1 ? 'its' : 'their'} group data could not be validated.</Banner> : null}
         {waitingForInstallation ? <InstallationConnectionCard attempts={installationRecheck.attempts} maxAttempts={installationRecheck.maxAttempts} checking={installationRecheck.checking || state.isRefreshing} exhausted={installationRecheck.exhausted} onRecheck={recheckInstallation} onOpenInstallation={openInstallation} /> : null}
         {hasInstallation && !canCreateGroups ? <Banner action={<View style={styles.bannerActions}><Button accessibilityLabel="Recheck GitHub access" onPress={runRefresh}>Recheck</Button><Button variant="ghost" onPress={() => void Linking.openURL(githubInstallationUrl)}>Manage</Button></View>}>Installation found. It must cover all repositories so newly created groups remain accessible.</Banner> : null}
         {pendingCreation ? <Banner tone="warning" action={<Button onPress={() => void retryPendingCreation().catch(() => undefined)}>Finish setup</Button>}>Repository {pendingCreation.repository.name} still needs its group file.</Banner> : null}
-        {!waitingForInstallation ? <Button disabled={!canCreateGroups} onPress={() => router.push('/groups/new' as never)}>Create a group</Button> : null}
+        {!waitingForInstallation || invitationState.data.length ? <View testID="groups-create-action"><Button disabled={!canCreateGroups} onPress={() => router.push('/groups/new' as never)}>Create a group</Button></View> : null}
+        {invitationState.data.length ? <View testID="groups-invitations-slot"><InvitationSection invitations={invitationState.data} stale={Boolean(invitationState.error)} mutations={invitationMutations} onAccept={(invitation) => void acceptInvitation(invitation.id).catch(() => undefined)} onDecline={setDeclineTarget} /></View> : null}
+        {invitationState.status === 'loading' && !invitationState.data.length ? <View style={styles.invitationLoading}><ActivityIndicator color={colors.accent} size="small" /><Body muted>Checking group invitations…</Body></View> : null}
+        {invitationState.error ? <Banner tone="warning" action={<View style={styles.bannerActions}><Button variant="ghost" onPress={runRefresh}>Retry invitations</Button><Button variant="ghost" onPress={() => void Linking.openURL(githubAuthorizationSettingsUrl)}>Manage GitHub access</Button></View>}>{invitationState.error}</Banner> : null}
+        {invitationNotice ? <Banner tone="info">{invitationNotice}</Banner> : null}
+        {invitationWarningCount ? <Banner tone="warning">{invitationWarningCount} GitHub {invitationWarningCount === 1 ? 'invitation was' : 'invitations were'} skipped because the details were invalid or outside BranchBalance group rules.</Banner> : null}
+        {acceptedPendingDiscovery.map((pending) => <Banner key={pending.invitationId} tone="warning" action={<Button variant="ghost" onPress={runRefresh}>Retry</Button>}>{pending.provisionalName} was accepted on GitHub, but BranchBalance cannot load the group yet.</Banner>)}
+        <Text testID="groups-active-heading" accessibilityRole="header" style={[styles.sectionTitle, { color: colors.text }]}>Active groups</Text>
       </View>}
-      ListEmptyComponent={state.status === 'loading' ? <EmptyState title="Finding groups…" body="Checking repositories available to your GitHub App installation." /> : waitingForInstallation ? null : <EmptyState title="No groups yet" body="Create a private GitHub-backed group to start sharing expenses." />}
+      ListEmptyComponent={state.status === 'loading' ? <EmptyState title="Finding groups…" body="Checking repositories available to your GitHub App installation." /> : waitingForInstallation ? null : <EmptyState title="No active groups yet" body={invitationState.data.length ? 'Accept an invitation above or create a group to start sharing expenses.' : 'Create a private GitHub-backed group to start sharing expenses.'} />}
+    />
+    <ConfirmDialog
+      visible={declineTarget !== null}
+      title={declineTarget ? `Decline “${declineTarget.provisionalName}”?` : 'Decline this invitation?'}
+      message={declineTarget ? `This removes the GitHub repository invitation from ${declineTarget.repository.owner}. You will need a new invitation from the owner if you change your mind.` : ''}
+      confirmLabel="Decline invitation"
+      loading={declineTarget ? invitationMutations.get(declineTarget.id) === 'declining' : false}
+      onCancel={() => setDeclineTarget(null)}
+      onConfirm={confirmDecline}
     />
   </SafeAreaView>;
+}
+
+function InvitationSection({ invitations, stale, mutations, onAccept, onDecline }: { invitations: PendingGroupInvitation[]; stale: boolean; mutations: ReadonlyMap<number, 'accepting' | 'declining'>; onAccept(invitation: PendingGroupInvitation): void; onDecline(invitation: PendingGroupInvitation): void }) {
+  const { colors } = useTheme();
+  return <View style={styles.invitationSection}>
+    <View style={styles.sectionHeading}>
+      <Text accessibilityRole="header" style={[styles.sectionTitle, { color: colors.text }]}>Invited groups</Text>
+      <Text accessibilityLabel={`${invitations.length} pending group ${invitations.length === 1 ? 'invitation' : 'invitations'}`} style={[styles.countPill, { color: colors.accentText, backgroundColor: colors.accent }]}>{invitations.length}</Text>
+    </View>
+    {stale ? <Body muted>Refresh these invitations before accepting or declining.</Body> : null}
+    {invitations.map((invitation) => {
+      const mutation = mutations.get(invitation.id);
+      const busy = mutation !== undefined;
+      return <Card key={invitation.id}>
+        <Text style={[styles.groupName, { color: colors.text }]}>{invitation.provisionalName}</Text>
+        <Body muted style={styles.wrapText}>GitHub repository invitation</Body>
+        <View style={styles.invitationMetadata}>
+          <Body style={styles.wrapText}>Repository: {invitation.repository.fullName}</Body>
+          <Body style={styles.wrapText}>Invited by @{invitation.inviter}</Body>
+          <Body style={styles.wrapText}>Requested access: {capitalize(invitation.permission)}</Body>
+          <Body style={styles.wrapText}>Invited {new Date(invitation.createdAt).toLocaleDateString()}</Body>
+        </View>
+        <View style={styles.invitationActions}>
+          <View style={styles.invitationAction}><Button accessibilityLabel={`Accept invitation to ${invitation.provisionalName}`} disabled={stale || busy} loading={mutation === 'accepting'} onPress={() => onAccept(invitation)}>Accept</Button></View>
+          <View style={styles.invitationAction}><Button accessibilityLabel={`Decline invitation to ${invitation.provisionalName}`} variant="secondary" disabled={stale || busy} loading={mutation === 'declining'} onPress={() => onDecline(invitation)}>Decline</Button></View>
+        </View>
+      </Card>;
+    })}
+  </View>;
+}
+
+function capitalize(value: string): string {
+  return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
 }
 
 function InstallationConnectionCard({ attempts, maxAttempts, checking, exhausted, onRecheck, onOpenInstallation }: { attempts: number; maxAttempts: number; checking: boolean; exhausted: boolean; onRecheck(): void; onOpenInstallation(): void }) {
@@ -72,4 +131,4 @@ function InstallationConnectionCard({ attempts, maxAttempts, checking, exhausted
   </Card>;
 }
 
-const styles = StyleSheet.create({ screen: { flex: 1 }, content: { flexGrow: 1, padding: 20, gap: 13 }, header: { gap: 14 }, accountRow: { flexDirection: 'row', alignItems: 'center', gap: 12 }, bannerActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, connectionCard: { borderLeftWidth: 4 }, connectionHeading: { flexDirection: 'row', alignItems: 'flex-start', gap: 11 }, connectionTitle: { fontSize: 18, lineHeight: 24, fontWeight: '800' }, progressTrack: { height: 8, overflow: 'hidden', borderRadius: 999 }, progressFill: { height: '100%', borderRadius: 999 }, connectionAction: { flexGrow: 1, minWidth: 130 }, totals: { flexDirection: 'row', justifyContent: 'space-between' }, total: { fontSize: 22, fontWeight: '800' }, groupName: { fontSize: 19, fontWeight: '800' } });
+const styles = StyleSheet.create({ screen: { flex: 1 }, content: { flexGrow: 1, padding: 20, gap: 13 }, header: { gap: 14 }, accountRow: { flexDirection: 'row', alignItems: 'center', gap: 12 }, bannerActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, connectionCard: { borderLeftWidth: 4 }, connectionHeading: { flexDirection: 'row', alignItems: 'flex-start', gap: 11 }, connectionTitle: { fontSize: 18, lineHeight: 24, fontWeight: '800' }, progressTrack: { height: 8, overflow: 'hidden', borderRadius: 999 }, progressFill: { height: '100%', borderRadius: 999 }, connectionAction: { flexGrow: 1, minWidth: 130 }, totals: { flexDirection: 'row', justifyContent: 'space-between' }, total: { fontSize: 22, fontWeight: '800' }, groupName: { fontSize: 19, fontWeight: '800' }, sectionTitle: { fontSize: 20, lineHeight: 26, fontWeight: '800' }, sectionHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }, countPill: { minWidth: 28, minHeight: 28, borderRadius: 14, overflow: 'hidden', textAlign: 'center', textAlignVertical: 'center', paddingHorizontal: 8, fontWeight: '800' }, invitationSection: { gap: 12 }, invitationLoading: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 10 }, invitationMetadata: { gap: 4 }, wrapText: { flexShrink: 1 }, invitationActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 }, invitationAction: { flexGrow: 1, minWidth: 130 } });

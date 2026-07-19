@@ -132,7 +132,7 @@ expenses/
 
 `group.json` holds the display name, currency, creator, creation time, and optional shared spending plan. Every expense is a separate JSON document containing its amount, date, payer, deterministic shares, category, payment method, and audit fields. GitHub's live collaborator list is the source of truth for membership. No empty expenses directory is created; the first expense creates it.
 
-See the [Phase 1 PRD](docs/PRD.md) for product requirements, the [architecture guide](docs/ARCHITECTURE.md) for implementation decisions, and the [testing guide](docs/TESTING.md) for automated and physical-device acceptance.
+See the [Phase 1 PRD](docs/PRD.md) for product requirements, the [architecture guide](docs/ARCHITECTURE.md) for implementation decisions, the [roadmap](ROADMAP.md) for known limitations and planned work, and the [testing guide](docs/TESTING.md) for automated and physical-device acceptance.
 
 ## Security
 

@@ -1,7 +1,7 @@
-# BranchBalance — Phase 1 Architecture and CR-001/CR-002 Increments
+# BranchBalance — Phase 1 Architecture and CR-001/CR-002/CR-003 Increments
 
-**Status:** Phase 1 implementation guide; CR-001 and CR-002 implemented
-**Applies to:** Phase 1 Android application, CR-001 trip and group spending intelligence, and CR-002 settlement payment recording
+**Status:** Phase 1 implementation guide; CR-001 through CR-003 implemented; CR-003 physical-device acceptance blocked by a known GitHub App token limitation
+**Applies to:** Phase 1 Android application, CR-001 trip and group spending intelligence, CR-002 settlement payment recording, and CR-003 in-app group invitation decisions
 **Companion specification:** [`PRD.md`](PRD.md)
 **Last updated:** 2026-07-19
 
@@ -1232,3 +1232,334 @@ CR-002 was implemented after the existing Phase 1 and CR-001 validation gates we
 5. **Hardening and acceptance:** concurrency, corruption, capacity, permission, accessibility, two-account physical-device coverage, and the existing typecheck/lint/test/doctor/APK gates.
 
 Payment-provider integrations, arbitrary or excessive transfers, record editing, per-expense allocation, binary receipt/attachment uploads, structured transaction/account fields outside the optional note, recurring payments, reminders, offline writes, and ledger archival remain outside this increment.
+
+## 18. CR-003 architecture delta — In-app group invitation decisions
+
+CR-003 is implemented; physical two-account Android acceptance remains pending. This section defines the additive architecture delivered for PRD change request CR-003; Phase 1, CR-001, and CR-002 behavior remains in force unless explicitly changed below. GitHub remains authoritative for invitations and repository access. The increment adds no BranchBalance backend, repository document, background task, persistent invitation cache, or new runtime dependency.
+
+The selected-group `PendingMember` model and `GroupProvider` continue to serve the repository owner's view of invitations sent from one accepted group. CR-003 adds a separate `PendingGroupInvitation` model for invitations received by the authenticated user before that user can open the repository. These concepts must not share state or be treated as interchangeable.
+
+### 18.1 Ownership, source organization, and navigation
+
+The top-level `GroupsProvider` owns invitee-side invitation state because the invitation is account-scoped and no valid selected-group route exists before acceptance. Do not add an `InvitationsProvider` or place received invitations in `GroupProvider`.
+
+Add a narrow feature boundary:
+
+```text
+src/
+├── domain/
+│   └── types.ts                         # PendingGroupInvitation transport-independent types
+├── features/
+│   └── invitations/
+│       ├── eligibility.ts               # validate/filter/order/provisional naming
+│       └── reconciliation.ts            # classify post-decision GitHub state
+├── infrastructure/
+│   └── github/
+│       ├── contracts.ts                 # invitation gateway operations
+│       └── gateway.ts                   # Octokit DTO mapping and pagination
+├── providers/
+│   └── groups-provider.tsx              # dashboard refresh and decision actions
+└── app/(app)/groups/
+    └── index.tsx                        # Invited groups section
+```
+
+No new route is required. `/(app)/groups` composes the existing account heading, currency-separated aggregate summary, **Create a group**, the conditional **Invited groups** section, and accepted group cards in that order. An invitation card is not a group link and must not construct or navigate to `/groups/[owner]/[repo]` until accepted discovery returns a valid `DiscoveredGroup`.
+
+The shared confirmation-dialog, button, banner, pill, live-region, and retry primitives are sufficient. Native implementation follows the CR-003 update to mockup 03; the mockup's browser script is presentation guidance and is not application state logic.
+
+### 18.2 Domain and transport-independent types
+
+Add explicit types rather than passing Octokit invitation responses into React:
+
+```ts
+type GroupInvitationPermission = 'write' | 'maintain' | 'admin';
+
+interface PendingGroupInvitation {
+  id: number;
+  repository: {
+    id: number;
+    owner: string;
+    ownerType: 'User';
+    name: string;
+    fullName: string;
+    private: true;
+  };
+  invitee: string;
+  inviter: string;
+  permission: GroupInvitationPermission;
+  createdAt: IsoInstant;
+  provisionalName: string;
+}
+
+interface InvitationDiscoveryResult {
+  invitations: PendingGroupInvitation[];
+  warnings: DataWarning[];
+}
+
+interface AcceptedInvitationPendingDiscovery {
+  invitationId: number;
+  repositoryId: number;
+  repositoryFullName: string;
+  provisionalName: string;
+  acceptedAt: IsoInstant;
+  reason: 'not_loadable' | 'discovery_failed';
+}
+```
+
+`PendingGroupInvitation` is ephemeral GitHub metadata, not a repository-backed entity. It has no `GroupKey`, `Group`, `GroupFile`, balance, members, expenses, spending, or settlement data. `provisionalName` is presentation-only and must never be persisted or later preferred over the validated `group.json` name.
+
+Validate the selected transport fields before constructing the type:
+
+- `id` and repository `id` are positive safe integers;
+- repository owner, repository name/full name, invitee, and inviter are non-empty normalized GitHub identities or names;
+- repository privacy is `true` and owner type is `User`;
+- repository name begins with `branch-balance-`;
+- normalized invitee equals the current authenticated login;
+- permission ranks at least `write`; and
+- `created_at` is a valid instant.
+
+The permission rank is `read < triage < write < maintain < admin`; only the final three map into `GroupInvitationPermission`. Reject malformed or ineligible entries independently and record safe warnings without exposing raw response bodies. Deduplicate by invitation ID, then sort newest `createdAt` first, case-insensitive repository full name second, and ID third. A duplicate ID with semantically different repository data is excluded with a warning instead of choosing one record arbitrarily.
+
+Derive the provisional name by removing exactly one leading `branch-balance-`, replacing internal hyphen runs with spaces, trimming, and applying presentation capitalization. If that produces an empty label, fall back to the repository name. This derivation never proves that the repository is a BranchBalance group.
+
+### 18.3 GitHub gateway contract and endpoint behavior
+
+Extend the product gateway boundary:
+
+```ts
+interface GitHubGateway {
+  listGroupInvitations(
+    currentLogin: string,
+    signal?: AbortSignal,
+  ): Promise<InvitationDiscoveryResult>;
+  acceptGroupInvitation(
+    invitationId: number,
+    signal?: AbortSignal,
+  ): Promise<void>;
+  declineGroupInvitation(
+    invitationId: number,
+    signal?: AbortSignal,
+  ): Promise<void>;
+}
+```
+
+The gateway uses the authenticated GitHub App user token and the shared media type and pinned API version:
+
+| Operation | REST endpoint |
+|---|---|
+| List open invitations for the current user | `GET /user/repository_invitations` |
+| Accept an invitation | `PATCH /user/repository_invitations/{invitation_id}` |
+| Decline an invitation | `DELETE /user/repository_invitations/{invitation_id}` |
+
+`listGroupInvitations` follows pagination to completion before returning one deterministic result. Validate and map one page at a time, but publish only after every page succeeds; a partial page set must never be presented as the authoritative list. The gateway does not request `group.json` or any repository contents while the invitation is pending because repository access has not been accepted.
+
+The existing GitHub App **Administration: read and write** repository permission is the documented permission for these user-token operations. Permission failure maps through the shared typed error model with an invitation-specific operation label. If the installed app or current user authorization lacks the required permission, expose reauthorization guidance rather than converting `403` into an empty list.
+
+Physical-device testing identified a separate GitHub App user-token visibility limitation: `GET /user/repository_invitations` returned `200 OK`, an empty array, and `X-Accepted-GitHub-Permissions: administration=read` while the authenticated account had a pending private-repository invitation visible on GitHub. This response is indistinguishable from a genuine empty invitation list at the API boundary. It is consistent with GitHub's rule that a user access token can access only resources available to both the user and app; the invitee does not have repository access until the invitation is accepted. Do not represent additional repository permissions as a fix for this case.
+
+The account-level **Private repository invitations: read** permission may be tested as a compatibility experiment, but it is not a confirmed requirement for this endpoint. If it does not change the response, resolving pre-acceptance discovery requires an architecture decision between targeted OAuth `repo:invite` authorization and a backend/owner-mediated invitation handoff. Until then, the operational fallback is acceptance through GitHub followed by normal BranchBalance group discovery. The work is tracked in [`ROADMAP.md`](../ROADMAP.md#reliable-pre-acceptance-private-invitation-discovery).
+
+Accept and decline send no request body and require a positive invitation ID. A `204` is a confirmed GitHub decision. Do not automatically replay a decision after timeout, connection loss, `404`, `409`, or another ambiguous result; first run the reconciliation algorithm in section 18.5. The authenticated client's existing one-time replay after an explicit `401` may remain because GitHub rejected the unauthenticated request before normal operation handling.
+
+Map rate limits, network failure, timeout, and terminal authentication through the shared client. Add invitation-specific safe classification where needed:
+
+```ts
+type InvitationDecisionError =
+  | { kind: 'invitation_unavailable'; invitationId: number }
+  | { kind: 'invitation_decision_unknown'; invitationId: number; action: 'accept' | 'decline' }
+  | { kind: 'invitation_permission'; operation: 'list' | 'accept' | 'decline' };
+```
+
+These errors contain IDs and safe operation names only. Repository full names, inviter logins, private response bodies, authorization headers, and tokens stay out of errors, logs, analytics, and crash reports.
+
+### 18.4 GroupsProvider state and dashboard refresh
+
+Keep accepted groups and received invitations as separate resources so either result can succeed while the other fails:
+
+```ts
+interface GroupsContextValue {
+  state: ResourceState<DiscoveredGroup[]>; // existing accepted groups
+  invitationState: ResourceState<PendingGroupInvitation[]>;
+  invitationMutations: ReadonlyMap<number, 'accepting' | 'declining'>;
+  acceptedPendingDiscovery: readonly AcceptedInvitationPendingDiscovery[];
+  refresh(): Promise<void>;
+  acceptInvitation(invitationId: number): Promise<void>;
+  declineInvitation(invitationId: number): Promise<void>;
+  // Existing creation, summary, and mutation-reconciliation members remain.
+}
+```
+
+`GroupsProvider.refresh()` becomes a dashboard refresh with one provider-instance in-flight promise. It starts accepted-group discovery and invitation discovery together and observes them with `Promise.allSettled` semantics:
+
+1. Terminal authentication failure from either branch expires the session and clears both resources.
+2. A successful group result replaces only accepted-group descriptors and persists the existing groups cache.
+3. A failed group result preserves cached/in-memory accepted groups and sets the existing scoped error.
+4. A successful invitation result replaces only in-memory invitations and their timestamp.
+5. A failed invitation result preserves the last in-memory invitation list, marks it stale, and sets an invitation-scoped error.
+6. Pull-to-refresh ends after both branches settle and exposes separate retry copy where only one failed.
+
+Launch, group-list focus, foreground, explicit retry, and pull-to-refresh all call this same method. Concurrent lifecycle triggers join its current promise. Foreground refresh remains limited to the visible resource; it does not refresh every accepted group's contents.
+
+Invitation cards from a stale failed refresh remain visible for context but their decision actions are disabled until a successful invitation reconciliation confirms that their IDs are still open. Accepted group cards remain fully usable when only invitation discovery fails. A first-load invitation failure shows a scoped banner without inventing an empty authoritative invitation list.
+
+`invitationMutations` is keyed by invitation ID. Inserting the ID is atomic before the gateway call, so repeated taps join or ignore the existing operation and cannot send duplicate mutations. A mutation disables only its own card. Sign-out, terminal session expiry, or account change clears invitation data, mutation state, confirmed-decision barriers, and accepted-pending-discovery state.
+
+### 18.5 Decision mutations and reconciliation
+
+Invitation decisions do not use optimistic repository membership. They use a confirmed-decision barrier plus a fresh post-mutation dashboard generation.
+
+Maintain an in-memory map of decision barriers:
+
+```ts
+type ConfirmedInvitationDecision = {
+  invitationId: number;
+  repositoryId: number;
+  action: 'accept' | 'decline';
+  confirmedAt: IsoInstant;
+};
+```
+
+The map prevents an invitation list request that began before a `204` from resurrecting the resolved card. Filter any incoming invitation generation through confirmed barriers until a later invitation-list response confirms that the ID is absent. Barriers are memory-only and account-scoped.
+
+Post-mutation reconciliation must not join a dashboard request that began before the mutation. `refreshAfterInvitationDecision()` first awaits that older request, then starts a new generation. This is the only forced-after-current path; ordinary lifecycle triggers continue to coalesce.
+
+#### 18.5.1 Confirmed acceptance
+
+For **Accept**:
+
+1. Require a fresh invitation in current state and install its `accepting` mutation entry.
+2. Call `acceptGroupInvitation` once.
+3. On `204`, install an `accept` barrier, remove the card from the published invitation list, and announce confirmed GitHub acceptance.
+4. Start a forced post-mutation invitation list plus accepted-group discovery.
+5. Match the accepted repository by numeric repository ID, not mutable owner/name text.
+6. When discovery returns a valid `DiscoveredGroup`, publish it through the normal sorted accepted-group path, remove any accepted-pending-discovery item, and clear the barrier after the invitation list confirms absence.
+
+If `204` is confirmed but the new repository is delayed, inaccessible through the expected installation, excluded for missing/malformed `group.json`, or group discovery fails, store `AcceptedInvitationPendingDiscovery` in memory and show an accepted-but-not-yet-loadable banner with **Retry**. Do not restore the invitation card or call PATCH again. The next normal dashboard refresh retries discovery; it clears the item only when a valid group with the repository ID appears.
+
+An older accepted-group discovery result must not remove a group published by the forced post-mutation generation. Reuse the existing generation/confirmed-mutation reconciliation pattern: only a result at or after the acceptance generation may authoritatively decide whether the newly accepted descriptor exists.
+
+#### 18.5.2 Confirmed decline
+
+For **Decline**, the screen first uses the shared confirmation dialog. Cancelling never enters the provider mutation. After confirmation:
+
+1. Require a fresh invitation and install its `declining` mutation entry.
+2. Call `declineGroupInvitation` once.
+3. On `204`, install a `decline` barrier, remove the card, update the count, and announce success.
+4. Run a forced invitation refresh. Absence clears the barrier; presence is a conflicting remote state and produces a safe retryable error without automatically sending DELETE again.
+
+Decline never starts repository-content discovery on its own, never creates a group descriptor, and never changes cross-group aggregates. A normal dashboard refresh may still run both branches through the shared lifecycle path.
+
+#### 18.5.3 Ambiguous outcomes
+
+After timeout, connection loss, `404`, `409`, or an otherwise ambiguous decision response, do not immediately replay the mutation. Fetch a fresh invitation list; acceptance additionally runs group discovery. Classify the result with a pure function:
+
+```ts
+function reconcileInvitationDecision(
+  intended: { invitation: PendingGroupInvitation; action: 'accept' | 'decline' },
+  openInvitations: readonly PendingGroupInvitation[],
+  discoveredGroups: readonly DiscoveredGroup[] | null,
+):
+  | { kind: 'still_open' }
+  | { kind: 'accepted'; group: DiscoveredGroup }
+  | { kind: 'resolved_decline' }
+  | { kind: 'unknown' }
+  | { kind: 'unavailable' };
+```
+
+- If the same invitation ID remains open with the same repository ID, preserve the card and permit a new explicit user retry.
+- For an intended accept, a valid discovered group with the repository ID is accepted success even though the original response was lost.
+- For an intended decline, absence from the fresh invitation list is treated as resolved, as required by the PRD.
+- For an intended accept, absence while accepted-group discovery failed is `unknown`; retry reconciliation reads without resending PATCH.
+- For an intended accept, absence with no valid discovered group is `unavailable`; explain that the invitation is no longer available without claiming it was accepted, declined, revoked, or expired.
+- A reused invitation ID pointing at different repository data is a conflict and also maps to `unavailable`.
+
+If invitation reconciliation fails, or acceptance reconciliation cannot obtain a successful group-discovery result, retain the card in stale state when it still exists locally, clear the busy indicator, and expose `invitation_decision_unknown` with a reconciliation retry. That retry performs reads first and never silently resends PATCH or DELETE.
+
+### 18.6 Cache, aggregates, and consistency boundaries
+
+CR-003 does not change `SnapshotStore`, AsyncStorage key versions, `GroupSnapshotV1`, or repository schemas. Never persist:
+
+- open invitation lists;
+- provisional invitation names;
+- invitation decision barriers;
+- per-card mutation state; or
+- accepted-pending-discovery records.
+
+This avoids presenting an old private invitation after process restart or account change. On cold start, hydrate accepted groups exactly as today while invitation state begins as loading and comes only from GitHub. A process restart after confirmed acceptance relies on normal accepted-group discovery; a still-open invitation is fetched again from GitHub.
+
+Invitation cards never contribute to group counts, member previews, currency aggregates, owed/owing totals, spending totals, balances, settlement suggestions, or last-synchronized times. Only a valid `DiscoveredGroup` may enter those selectors. `applyGroupSnapshot` and existing CR-001/CR-002 confirmed-mutation reconciliation remain unchanged.
+
+The owner-side selected-group snapshot may continue caching `PendingMember[] | null` because that data describes one repository already accessible to the current user. This is distinct from the non-persisted account-level received invitation list.
+
+### 18.7 UI, permissions, and accessibility
+
+Place the invitation section in the groups screen list header immediately after the full-width **Create a group** action and before accepted group rows. Omit the entire section when the authoritative fresh list is empty. A stale non-empty list is visibly marked as needing refresh and has no enabled decisions.
+
+Each card renders only validated invitation metadata: provisional name, repository owner/full name, inviter, requested permission, and localized invitation date. Owner, inviter, and repository text are untrusted display strings: render them as plain text, constrain/wrap long values, and never execute or automatically link them.
+
+**Accept** is primary and does not require another confirmation because the labelled button is the explicit decision. **Decline** is secondary and opens a destructive confirmation naming the provisional group and owner and stating that a new invitation will be required to join later. Both buttons include the provisional name in their accessibility label, meet the 44 dp target, expose busy/disabled state, and announce their result through the shared live region.
+
+After confirmed acceptance, keep the user on **Your groups**. When the group validates, insert its normal accepted card in deterministic group order and announce that it was added. When GitHub accepted access but discovery cannot load the group, show the accepted-pending-discovery banner outside **Invited groups** so its state cannot be mistaken for an open invitation.
+
+The screen must distinguish these independent states without replacing the whole list:
+
+- invitations loading while cached groups are visible;
+- no fresh invitations;
+- one invitation mutating while others remain usable;
+- stale invitations awaiting reconciliation;
+- invitation-only permission/network/rate-limit failure;
+- accepted but group not yet loadable; and
+- accepted groups failing refresh while invitations load successfully.
+
+### 18.8 Security, privacy, and operational limits
+
+- Only `GET /user/repository_invitations` for the authenticated token is supported; there is no arbitrary-username invitation lookup.
+- A GitHub App user access token may receive `200 OK` with an empty invitation list for a valid pending private-repository invitation. BranchBalance cannot recover invitation metadata or offer in-app accept/decline when GitHub omits the row; the user must accept through GitHub and refresh until the roadmap item is resolved.
+- The app never reads or previews repository contents before acceptance and never describes a provisional invitation as a validated BranchBalance group.
+- Existing private, personal-account, prefix, invitee, and write-or-greater filters are enforced in the domain boundary even if the UI receives unexpected transport data.
+- Invitation IDs are accepted only from current validated state, not route params, free text, deep links, or persisted storage.
+- The user token remains in SecureStore-backed session infrastructure and is never passed through React props or invitation domain objects.
+- Private repository names and inviter identities are current-screen data. Exclude them from analytics, telemetry, crash breadcrumbs, persistent operation metadata, and user-facing raw errors.
+- Accept/decline changes GitHub collaboration only. It does not write `group.json`, expenses, settlements, caches, or a BranchBalance audit record.
+- CR-003 remains online-only. No offline mutation queue, automatic background polling, push notification, invitation history, membership removal, organization/team invitation, or leave-repository flow is introduced.
+
+### 18.9 CR-003 test architecture
+
+Extend the platform-free unit suite with table-driven coverage for:
+
+- selected invitation DTO validation, positive safe IDs, personal/private/prefix/invitee rules, and malformed-entry isolation;
+- permission ranking and exclusion of read/triage invitations;
+- provisional-name derivation, duplicate agreement/conflict, and deterministic ordering;
+- invitation barrier filtering against older refresh generations;
+- accepted-pending-discovery state transitions; and
+- every branch of pure accept/decline ambiguous-outcome reconciliation.
+
+Service/integration tests use the existing scripted GitHub transport, fake clock, authenticated client, and in-memory provider harness to cover:
+
+- empty, one-page, and paginated invitation lists with no partial publish;
+- mixed eligible/ineligible entries and safe warning output;
+- independent all-settled dashboard refresh outcomes and one shared lifecycle promise;
+- `204` accept followed by valid group discovery, delayed visibility, missing/malformed `group.json`, installation mismatch, and discovery failure;
+- `204` decline, cancelled decline, and invitation-list confirmation;
+- timeout/connection-loss/`404`/`409` reconciliation for still-open, accepted, resolved-decline, unavailable, and read-failure states;
+- an invitation refresh begun before a confirmed decision that cannot resurrect the card;
+- a group refresh begun before acceptance that cannot overwrite the forced post-mutation generation;
+- per-ID duplicate-submit prevention while a different invitation remains actionable;
+- token refresh-once, terminal authentication, permission, primary/secondary rate-limit, and reauthorization behavior; and
+- sign-out/account-switch clearing all invitation memory without writing new AsyncStorage records.
+
+Component tests cover exact section placement below **Create a group**, hidden authoritative empty state, metadata wrapping, fresh/stale cards, count updates, accessible labels, per-card busy state, decline confirmation/cancel, success announcements, accepted-pending-discovery retry, scoped errors, large text, and accepted-group insertion.
+
+Extend the physical two-account Android acceptance run exactly as required by PRD section 18.12: invite, observe below **Create a group**, decline, resend, accept, validate the new group on both devices, then interrupt the network after acceptance submission and verify read-based reconciliation without duplicate mutation or a false pending card.
+
+### 18.10 Implementation sequence
+
+CR-003 was implemented after the existing Phase 1/CR-001/CR-002 gates were green, in this order:
+
+1. **Domain types and pure decisions:** add transport-independent invitation types, DTO schemas, eligibility/permission rules, provisional naming, ordering, decision barriers, reconciliation, and unit tests.
+2. **GitHub gateway:** add paginated list and accept/decline operations, safe typed errors, permission/reauthorization handling, and scripted transport coverage.
+3. **Dashboard state:** extend `GroupsProvider` with separate invitation resource/mutation state, all-settled single-flight refresh, non-persistent account cleanup, forced post-mutation generations, and stale-result barriers.
+4. **Your groups experience:** place the section below **Create a group**, implement accessible cards, decline confirmation, accepted-pending-discovery recovery, scoped refresh states, and component tests.
+5. **Hardening and acceptance:** exercise ambiguous outcomes, pre-mutation refresh races, rate limits, large text, two physical accounts, and the existing typecheck/lint/test/doctor/APK gates.
+
+Organization/team invitations, unrelated GitHub repository invitations, read-only membership, pre-accept repository previews, push/background notifications, invitation history, owner-side cancellation, permission editing, leaving accepted repositories, and offline decisions remain outside CR-003.

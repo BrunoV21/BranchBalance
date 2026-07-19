@@ -13,7 +13,9 @@ If repository creation succeeds but the group file cannot be written, BranchBala
 
 ## Invite members
 
-The repository owner enters a GitHub username from the Members tab. GitHub sends the private-repository invitation; the app displays it as pending until the user accepts.
+The repository owner enters a GitHub username from the Members tab. GitHub sends the private-repository invitation; the app displays it as pending until the user accepts or declines it.
+
+The invitee sees eligible BranchBalance invitations below **Create a group** on **Your groups**. They can review the repository, inviter, requested access, and invitation date, then accept or decline without leaving BranchBalance. Acceptance keeps the user on **Your groups** while the app validates the repository and adds a valid group to **Active groups**.
 
 The form rejects the owner, an accepted collaborator, and an already-pending username. GitHub remains authoritative for both accepted and pending membership.
 

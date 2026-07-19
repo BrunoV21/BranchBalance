@@ -1,6 +1,6 @@
 # BranchBalance — Phase 1 Product Requirements Document
 
-**Status:** Phase 1, CR-001, and CR-002 implemented; physical-device acceptance pending
+**Status:** Phase 1 and CR-001 through CR-003 implemented; CR-003 physical-device acceptance blocked by a known GitHub App token limitation
 
 **Last updated:** 2026-07-19
 
@@ -8,7 +8,7 @@
 
 **Repository prefix:** `branch-balance`
 
-**Active change requests:** None; CR-001 and CR-002 are implemented
+**Active change requests:** None; CR-001, CR-002, and CR-003 are implemented
 
 ## 1. Product summary
 
@@ -1122,10 +1122,228 @@ The manual two-account Android test must record a partial pending payment with a
 
 These require separate product and security requirements before implementation.
 
-## 18. Technical references
+## 18. Change request CR-003 — In-app group invitation decisions
+
+**Status:** Implemented; physical two-account Android acceptance blocked by the known limitation in section 18.9.1
+
+**Requested:** 2026-07-19
+
+**Target:** Next product increment; release name to be decided
+
+### 18.1 Context and motivation
+
+Phase 1 lets a repository owner invite another GitHub user from BranchBalance, but the invitee must leave the app and accept through a GitHub notification, email, or website before the group becomes discoverable. This breaks the BranchBalance onboarding loop and gives a signed-in invitee no indication that a group is waiting for them.
+
+CR-003 brings the invitee side of GitHub repository collaboration into BranchBalance. A signed-in user sees eligible pending BranchBalance repository invitations on the top-level **Your groups** screen and can accept or decline each invitation without leaving the app.
+
+GitHub remains the source of truth. CR-003 does not create a BranchBalance invitation record, duplicate membership state in `group.json`, or expose invitations belonging to another GitHub user.
+
+### 18.2 Product outcome
+
+The invitation flow becomes:
+
+1. A repository owner invites a GitHub user from the existing Members experience.
+2. The invitee signs in to BranchBalance or returns to the foreground.
+3. The **Your groups** screen shows the pending invitation directly below **Create a group** and before accepted groups.
+4. The invitee reviews the repository owner, inviter, requested access, and invitation date.
+5. The invitee accepts or declines in BranchBalance.
+6. After acceptance, BranchBalance refreshes accessible repositories, validates `group.json`, and moves the group into the accepted group list.
+7. After decline, the invitation disappears and the user does not gain repository or group access.
+
+### 18.3 Confirmed decisions
+
+| Area | Decision |
+|---|---|
+| Surface | Pending invitations appear on the top-level **Your groups** screen at `/(app)/groups`, not inside a selected group's Overview tab |
+| Placement | The **Invited groups** section appears immediately below the primary **Create a group** action and before accepted group cards |
+| Authority | GitHub repository invitations are authoritative; BranchBalance stores no independent invitation or membership record |
+| Scope | Phase 1 personal-account, private `branch-balance-<slug>` repositories requesting write access or greater |
+| Discovery | Read all open invitations for the authenticated user with `GET /user/repository_invitations`, following pagination |
+| Acceptance | Accept with `PATCH /user/repository_invitations/{invitation_id}` and then run group discovery and validation |
+| Decline | Require confirmation, then decline with `DELETE /user/repository_invitations/{invitation_id}` |
+| Pending access | A pending invite is not a membership and cannot open group data, affect balances, or participate in expenses |
+| Validation | The app cannot trust or read `group.json` before access is granted; it validates the repository only after acceptance |
+| Refresh | Invitation discovery participates in the existing launch, focus, foreground, retry, and pull-to-refresh lifecycle |
+
+### 18.4 Invitation discovery and eligibility
+
+Whenever the top-level group list refreshes, BranchBalance fetches the authenticated user's open repository invitations in parallel with accepted-group discovery. Pagination must continue until every open invitation is inspected.
+
+An invitation is eligible for the **Invited groups** section when all of the following response metadata is present and valid:
+
+- A stable positive invitation ID
+- A private repository owned by a personal GitHub account
+- A repository name beginning with `branch-balance-`
+- An invitee matching the authenticated GitHub login after case-insensitive normalization
+- Requested repository permission of write, maintain, or admin
+- Repository owner and inviter identities
+
+BranchBalance invitations created through the existing Members flow request write access and therefore satisfy the permission rule. Invitations to unrelated repositories, organization-owned repositories, or repositories requesting only read or triage access remain manageable through GitHub and do not appear as joinable BranchBalance groups.
+
+Before acceptance, the app has not validated the repository contents. The invitation card derives a readable provisional name from the repository slug and labels the item as a GitHub repository invitation; it must not claim that the group is valid or display budget, members, expenses, balances, or other repository-derived data.
+
+Invitations are ordered by `created_at` newest first, then by case-insensitive repository full name and invitation ID for deterministic ties. Duplicate invitation IDs are collapsed without combining invitations for different repositories.
+
+### 18.5 Your groups experience
+
+The top-level screen order is:
+
+1. Screen heading and account identity
+2. Cross-group balance summary
+3. Primary **Create a group** action
+4. **Invited groups**, when one or more eligible invitations exist
+5. Accepted groups
+
+Each invitation card shows:
+
+- Provisional group name derived from `branch-balance-<slug>`
+- Repository owner and repository name
+- Inviter login
+- Requested permission
+- Invitation date
+- Primary **Accept** action
+- Secondary **Decline** action
+
+The section header shows the number of eligible pending invitations. It is omitted when there are none; the zero-invitation state must not add another empty card to the screen. Invitation actions have accessible names containing the provisional group name, remain usable with large text, and do not rely on color alone to communicate state.
+
+Only the selected invitation's actions are disabled while its mutation is running. Other invitation cards and accepted groups remain usable. Repeated taps must not send duplicate mutations.
+
+### 18.6 Accept an invitation
+
+Tapping **Accept** performs `PATCH /user/repository_invitations/{invitation_id}` using the current GitHub App user access token. The app then reconciles both open invitations and accessible BranchBalance repositories before publishing UI state.
+
+On success:
+
+- Remove the invitation from **Invited groups**.
+- Rediscover accessible repositories and read the accepted repository's `group.json` from its actual default branch.
+- If the repository is a valid BranchBalance group, add it to accepted groups without requiring an app restart and keep the user on **Your groups**.
+- Announce that the invitation was accepted and the group was added.
+
+A `204` acceptance response means GitHub collaboration was accepted even if subsequent repository discovery or `group.json` validation fails. In that case, do not restore the pending invitation or claim that acceptance failed. Show a recoverable message that access was accepted but the group could not yet be loaded, preserve existing groups, and provide **Retry**. A repository with a missing or malformed `group.json` remains excluded under the existing discovery rules.
+
+If the acceptance response is lost or GitHub returns a stale/not-found conflict, refetch invitations and accessible repositories before offering another mutation. If the invitation is gone and a valid accessible group exists, treat acceptance as successful. If neither state can be confirmed, explain that the invitation is no longer available and do not guess whether it was accepted, revoked, expired, or changed elsewhere.
+
+### 18.7 Decline an invitation
+
+Tapping **Decline** opens a confirmation dialog naming the provisional group and repository owner. The dialog explains that declining removes the GitHub invitation and that the owner must send a new invitation if the user changes their mind.
+
+After confirmation, BranchBalance calls `DELETE /user/repository_invitations/{invitation_id}`. A successful decline removes the card immediately, updates the section count, keeps the user on **Your groups**, and does not add the repository to accepted groups.
+
+If the decline result is ambiguous, refetch open invitations. If the invitation is absent, treat it as resolved; if it remains open, preserve the card and offer a safe retry. Cancelling the confirmation performs no API call.
+
+### 18.8 Synchronization, caching, and errors
+
+Invitation refresh follows the existing single-flight lifecycle behavior used by group discovery. Overlapping launch, focus, foreground, and pull-to-refresh triggers share one in-flight refresh rather than issuing duplicate invitation requests.
+
+Accepted groups and pending invitations are separate result domains:
+
+- Failure to load invitations must not hide the last successful accepted-group list.
+- Failure to refresh accepted groups must not discard freshly loaded invitations.
+- The screen shows a scoped error and retry action for whichever domain failed.
+- Pull-to-refresh retries both domains.
+
+Pending invitations are not persisted in the long-lived group snapshot cache. The screen may preserve the last in-memory successful invitation list during a transient refresh failure, visibly mark it stale, and require reconciliation before accepting or declining from a stale card. Signing out clears all in-memory invitation state.
+
+Handle `401`, token refresh, `403`, `404`, `409`, validation/spam responses, primary and secondary rate limits, timeouts, and offline failures through the shared GitHub error model. Errors use plain language and never expose access tokens or raw response bodies.
+
+### 18.9 GitHub API and permission impact
+
+CR-003 adds these authenticated-user endpoints to the GitHub API surface:
+
+| Action | Endpoint |
+|---|---|
+| List the signed-in user's open repository invitations | `GET /user/repository_invitations` |
+| Accept one repository invitation | `PATCH /user/repository_invitations/{invitation_id}` |
+| Decline one repository invitation | `DELETE /user/repository_invitations/{invitation_id}` |
+
+The calls use a GitHub App user access token and the same recommended media type and pinned API version as the shared client. The existing GitHub App **Administration: read and write** repository permission covers invitation listing and decisions; CR-003 adds no BranchBalance backend or new secret. If the installed GitHub App configuration or an existing authorization does not expose the required permission, the app must explain that GitHub access needs to be updated and route the user through reauthorization instead of hiding invitations silently.
+
+#### 18.9.1 Known limitation — pending private invitations may be invisible
+
+Physical-device testing on 2026-07-19 confirmed that `GET /user/repository_invitations` can return `200 OK` with an empty array for a GitHub App user access token even while the same signed-in GitHub account shows a valid pending private-repository invitation on GitHub. The response reported `administration=read` in `X-Accepted-GitHub-Permissions`, confirming that the request used the documented endpoint and an accepted repository permission. Because GitHub returns success with no rows, BranchBalance cannot distinguish this condition from an account with no invitations and the **Invited groups** section remains absent.
+
+This behavior is consistent with GitHub App user access tokens being restricted to resources accessible to both the user and the app: before acceptance, the invitee does not yet have repository access. Adding more repository permissions does not resolve the observed response. The account-level **Private repository invitations: read** permission remains a targeted compatibility experiment, but GitHub's authenticated-user endpoint documentation currently specifies **Administration: read**, so it is not treated as a confirmed fix.
+
+Until the roadmap item is resolved, affected invitees must accept the invitation through GitHub's website, notification, or email and then return to BranchBalance and refresh **Your groups**. Once accepted, normal installation-backed repository discovery and `group.json` validation can add the group. A reliable in-app solution may require a different authorization model using the targeted `repo:invite` OAuth scope, or a backend/owner-mediated invitation handoff; either option requires a separate security and architecture decision. See [`ROADMAP.md`](../ROADMAP.md#reliable-pre-acceptance-private-invitation-discovery).
+
+### 18.10 User stories
+
+#### US-CR003-01 — See pending group invitations
+
+As an invited GitHub user, I want pending BranchBalance groups shown with my accepted groups so that I know someone is waiting for me to join.
+
+#### US-CR003-02 — Accept a group invitation
+
+As an invitee, I want to accept from BranchBalance so that the valid group appears in **Your groups** without visiting GitHub separately.
+
+#### US-CR003-03 — Decline a group invitation
+
+As an invitee, I want to decline an unwanted group with a clear confirmation so that I do not gain repository access accidentally.
+
+#### US-CR003-04 — Understand who invited me
+
+As an invitee, I want to see the repository owner, inviter, requested access, and invitation date so that I can make an informed decision.
+
+#### US-CR003-05 — Recover from an ambiguous decision
+
+As an invitee, I want BranchBalance to reconcile GitHub state after an interrupted accept or decline so that I do not repeat a decision or see a misleading result.
+
+### 18.11 Acceptance criteria
+
+- [x] The signed-in user's eligible open BranchBalance repository invitations appear in an **Invited groups** section directly below **Create a group** on **Your groups**.
+- [x] The invitation section is absent when no eligible invitations exist and accepted groups retain their current placement and behavior.
+- [x] Invitation listing follows pagination and refreshes on app launch, group-list focus, app foreground, retry, and pull-to-refresh without duplicate concurrent requests.
+- [x] Each card identifies the provisional group, repository owner, inviter, requested permission, and invitation date and exposes accessible **Accept** and **Decline** actions.
+- [x] Pending invitations cannot be opened as groups, participate in expenses, or affect members, balances, settlements, spending totals, or cross-group summaries.
+- [x] Accepting calls GitHub exactly once per action, removes the pending card, refreshes discovery, validates `group.json`, and adds a valid accepted group without restarting the app.
+- [x] A successful GitHub acceptance followed by discovery or validation failure is presented as accepted-but-not-yet-loadable, not as a failed or pending invitation.
+- [x] Declining requires confirmation, calls GitHub exactly once after confirmation, removes the card, and does not grant repository access.
+- [x] Cancelling a decline confirmation leaves the invitation unchanged and performs no mutation.
+- [x] Ambiguous, concurrent, expired, revoked, already-decided, permission, authentication, rate-limit, and network outcomes reconcile against GitHub before retrying or reporting a final state.
+- [x] Invitation refresh failure does not hide accepted groups, and accepted-group refresh failure does not hide freshly loaded invitations.
+- [x] Invitation state is not written to `group.json`, repository files, or the persistent group snapshot cache.
+- [x] The repository owner's existing Members screen reflects acceptance or decline on its next automatic or manual refresh.
+- [ ] The complete flow works between two physical Android sessions using separate GitHub accounts. Blocked by the known limitation in section 18.9.1.
+
+### 18.12 Test requirements
+
+Unit coverage must include invitation response validation, eligibility filtering, permission ranking, case-insensitive invitee matching, provisional-name derivation, deduplication, deterministic ordering, and state transitions for loading, accepting, declining, reconciliation, and scoped failures.
+
+Integration coverage with mocked GitHub responses must include:
+
+- Empty, single-page, and paginated invitation lists
+- Eligible and excluded public, organization-owned, unrelated-prefix, insufficient-permission, malformed, and wrong-invitee invitations
+- Successful acceptance followed by valid group discovery
+- Successful acceptance followed by delayed repository visibility, inaccessible installation coverage, missing `group.json`, and malformed `group.json`
+- Successful and cancelled decline
+- Ambiguous acceptance and decline recovered by refetching both invitations and accessible repositories
+- `401` with one token refresh, `403`, `404`, `409`, validation/spam failure, rate limits, timeout, and offline behavior
+- Concurrent lifecycle refresh coalescing and per-card duplicate-submit prevention
+- Invitation failure with accepted groups preserved and accepted-group failure with invitations preserved
+
+Component coverage must verify section placement immediately below **Create a group**, hidden zero state, card metadata, section count, per-card loading state, decline confirmation copy, accessible action labels, large-text layout, success announcements, scoped errors, and safe retries.
+
+The manual two-account Android test must invite the second account from one device, observe the invitation below **Create a group** on the second device, decline once, resend the invitation, accept it in BranchBalance, and verify that the valid group moves into accepted groups on both devices after refresh. Repeat acceptance with the network interrupted after submission to verify reconciliation without duplicate mutations or a false pending state.
+
+### 18.13 Explicitly deferred from CR-003
+
+- Push notifications, background polling, email, or reminders for new invitations
+- Organization, enterprise, or team-based group invitations
+- Displaying unrelated GitHub repository invitations in BranchBalance
+- Reading or previewing `group.json`, expenses, budgets, members, or balances before repository access is accepted
+- Accepting read-only or triage-only access as BranchBalance membership
+- Invitation expiry countdowns or invitation history after an invitation is resolved
+- Revoking an accepted membership or leaving a repository from BranchBalance
+- Owner-side cancellation or permission editing of a pending invitation
+- Offline accept or decline queues
+
+These require separate product, permission, and synchronization requirements before implementation.
+
+## 19. Technical references
 
 - [Generating a user access token for a GitHub App](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)
 - [Refreshing GitHub App user access tokens](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/refreshing-user-access-tokens)
 - [GitHub App installation endpoints](https://docs.github.com/en/rest/apps/installations)
 - [Repository endpoints](https://docs.github.com/en/rest/repos/repos)
 - [Repository collaborator endpoints](https://docs.github.com/en/rest/collaborators/collaborators)
+- [Repository invitation endpoints](https://docs.github.com/en/rest/collaborators/invitations)

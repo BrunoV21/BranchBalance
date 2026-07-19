@@ -92,6 +92,46 @@ export interface PendingMember {
   avatarUrl: string | null;
 }
 
+export type GroupInvitationPermission = 'write' | 'maintain' | 'admin';
+
+export interface PendingGroupInvitation {
+  id: number;
+  repository: {
+    id: number;
+    owner: string;
+    ownerType: 'User';
+    name: string;
+    fullName: string;
+    private: true;
+  };
+  invitee: string;
+  inviter: string;
+  permission: GroupInvitationPermission;
+  createdAt: IsoInstant;
+  provisionalName: string;
+}
+
+export interface InvitationDiscoveryResult {
+  invitations: PendingGroupInvitation[];
+  warnings: DataWarning[];
+}
+
+export interface AcceptedInvitationPendingDiscovery {
+  invitationId: number;
+  repositoryId: number;
+  repositoryFullName: string;
+  provisionalName: string;
+  acceptedAt: IsoInstant;
+  reason: 'not_loadable' | 'discovery_failed';
+}
+
+export interface ConfirmedInvitationDecision {
+  invitationId: number;
+  repositoryId: number;
+  action: 'accept' | 'decline';
+  confirmedAt: IsoInstant;
+}
+
 export interface MemberBalance {
   login: string;
   totalPaidMinor: number;
