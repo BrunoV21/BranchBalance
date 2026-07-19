@@ -79,6 +79,52 @@ describe('GitHubGateway received group invitations', () => {
   });
 });
 
+describe('GitHubGateway activity commits', () => {
+  const repository = { id: 1, owner: 'owner', name: 'branch-balance-trip', defaultBranch: 'trunk', installationId: 10, private: true as const, canAdmin: true, canWrite: true };
+  const row = (sha: string, message = 'Update spending plan') => ({
+    sha,
+    commit: { message, committer: { date: '2026-07-19T12:00:00Z' } },
+    author: { login: 'Friend' },
+  });
+
+  it('uses the default branch and stops when the checkpoint appears on page two', async () => {
+    const checkpoint = 'a'.repeat(40);
+    const pageOne = Array.from({ length: 50 }, (_, index) => row((index + 100).toString(16).padStart(40, '0')));
+    const request = jest.fn(async (_route: string, parameters: Record<string, unknown>) => ({
+      data: parameters.page === 1 ? pageOne : [row('b'.repeat(40), 'External\nInjected'), row(checkpoint)], headers: {}, status: 200,
+    }));
+    const gateway = new GitHubGatewayImpl({ request: request as never }, { now: () => new Date() });
+
+    const result = await gateway.listGroupActivityCommits(repository, checkpoint);
+
+    expect(result).toMatchObject({ checkpointFound: true, hasMore: false });
+    expect(result.commits).toHaveLength(52);
+    expect(result.commits[50]).toMatchObject({ firstMessageLine: 'External', authorLogin: 'friend', committedAt: '2026-07-19T12:00:00.000Z' });
+    expect(request).toHaveBeenNthCalledWith(1, 'GET /repos/{owner}/{repo}/commits', expect.objectContaining({ sha: 'trunk', page: 1, per_page: 50 }));
+    expect(request).toHaveBeenNthCalledWith(2, 'GET /repos/{owner}/{repo}/commits', expect.objectContaining({ sha: 'trunk', page: 2, per_page: 50 }));
+  });
+
+  it('caps traversal at two pages and rejects a malformed page atomically', async () => {
+    const validPage = Array.from({ length: 50 }, (_, index) => row((index + 100).toString(16).padStart(40, '0')));
+    const capped = new GitHubGatewayImpl({ request: jest.fn().mockResolvedValue({ data: validPage, headers: {}, status: 200 }) }, { now: () => new Date() });
+    await expect(capped.listGroupActivityCommits(repository, 'f'.repeat(40))).resolves.toMatchObject({ checkpointFound: false, hasMore: true, commits: expect.arrayContaining([expect.any(Object)]) });
+
+    const malformed = new GitHubGatewayImpl({ request: jest.fn(async (_route, parameters) => ({ data: parameters.page === 1 ? validPage : [{ nope: true }], headers: {}, status: 200 })) as never }, { now: () => new Date() });
+    await expect(malformed.listGroupActivityCommits(repository, 'f'.repeat(40))).rejects.toThrow('GitHub returned invalid commit history.');
+  });
+
+  it('treats an empty-repository 409 as an empty successful slice', async () => {
+    const gateway = new GitHubGatewayImpl({ request: jest.fn().mockRejectedValue(new AppFailure({ kind: 'github', status: 409, safeMessage: 'Empty repository', retryable: false })) }, { now: () => new Date() });
+    await expect(gateway.listGroupActivityCommits(repository, null)).resolves.toEqual({ commits: [], checkpointFound: true, hasMore: false, warnings: [] });
+  });
+
+  it('does not hide a non-empty repository conflict', async () => {
+    const failure = new AppFailure({ kind: 'github', status: 409, safeMessage: 'Repository conflict', retryable: false });
+    const gateway = new GitHubGatewayImpl({ request: jest.fn().mockRejectedValue(failure) }, { now: () => new Date() });
+    await expect(gateway.listGroupActivityCommits(repository, null)).rejects.toBe(failure);
+  });
+});
+
 describe('GitHubGateway group refresh', () => {
   it('excludes malformed expenses and calculates one atomic snapshot', async () => {
     const expense = {
@@ -124,9 +170,10 @@ describe('GitHubGateway expense writes', () => {
   };
 
   it('creates a UUID path and retains the returned blob SHA', async () => {
-    const request = jest.fn().mockResolvedValue({ data: { content: { sha: 'new-sha' } }, headers: {}, status: 201 });
+    const commitSha = 'a'.repeat(40);
+    const request = jest.fn().mockResolvedValue({ data: { content: { sha: 'new-sha' }, commit: { sha: commitSha, committer: { date: '2026-07-19T12:00:00Z' } } }, headers: {}, status: 201 });
     const gateway = new GitHubGatewayImpl({ request }, { now: () => new Date() });
-    await expect(gateway.createExpense(repository, expense)).resolves.toMatchObject({ blobSha: 'new-sha', path: `expenses/${expense.id}.json` });
+    await expect(gateway.createExpense(repository, expense)).resolves.toMatchObject({ value: { blobSha: 'new-sha', path: `expenses/${expense.id}.json` }, commit: { sha: commitSha, committedAt: '2026-07-19T12:00:00.000Z' } });
     expect(request).toHaveBeenCalledWith('PUT /repos/{owner}/{repo}/contents/{path}', expect.objectContaining({ message: `Add expense ${expense.id}`, branch: 'main' }));
   });
 
@@ -148,7 +195,7 @@ describe('GitHubGateway expense writes', () => {
       throw new Error(`Unexpected ${route}`);
     });
     const gateway = new GitHubGatewayImpl(client, { now: () => new Date() });
-    await expect(gateway.deleteExpense(repository, { expense, blobSha: 'old-sha', path: `expenses/${expense.id}.json`, sourceDocument: { ...expense } })).resolves.toBeUndefined();
+    await expect(gateway.deleteExpense(repository, { expense, blobSha: 'old-sha', path: `expenses/${expense.id}.json`, sourceDocument: { ...expense } })).resolves.toEqual({ value: null, commit: null });
   });
 
   it('preserves unrelated passthrough properties during an edit', async () => {
@@ -156,7 +203,7 @@ describe('GitHubGateway expense writes', () => {
     const gateway = new GitHubGatewayImpl({ request }, { now: () => new Date() });
     const updated = { ...expense, description: 'Updated dinner' };
     const file = await gateway.updateExpense(repository, { expense, blobSha: 'old-sha', path: `expenses/${expense.id}.json`, sourceDocument: { ...expense, future: { retained: true } } }, updated);
-    expect(file.sourceDocument.future).toEqual({ retained: true });
+    expect(file.value.sourceDocument.future).toEqual({ retained: true });
     const body = JSON.parse(atob(jest.mocked(request).mock.calls[0]?.[1]?.content as string));
     expect(body).toMatchObject({ description: 'Updated dinner', future: { retained: true } });
   });
@@ -171,7 +218,7 @@ describe('GitHubGateway spending-plan writes', () => {
     const request = jest.fn().mockResolvedValue({ data: { content: { sha: 'next-group-sha' } }, headers: {}, status: 200 });
     const gateway = new GitHubGatewayImpl({ request }, { now: () => new Date() });
     const result = await gateway.updateSpendingPlan(repository, current, plan);
-    expect(result).toMatchObject({ blobSha: 'next-group-sha', group: { spending_plan: plan }, sourceDocument: { future: { retained: true } } });
+    expect(result).toMatchObject({ value: { blobSha: 'next-group-sha', group: { spending_plan: plan }, sourceDocument: { future: { retained: true } } } });
     expect(request).toHaveBeenCalledWith('PUT /repos/{owner}/{repo}/contents/{path}', expect.objectContaining({ sha: 'group-sha', message: 'Update spending plan' }));
   });
 
@@ -182,9 +229,9 @@ describe('GitHubGateway spending-plan writes', () => {
 
     const result = await gateway.updateSpendingPlan(repository, currentWithPlan, null);
 
-    expect(result.group.spending_plan).toBeUndefined();
-    expect(result.sourceDocument).toMatchObject({ future: { retained: true } });
-    expect(result.sourceDocument).not.toHaveProperty('spending_plan');
+    expect(result.value.group.spending_plan).toBeUndefined();
+    expect(result.value.sourceDocument).toMatchObject({ future: { retained: true } });
+    expect(result.value.sourceDocument).not.toHaveProperty('spending_plan');
     expect(request).toHaveBeenCalledWith('PUT /repos/{owner}/{repo}/contents/{path}', expect.objectContaining({ sha: 'group-sha', message: 'Remove spending plan' }));
   });
 
@@ -200,13 +247,16 @@ describe('GitHubGateway spending-plan writes', () => {
   });
 
   it('recognizes an ambiguous write that already committed semantically', async () => {
-    const request = jest.fn(async (route: string) => {
+    const commitSha = 'b'.repeat(40);
+    const request = jest.fn(async (route: string, _parameters: Record<string, unknown>) => {
       if (route.startsWith('PUT ')) throw new AppFailure({ kind: 'network', retryable: true });
       if (route === 'GET /repos/{owner}/{repo}/contents/{path}') return { data: { type: 'file', sha: 'confirmed-sha', content: encoded({ ...group, spending_plan: plan }) }, headers: {}, status: 200 };
+      if (route === 'GET /repos/{owner}/{repo}/commits') return { data: [{ sha: commitSha, commit: { message: 'Update spending plan', committer: { date: '2026-07-19T12:00:00Z' } }, author: { login: 'owner' } }], headers: {}, status: 200 };
       throw new Error(`Unexpected ${route}`);
     });
     const gateway = new GitHubGatewayImpl({ request: request as never }, { now: () => new Date() });
-    await expect(gateway.updateSpendingPlan(repository, current, plan)).resolves.toMatchObject({ blobSha: 'confirmed-sha', group: { spending_plan: plan } });
-    expect(request).toHaveBeenCalledTimes(2);
+    await expect(gateway.updateSpendingPlan(repository, current, plan)).resolves.toMatchObject({ value: { blobSha: 'confirmed-sha', group: { spending_plan: plan } }, commit: { sha: commitSha } });
+    expect(request).toHaveBeenCalledTimes(3);
+    expect(request).toHaveBeenLastCalledWith('GET /repos/{owner}/{repo}/commits', expect.objectContaining({ path: 'group.json', sha: 'main', page: 1, per_page: 10 }));
   });
 });

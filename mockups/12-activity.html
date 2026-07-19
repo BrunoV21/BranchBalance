@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>BranchBalance — Recent activity</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<main class="app-page">
+  <section class="phone">
+    <div class="statusbar">
+      <span>9:41</span>
+      <div class="status-icons"><span>5G</span><span class="status-dot"></span><span class="battery"></span></div>
+    </div>
+
+    <header class="app-header">
+      <a class="icon-button" href="03-groups.html" aria-label="Back to Your groups">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
+      </a>
+      <div class="header-main" style="flex:1">
+        <div class="eyebrow">Across your groups</div>
+        <h1 class="app-title">Recent activity</h1>
+      </div>
+      <button class="header-text-action" type="button" data-activity-clear>Clear all</button>
+    </header>
+
+    <div class="content activity-content">
+      <div class="activity-refresh-state" role="status">
+        <span class="pill success"><span class="dot"></span>Checked just now</span>
+        <span>Foreground refresh</span>
+      </div>
+
+      <div class="callout activity-notice">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5"></path><path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5"></path></svg>
+        <span>Activity appears after BranchBalance checks GitHub while the app is open. It is a recent summary, not real-time push delivery.</span>
+      </div>
+
+      <div data-activity-list>
+        <section class="section activity-section" aria-labelledby="new-activity-title">
+          <div class="section-header">
+            <span class="section-title" id="new-activity-title">New since your last visit</span>
+            <span class="pill pending" data-new-activity-count><span class="dot"></span>3 new</span>
+          </div>
+
+          <div class="activity-list">
+            <article class="activity-card is-unread" data-activity-item data-activity-unread>
+              <a class="activity-link" href="05-group-overview.html" aria-label="Expense updated in Road trip 2026 by maya-brown, 8 minutes ago">
+                <span class="activity-icon expense">
+                  <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z"></path></svg>
+                </span>
+                <span class="activity-main">
+                  <span class="activity-title-row"><strong>Expense updated</strong><span class="activity-new">New</span></span>
+                  <span class="activity-group">Road trip 2026</span>
+                  <span class="activity-meta">@maya-brown · 8 min ago</span>
+                </span>
+              </a>
+              <button class="activity-dismiss" type="button" data-activity-dismiss aria-label="Dismiss Expense updated in Road trip 2026">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m18 6-12 12M6 6l12 12"></path></svg>
+              </button>
+            </article>
+
+            <article class="activity-card is-unread" data-activity-item data-activity-unread>
+              <a class="activity-link" href="09-balances.html" aria-label="Payment confirmed in Apartment by lucas-costa, 1 hour ago">
+                <span class="activity-icon payment">
+                  <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>
+                </span>
+                <span class="activity-main">
+                  <span class="activity-title-row"><strong>Payment confirmed</strong><span class="activity-new">New</span></span>
+                  <span class="activity-group">Apartment</span>
+                  <span class="activity-meta">@lucas-costa · 1 hr ago</span>
+                </span>
+              </a>
+              <button class="activity-dismiss" type="button" data-activity-dismiss aria-label="Dismiss Payment confirmed in Apartment">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m18 6-12 12M6 6l12 12"></path></svg>
+              </button>
+            </article>
+
+            <article class="activity-card is-unread" data-activity-item data-activity-unread>
+              <a class="activity-link" href="03-groups.html" aria-label="Group invitation received for Lisbon weekend from maya-brown, 3 hours ago">
+                <span class="activity-icon invitation">
+                  <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z"></path><path d="m4 7 8 6 8-6"></path></svg>
+                </span>
+                <span class="activity-main">
+                  <span class="activity-title-row"><strong>Group invitation received</strong><span class="activity-new">New</span></span>
+                  <span class="activity-group">Lisbon weekend</span>
+                  <span class="activity-meta">Invited by @maya-brown · 3 hr ago</span>
+                </span>
+              </a>
+              <button class="activity-dismiss" type="button" data-activity-dismiss aria-label="Dismiss Group invitation received for Lisbon weekend">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m18 6-12 12M6 6l12 12"></path></svg>
+              </button>
+            </article>
+          </div>
+        </section>
+
+        <section class="section activity-section" aria-labelledby="earlier-activity-title">
+          <div class="section-header"><span class="section-title" id="earlier-activity-title">Earlier</span></div>
+          <div class="activity-list">
+            <article class="activity-card" data-activity-item>
+              <a class="activity-link" href="10-spending.html" aria-label="Spending plan updated in Road trip 2026 by alexk, yesterday at 6:14 PM">
+                <span class="activity-icon plan">
+                  <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"></path></svg>
+                </span>
+                <span class="activity-main">
+                  <span class="activity-title-row"><strong>Spending plan updated</strong></span>
+                  <span class="activity-group">Road trip 2026</span>
+                  <span class="activity-meta">@alexk · Yesterday, 6:14 PM</span>
+                </span>
+              </a>
+              <button class="activity-dismiss" type="button" data-activity-dismiss aria-label="Dismiss Spending plan updated in Road trip 2026">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m18 6-12 12M6 6l12 12"></path></svg>
+              </button>
+            </article>
+
+            <article class="activity-card" data-activity-item>
+              <a class="activity-link" href="05-group-overview.html" aria-label="Expense added in Family by paola, July 17 at 12:32 PM">
+                <span class="activity-icon expense">
+                  <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+                </span>
+                <span class="activity-main">
+                  <span class="activity-title-row"><strong>Expense added</strong></span>
+                  <span class="activity-group">Family</span>
+                  <span class="activity-meta">@paola · 17 Jul, 12:32 PM</span>
+                </span>
+              </a>
+              <button class="activity-dismiss" type="button" data-activity-dismiss aria-label="Dismiss Expense added in Family">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m18 6-12 12M6 6l12 12"></path></svg>
+              </button>
+            </article>
+
+            <article class="activity-card" data-activity-item>
+              <a class="activity-link" href="05-group-overview.html" aria-label="Group data updated in Apartment by a collaborator, July 16 at 9:08 AM">
+                <span class="activity-icon generic">
+                  <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h6l2 2h10v10H3z"></path><path d="M3 7V5h6l2 2"></path></svg>
+                </span>
+                <span class="activity-main">
+                  <span class="activity-title-row"><strong>Group data updated</strong></span>
+                  <span class="activity-group">Apartment</span>
+                  <span class="activity-meta">A collaborator · 16 Jul, 9:08 AM</span>
+                </span>
+              </a>
+              <button class="activity-dismiss" type="button" data-activity-dismiss aria-label="Dismiss Group data updated in Apartment">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m18 6-12 12M6 6l12 12"></path></svg>
+              </button>
+            </article>
+          </div>
+        </section>
+      </div>
+
+      <div class="activity-empty hidden" data-activity-empty>
+        <span class="activity-empty-icon">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v13H4z"></path><path d="M4 13h4l2 3h4l2-3h4"></path></svg>
+        </span>
+        <h2>Nothing new to review</h2>
+        <p>New activity will appear here after BranchBalance observes group changes during a foreground refresh.</p>
+      </div>
+    </div>
+
+    <div class="toast" role="status" aria-live="polite"></div>
+  </section>
+</main>
+<script src="script.js"></script>
+</body>
+</html>

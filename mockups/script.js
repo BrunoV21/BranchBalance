@@ -45,6 +45,37 @@
     document.querySelectorAll('[data-active-group-count]').forEach((count) => { count.textContent = '4'; });
   }
 
+  function syncActivityMockup() {
+    const items = Array.from(document.querySelectorAll('[data-activity-item]'));
+    const unread = items.filter((item) => item.hasAttribute('data-activity-unread'));
+    const list = document.querySelector('[data-activity-list]');
+    const empty = document.querySelector('[data-activity-empty]');
+    const clear = document.querySelector('[data-activity-clear]');
+    const count = document.querySelector('[data-new-activity-count]');
+
+    if (list) list.classList.toggle('hidden', items.length === 0);
+    if (empty) empty.classList.toggle('hidden', items.length !== 0);
+    if (clear) clear.classList.toggle('hidden', items.length === 0);
+    if (count) {
+      count.innerHTML = `<span class="dot"></span>${unread.length} new`;
+      count.classList.toggle('hidden', unread.length === 0);
+    }
+
+    document.querySelectorAll('.activity-section').forEach((section) => {
+      section.classList.toggle('hidden', section.querySelectorAll('[data-activity-item]').length === 0);
+    });
+  }
+
+  function applyChartFilter(filterName, value, label) {
+    const filter = document.querySelector(`[data-expense-filter="${filterName}"]`);
+    if (!filter) return;
+    filter.value = value;
+    applyExpenseFilters();
+    const explorer = document.querySelector('#expenses');
+    if (explorer) explorer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    showToast(`${label} expenses shown`);
+  }
+
   document.addEventListener('click', (event) => {
     const themeButton = event.target.closest('[data-theme-toggle]');
     if (themeButton) {
@@ -75,9 +106,40 @@
       applyExpenseFilters();
     }
 
+    const categoryFilter = event.target.closest('[data-chart-filter-category]');
+    if (categoryFilter) {
+      const label = categoryFilter.querySelector('.spending-row-title')?.textContent || 'Category';
+      applyChartFilter('category', categoryFilter.dataset.chartFilterCategory, label);
+    }
+
+    const scopeFilter = event.target.closest('[data-chart-filter-scope]');
+    if (scopeFilter) {
+      const label = scopeFilter.dataset.chartFilterScope === 'just_me' ? 'Just me' : 'Shared';
+      applyChartFilter('scope', scopeFilter.dataset.chartFilterScope, label);
+    }
+
+    const dateFilter = event.target.closest('[data-chart-filter-date]');
+    if (dateFilter) {
+      const label = dateFilter.querySelector('.daily-date')?.textContent || 'Selected date';
+      applyChartFilter('date', dateFilter.dataset.chartFilterDate, label);
+    }
+
     const toastTrigger = event.target.closest('[data-toast-message]');
     if (toastTrigger) {
       showToast(toastTrigger.dataset.toastMessage);
+    }
+
+    const inviteGuidance = event.target.closest('[data-invite-guidance]');
+    if (inviteGuidance) {
+      const inviteCard = inviteGuidance.closest('.card');
+      const invitedLogin = inviteCard?.querySelector('input')?.value.trim() || 'the invited user';
+      const repository = inviteGuidance.dataset.repository || 'this repository';
+      const notice = document.querySelector('[data-invite-notice]');
+      if (notice) {
+        notice.textContent = `Invitation sent to @${invitedLogin}. Ask them to go to github.com and accept the invitation to collaborate on ${repository}. After accepting, they should open BranchBalance and refresh Your groups.`;
+        notice.hidden = false;
+      }
+      showToast('Invitation sent through GitHub');
     }
 
     const invitationAction = event.target.closest('[data-invitation-action]');
@@ -100,6 +162,23 @@
         }
         resolveInvitation(card);
       }, 650);
+    }
+
+    const dismissActivity = event.target.closest('[data-activity-dismiss]');
+    if (dismissActivity) {
+      const item = dismissActivity.closest('[data-activity-item]');
+      if (!item) return;
+      item.remove();
+      syncActivityMockup();
+      showToast('Activity dismissed on this device');
+    }
+
+    const clearActivity = event.target.closest('[data-activity-clear]');
+    if (clearActivity) {
+      if (!window.confirm('Clear all recent activity from this device? This will not undo any group actions.')) return;
+      document.querySelectorAll('[data-activity-item]').forEach((item) => item.remove());
+      syncActivityMockup();
+      showToast('Recent activity cleared on this device');
     }
   });
 
@@ -125,6 +204,13 @@
     if (event.target.matches('[data-expense-filter]')) applyExpenseFilters();
   });
 
+  document.addEventListener('keydown', (event) => {
+    const categoryFilter = event.target.closest('[data-chart-filter-category]');
+    if (!categoryFilter || (event.key !== 'Enter' && event.key !== ' ')) return;
+    event.preventDefault();
+    categoryFilter.click();
+  });
+
   window.addEventListener('storage', (event) => {
     if (event.key === 'bb-theme' && (event.newValue === 'dark' || event.newValue === 'light')) {
       root.dataset.theme = event.newValue;
@@ -134,4 +220,5 @@
 
   syncThemeIcons();
   applyExpenseFilters();
+  syncActivityMockup();
 })();

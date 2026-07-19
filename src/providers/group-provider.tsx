@@ -1,7 +1,7 @@
 import { createContext, type PropsWithChildren, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { AppFailure, DomainValidationError, messageForError } from '@/domain/errors';
-import { normalizeLogin, type ExpenseFile, type GroupFile, type GroupKey, type RemoteGroupSnapshot, type SettlementLedgerState, type SettlementPayment, type SpendingPlan, type WritableExpense } from '@/domain/types';
+import { normalizeLogin, type CommittedMutation, type ExpenseFile, type GroupFile, type GroupKey, type RemoteGroupSnapshot, type SettlementLedgerFile, type SettlementLedgerState, type SettlementPayment, type SpendingPlan, type WritableExpense } from '@/domain/types';
 import { hydrateCachedSnapshot, type ConfirmedExpenseMutation, withExpenses, withGroupFile } from '@/features/expenses/snapshot-reconciliation';
 import { githubGateway, snapshotStore, systemClock, systemLocalCalendar } from '@/infrastructure/runtime';
 import { withSettlementLedger } from '@/features/settlements/snapshot-reconciliation';
@@ -29,7 +29,7 @@ const GroupContext = createContext<GroupContextValue | null>(null);
 
 export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ owner: string; repo: string }>) {
   const { session, expire } = useSession();
-  const { state: groupsState, applyGroupSnapshot, recordConfirmedExpenseMutation, recordConfirmedSpendingPlanMutation, recordConfirmedSettlementMutation, reconcileRemoteGroupSnapshot, removeGroup } = useGroups();
+  const { state: groupsState, applyGroupSnapshot, recordConfirmedExpenseMutation, recordConfirmedSpendingPlanMutation, recordConfirmedSettlementMutation, recordLocalActivity, reconcileRemoteGroupSnapshot, removeGroup } = useGroups();
   const account = session.account;
   const key = `${owner.toLowerCase()}/${repo.toLowerCase()}` as GroupKey;
   const descriptor = groupsState.data.find((group) => group.key === key);
@@ -132,31 +132,34 @@ export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ own
   const createExpense = useCallback(async (expense: WritableExpense) => {
     const current = stateRef.current.data;
     if (!current) throw new DomainValidationError('Refresh the group before adding an expense.');
-    let file: ExpenseFile;
-    try { file = await githubGateway.createExpense(current.repository, expense); }
+    let committed: CommittedMutation<ExpenseFile>;
+    try { committed = await githubGateway.createExpense(current.repository, expense); }
     catch (error) {
       if (!(error instanceof AppFailure) || !('retryable' in error.detail && error.detail.retryable)) throw error;
       const remote = await githubGateway.readExpense(current.repository, expense.id);
       if (!remote) throw error;
       if (JSON.stringify(remote.expense) !== JSON.stringify(expense)) throw new AppFailure({ kind: 'expense_conflict', latest: remote, operation: 'edit' });
-      file = remote;
+      committed = { value: remote, commit: null };
     }
-    await commitExpenseMutation({ kind: 'upsert', file });
-  }, [commitExpenseMutation]);
+    await commitExpenseMutation({ kind: 'upsert', file: committed.value });
+    await recordLocalActivity(key, 'expense_added', committed.commit, expense.id);
+  }, [commitExpenseMutation, key, recordLocalActivity]);
 
   const updateExpense = useCallback(async (expense: WritableExpense, target: ExpenseFile) => {
     const current = stateRef.current.data;
     if (!current) throw new DomainValidationError('Refresh the group before editing an expense.');
-    const file = await githubGateway.updateExpense(current.repository, target, expense);
-    await commitExpenseMutation({ kind: 'upsert', file });
-  }, [commitExpenseMutation]);
+    const committed = await githubGateway.updateExpense(current.repository, target, expense);
+    await commitExpenseMutation({ kind: 'upsert', file: committed.value });
+    await recordLocalActivity(key, 'expense_updated', committed.commit, expense.id);
+  }, [commitExpenseMutation, key, recordLocalActivity]);
 
   const deleteExpense = useCallback(async (target: ExpenseFile) => {
     const current = stateRef.current.data;
     if (!current) throw new DomainValidationError('Refresh the group before deleting an expense.');
-    await githubGateway.deleteExpense(current.repository, target);
+    const committed = await githubGateway.deleteExpense(current.repository, target);
     await commitExpenseMutation({ kind: 'delete', expenseId: target.expense.id });
-  }, [commitExpenseMutation]);
+    await recordLocalActivity(key, 'expense_deleted', committed.commit, target.expense.id);
+  }, [commitExpenseMutation, key, recordLocalActivity]);
 
   const commitSpendingPlanMutation = useCallback(async (groupFile: GroupFile) => {
     const current = stateRef.current.data;
@@ -174,16 +177,20 @@ export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ own
     const groupFile = target ?? current?.groupFile;
     if (!current || !groupFile) throw new DomainValidationError('Refresh the group before changing its spending plan.');
     if (!current.repository.canWrite) throw new DomainValidationError('Your GitHub account cannot update this spending plan.');
-    await commitSpendingPlanMutation(await githubGateway.updateSpendingPlan(current.repository, groupFile, plan));
-  }, [commitSpendingPlanMutation]);
+    const committed = await githubGateway.updateSpendingPlan(current.repository, groupFile, plan);
+    await commitSpendingPlanMutation(committed.value);
+    await recordLocalActivity(key, 'spending_plan_updated', committed.commit);
+  }, [commitSpendingPlanMutation, key, recordLocalActivity]);
 
   const removeSpendingPlan = useCallback(async (target?: GroupFile) => {
     const current = stateRef.current.data;
     const groupFile = target ?? current?.groupFile;
     if (!current || !groupFile) throw new DomainValidationError('Refresh the group before changing its spending plan.');
     if (!current.repository.canWrite) throw new DomainValidationError('Your GitHub account cannot update this spending plan.');
-    await commitSpendingPlanMutation(await githubGateway.updateSpendingPlan(current.repository, groupFile, null));
-  }, [commitSpendingPlanMutation]);
+    const committed = await githubGateway.updateSpendingPlan(current.repository, groupFile, null);
+    await commitSpendingPlanMutation(committed.value);
+    await recordLocalActivity(key, 'spending_plan_removed', committed.commit);
+  }, [commitSpendingPlanMutation, key, recordLocalActivity]);
 
   const acceptSpendingPlanFile = useCallback(async (groupFile: GroupFile) => {
     const current = stateRef.current.data;
@@ -212,9 +219,9 @@ export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ own
       throw new DomainValidationError('Only an accepted group member with write access can record settlement payments.');
     }
     const ledger = current.settlementLedger ?? { kind: 'unverified' as const };
-    let file;
+    let committed: CommittedMutation<SettlementLedgerFile>;
     try {
-      file = await githubGateway.recordSettlementPayment(current.repository, ledger, payment, {
+      committed = await githubGateway.recordSettlementPayment(current.repository, ledger, payment, {
         currency: current.group.currency,
         expenses: current.expenses.map((item) => item.expense),
         members: current.members,
@@ -223,8 +230,9 @@ export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ own
       if (error instanceof AppFailure && error.detail.kind === 'settlement_stale') await refresh().catch(() => undefined);
       throw error;
     }
-    await commitSettlementMutation({ kind: 'ready', file });
-  }, [account, commitSettlementMutation, refresh]);
+    await commitSettlementMutation({ kind: 'ready', file: committed.value });
+    await recordLocalActivity(key, 'settlement_recorded', committed.commit, payment.id);
+  }, [account, commitSettlementMutation, key, recordLocalActivity, refresh]);
 
   const confirmSettlementPayment = useCallback(async (paymentId: string) => {
     if (!account) throw new DomainValidationError('Sign in to confirm a payment.');
@@ -236,9 +244,10 @@ export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ own
     if (ledger?.kind !== 'ready') throw new AppFailure({ kind: 'settlement_ledger_invalid' });
     const payment = ledger.file.payments.find((item) => item.id === paymentId);
     if (!payment || normalizeLogin(payment.to) !== normalizeLogin(account.login)) throw new AppFailure({ kind: 'settlement_confirmation_unauthorized' });
-    const file = await githubGateway.confirmSettlementPayment(current.repository, ledger.file, paymentId, account.login, systemClock.now().toISOString());
-    await commitSettlementMutation({ kind: 'ready', file });
-  }, [account, commitSettlementMutation, refresh]);
+    const committed = await githubGateway.confirmSettlementPayment(current.repository, ledger.file, paymentId, account.login, systemClock.now().toISOString());
+    await commitSettlementMutation({ kind: 'ready', file: committed.value });
+    await recordLocalActivity(key, 'settlement_confirmed', committed.commit, paymentId);
+  }, [account, commitSettlementMutation, key, recordLocalActivity, refresh]);
 
   const deleteSettlementPayment = useCallback(async (paymentId: string) => {
     if (!account) throw new DomainValidationError('Sign in to delete a payment.');
@@ -248,8 +257,10 @@ export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ own
     }
     const ledger = current.settlementLedger;
     if (ledger?.kind !== 'ready') throw new AppFailure({ kind: 'settlement_ledger_invalid' });
-    await commitSettlementMutation(await githubGateway.deleteSettlementPayment(current.repository, ledger.file, paymentId));
-  }, [account, commitSettlementMutation, refresh]);
+    const committed = await githubGateway.deleteSettlementPayment(current.repository, ledger.file, paymentId);
+    await commitSettlementMutation(committed.value);
+    await recordLocalActivity(key, 'settlement_deleted', committed.commit, paymentId);
+  }, [account, commitSettlementMutation, key, recordLocalActivity, refresh]);
 
   const value = useMemo(() => ({ state, accessLost, refresh, invite, createExpense, updateExpense, deleteExpense, updateSpendingPlan, removeSpendingPlan, acceptSpendingPlanFile, recordSettlementPayment, confirmSettlementPayment, deleteSettlementPayment }), [acceptSpendingPlanFile, accessLost, confirmSettlementPayment, createExpense, deleteExpense, deleteSettlementPayment, invite, recordSettlementPayment, refresh, removeSpendingPlan, state, updateExpense, updateSpendingPlan]);
   return <GroupContext.Provider value={value}>{children}</GroupContext.Provider>;

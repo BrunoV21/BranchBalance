@@ -1,4 +1,5 @@
 import { MemoryKeyValueStore, SnapshotStoreImpl } from './snapshot-store';
+import { emptyActivityInbox } from '@/features/activity/model';
 import type { RemoteGroupSnapshot } from '@/domain/types';
 import { UnsupportedCredentialStore } from './credential-store';
 
@@ -52,6 +53,19 @@ describe('SnapshotStore', () => {
     expect(raw).not.toContain('private-reference');
     expect(raw).not.toContain('private-source');
     expect(await store.readGroup(7, 'owner/repo')).toMatchObject({ settlementLedger: { kind: 'unverified' }, payments: [{ id: payment.id, hasNote: true }] });
+  });
+
+  it('persists validated account-scoped activity and clears it with the account', async () => {
+    const memory = new MemoryKeyValueStore();
+    const store = new SnapshotStoreImpl(memory);
+    const activity = emptyActivityInbox('2026-07-19T12:00:00.000Z');
+
+    await store.writeActivity(7, activity);
+    expect(await store.readActivity(7)).toEqual(activity);
+    expect(await store.readActivity(8)).toBeNull();
+
+    await store.clearAccount(7);
+    expect(await store.readActivity(7)).toBeNull();
   });
 
   it('treats corrupt records as misses and removes them', async () => {

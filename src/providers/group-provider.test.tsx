@@ -79,6 +79,7 @@ describe('GroupProvider expense mutations', () => {
   });
   const recordConfirmedSpendingPlanMutation = jest.fn();
   const recordConfirmedSettlementMutation = jest.fn();
+  const recordLocalActivity = jest.fn().mockResolvedValue(undefined);
   const reconcileRemoteGroupSnapshot = jest.fn((remote: RemoteGroupSnapshot) => reconcileConfirmedExpenseMutations(remote, confirmedMutations, 'owner', '2026-07-17'));
 
   beforeEach(() => {
@@ -87,13 +88,13 @@ describe('GroupProvider expense mutations', () => {
     jest.mocked(useSession).mockReturnValue({ session: { status: 'authenticated', account: { id: 7, login: 'owner', name: null, avatarUrl: null }, error: null }, expire: jest.fn() } as never);
     jest.mocked(useGroups).mockReturnValue({
       state: { data: [{ key: originalSnapshot.key, repository, group: originalSnapshot.group, summary: null }] },
-      applyGroupSnapshot, recordConfirmedExpenseMutation, recordConfirmedSpendingPlanMutation, recordConfirmedSettlementMutation, reconcileRemoteGroupSnapshot, removeGroup,
+      applyGroupSnapshot, recordConfirmedExpenseMutation, recordConfirmedSpendingPlanMutation, recordConfirmedSettlementMutation, recordLocalActivity, reconcileRemoteGroupSnapshot, removeGroup,
     } as never);
     jest.mocked(snapshotStore.readGroup).mockResolvedValue(originalSnapshot);
-    jest.mocked(githubGateway.createExpense).mockResolvedValue({ expense: newExpense, blobSha: 'created-sha', path: `expenses/${newExpense.id}.json`, sourceDocument: { ...newExpense } });
-    jest.mocked(githubGateway.updateExpense).mockResolvedValue({ expense: updatedExpense, blobSha: 'new-sha', path: `expenses/${updatedExpense.id}.json`, sourceDocument: { ...updatedExpense } });
+    jest.mocked(githubGateway.createExpense).mockResolvedValue({ value: { expense: newExpense, blobSha: 'created-sha', path: `expenses/${newExpense.id}.json`, sourceDocument: { ...newExpense } }, commit: null });
+    jest.mocked(githubGateway.updateExpense).mockResolvedValue({ value: { expense: updatedExpense, blobSha: 'new-sha', path: `expenses/${updatedExpense.id}.json`, sourceDocument: { ...updatedExpense } }, commit: null });
     jest.mocked(githubGateway.refreshGroup).mockResolvedValue(originalSnapshot);
-    jest.mocked(githubGateway.recordSettlementPayment).mockResolvedValue({ payments: [pendingPayment], blobSha: 'settlement-sha', path: 'settlements.json', sourceDocument: { schema_version: 1, payments: [pendingPayment] }, warnings: [] });
+    jest.mocked(githubGateway.recordSettlementPayment).mockResolvedValue({ value: { payments: [pendingPayment], blobSha: 'settlement-sha', path: 'settlements.json', sourceDocument: { schema_version: 1, payments: [pendingPayment] }, warnings: [] }, commit: null });
     jest.mocked(githubGateway.updateSpendingPlan).mockImplementation(async (_repository, current, plan) => {
       const sourceDocument: Record<string, unknown> = { ...current.sourceDocument };
       const group = { ...current.group };
@@ -104,7 +105,7 @@ describe('GroupProvider expense mutations', () => {
         delete sourceDocument.spending_plan;
         delete group.spending_plan;
       }
-      return { group, blobSha: 'next-group-sha', path: 'group.json', sourceDocument };
+      return { value: { group, blobSha: 'next-group-sha', path: 'group.json', sourceDocument }, commit: null };
     });
   });
 
@@ -139,6 +140,21 @@ describe('GroupProvider expense mutations', () => {
     expect(next.balances.members.find((member) => member.login === 'owner')?.netMinor).toBe(2000);
     expect(next.settlements).toEqual([{ from: 'friend', to: 'owner', amountMinor: 2000 }]);
     expect(applyGroupSnapshot).toHaveBeenLastCalledWith(next);
+  });
+
+  it('records a confirmed local commit as read activity without exposing mutation details', async () => {
+    const commit = { sha: 'a'.repeat(40), committedAt: '2026-07-17T12:00:00.000Z' };
+    jest.mocked(githubGateway.updateExpense).mockResolvedValueOnce({
+      value: { expense: updatedExpense, blobSha: 'new-sha', path: `expenses/${updatedExpense.id}.json`, sourceDocument: { ...updatedExpense } },
+      commit,
+    });
+    const wrapper = ({ children }: PropsWithChildren) => <GroupProvider owner="owner" repo="branch-balance-trip">{children}</GroupProvider>;
+    const view = await renderHook(() => useGroup(), { wrapper });
+    await waitFor(() => expect(view.result.current.state.data).not.toBeNull());
+
+    await act(() => view.result.current.updateExpense(updatedExpense, originalSnapshot.expenses[0]!));
+
+    expect(recordLocalActivity).toHaveBeenCalledWith(originalSnapshot.key, 'expense_updated', commit, updatedExpense.id);
   });
 
   it('publishes a pending settlement reservation without changing balances', async () => {
@@ -226,7 +242,7 @@ describe('GroupProvider expense mutations', () => {
 
     jest.mocked(useGroups).mockReturnValue({
       state: { data: [{ key: originalSnapshot.key, repository: { ...repository }, group: { ...originalSnapshot.group }, summary: null }] },
-      applyGroupSnapshot, recordConfirmedExpenseMutation, recordConfirmedSpendingPlanMutation, recordConfirmedSettlementMutation, reconcileRemoteGroupSnapshot, removeGroup,
+      applyGroupSnapshot, recordConfirmedExpenseMutation, recordConfirmedSpendingPlanMutation, recordConfirmedSettlementMutation, recordLocalActivity, reconcileRemoteGroupSnapshot, removeGroup,
     } as never);
     await view.rerender({ descriptorVersion: 2 });
 

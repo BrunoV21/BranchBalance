@@ -1,7 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { z } from 'zod';
 
-import type { AccountProfile, DiscoveredGroup, GroupKey, PendingGroupCreation, RemoteGroupSnapshot } from '@/domain/types';
+import type { AccountProfile, ActivityInboxV1, DiscoveredGroup, GroupKey, PendingGroupCreation, RemoteGroupSnapshot } from '@/domain/types';
+import { activityInboxSchema } from '@/features/activity/schema';
 
 import type { SnapshotStore, ThemePreference } from './contracts';
 
@@ -59,6 +60,7 @@ const accountKey = (id: number) => `bb:v1:account:${id}`;
 const groupsKey = (id: number) => `bb:v1:groups:${id}`;
 const groupStorageKey = (id: number, key: GroupKey) => `bb:v1:group:${id}:${encodeURIComponent(key)}`;
 const pendingKey = (id: number) => `bb:v1:pending-group:${id}`;
+const activityKey = (id: number) => `bb:v1:activity:${id}`;
 
 export class SnapshotStoreImpl implements SnapshotStore {
   constructor(private readonly storage: KeyValueStore = new AsyncKeyValueStore()) {}
@@ -101,9 +103,12 @@ export class SnapshotStoreImpl implements SnapshotStore {
   removeGroup(accountId: number, key: GroupKey) { return this.storage.remove(groupStorageKey(accountId, key)); }
   async readPendingGroup(accountId: number) { return this.readJson(pendingKey(accountId), pendingSchema) as Promise<PendingGroupCreation | null>; }
   writePendingGroup(accountId: number, value: PendingGroupCreation | null) { return value ? this.writeJson(pendingKey(accountId), value) : this.storage.remove(pendingKey(accountId)); }
+  async readActivity(accountId: number) { return this.readJson(activityKey(accountId), activityInboxSchema) as Promise<ActivityInboxV1 | null>; }
+  writeActivity(accountId: number, value: ActivityInboxV1) { return this.writeJson(activityKey(accountId), value); }
+  removeActivity(accountId: number) { return this.storage.remove(activityKey(accountId)); }
   async clearAccount(accountId: number) {
     const prefix = `bb:v1:`;
-    const suffixes = [`account:${accountId}`, `groups:${accountId}`, `group:${accountId}:`, `pending-group:${accountId}`, `profiles:${accountId}`];
+    const suffixes = [`account:${accountId}`, `groups:${accountId}`, `group:${accountId}:`, `pending-group:${accountId}`, `profiles:${accountId}`, `activity:${accountId}`];
     const keys = await this.storage.keys();
     await Promise.all(keys.filter((key) => suffixes.some((suffix) => key === `${prefix}${suffix}` || key.startsWith(`${prefix}${suffix}`))).map((key) => this.storage.remove(key)));
     if (await this.readActiveAccountId() === accountId) await this.storage.remove(ACTIVE_ACCOUNT);

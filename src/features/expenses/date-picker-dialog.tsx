@@ -56,6 +56,6 @@ export function DatePickerDialog({ value, onCancel, onConfirm }: { value: Calend
 const styles = StyleSheet.create({
   overlay: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 18 }, dialog: { width: '100%', maxWidth: 460, borderRadius: 18, borderWidth: 1, padding: 18, gap: 12, elevation: 12 },
   monthHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, monthButton: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' }, monthArrow: { fontSize: 38, lineHeight: 42, fontWeight: '500' }, monthTitle: { fontSize: 19, fontWeight: '800' },
-  grid: { flexDirection: 'row', flexWrap: 'wrap' }, cell: { width: '14.2857%', minHeight: 44, alignItems: 'center', justifyContent: 'center' }, weekDay: { fontSize: 13, fontWeight: '800' }, day: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  grid: { flexDirection: 'row', flexWrap: 'wrap' }, cell: { width: '14.2857%', minHeight: 44, alignItems: 'center', justifyContent: 'center' }, weekDay: { fontSize: 13, fontWeight: '800' }, day: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   actions: { flexDirection: 'row', gap: 10, marginTop: 4 }, action: { flex: 1 },
 });

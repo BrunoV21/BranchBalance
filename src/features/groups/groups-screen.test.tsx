@@ -118,6 +118,21 @@ describe('Groups screen invitations', () => {
   });
 });
 
+describe('Groups screen activity entry point', () => {
+  it('announces unread activity and opens the inbox from the account heading', async () => {
+    const push = jest.fn();
+    jest.mocked(useRouter).mockReturnValue({ push } as never);
+    jest.mocked(useSession).mockReturnValue({ session: { status: 'authenticated', account: { id: 7, login: 'owner', name: 'Owner', avatarUrl: null }, error: null } } as never);
+    jest.mocked(useInstallationRecheck).mockReturnValue({ attempts: 0, maxAttempts: 20, checking: false, exhausted: false, restart: jest.fn() });
+    jest.mocked(useGroups).mockReturnValue(groupsValue({ hasUnreadActivity: true }) as never);
+
+    const view = await render(<ThemeProvider><GroupsScreen /></ThemeProvider>);
+    await fireEvent.press(view.getByRole('button', { name: 'Activity inbox, new activity' }));
+
+    expect(push).toHaveBeenCalledWith('/activity');
+  });
+});
+
 function groupsValue(overrides: Record<string, unknown> = {}) {
   return {
     state: { data: [], status: 'ready', isRefreshing: false, lastSuccessfulAt: null, error: null },
@@ -131,10 +146,16 @@ function groupsValue(overrides: Record<string, unknown> = {}) {
     invitationMutations: new Map(),
     acceptedPendingDiscovery: [],
     invitationNotice: null,
+    activityState: { data: [], status: 'ready', isRefreshing: false, lastSuccessfulAt: null, error: null },
+    activityWarning: null,
+    hasUnreadActivity: false,
     refresh: jest.fn().mockResolvedValue(undefined),
     acceptInvitation: jest.fn().mockResolvedValue(undefined),
     declineInvitation: jest.fn().mockResolvedValue(undefined),
     retryPendingCreation: jest.fn(),
+    markActivityRead: jest.fn().mockResolvedValue(undefined),
+    dismissActivity: jest.fn().mockResolvedValue(undefined),
+    clearActivity: jest.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }

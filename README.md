@@ -2,7 +2,7 @@
 
 BranchBalance is a peer-distributed expense splitter backed by private GitHub repositories. GitHub provides authentication, storage, and group membership, so Phase 1 does not require an application server.
 
-The Expo application implements Android Phase 1, CR-001 spending intelligence, and CR-002 settlement payment recording as described by [`docs/PRD.md`](docs/PRD.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+The Expo application implements Android Phase 1 through CR-004, including spending intelligence, settlement payments, received group invitations, and the foreground-only local activity inbox described by [`docs/PRD.md`](docs/PRD.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Phase 1
 
@@ -19,7 +19,7 @@ CR-001 adds required category and payment-method metadata for new expenses, a Ju
 
 CR-002 adds a SHA-protected `settlements.json` ledger. Members can record full or partial payments against current suggestions, recipients must confirm receipt before balances change, and the Balances tab shows pending reservations, confirmed settlement totals, and payment history. Optional notes can hold plain-text receipt or attachment references, external transaction IDs, or financial-account identifiers; those notes remain remote-only and are redacted from device caches.
 
-BranchBalance records transfers completed elsewhere—it does not move money or connect to financial accounts. Offline Git sync, arbitrary transfers, binary receipt uploads, percentage splits, currency conversion, notifications, and iOS release builds remain outside the implemented scope.
+BranchBalance records transfers completed elsewhere—it does not move money or connect to financial accounts. Offline Git sync, arbitrary transfers, binary receipt uploads, percentage splits, currency conversion, push/background notifications, and iOS release builds remain outside the implemented scope.
 
 ## Stack
 

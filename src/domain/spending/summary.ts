@@ -1,5 +1,5 @@
 import { DomainValidationError } from '@/domain/errors';
-import { normalizeLogin, type CalendarDate, type Expense, type SpendingPlan, type SpendingSummary } from '@/domain/types';
+import { normalizeLogin, type CalendarDate, type Expense, type SpendingInsight, type SpendingPlan, type SpendingSummary } from '@/domain/types';
 
 import { calendarDayOrdinal, inclusiveCalendarDays } from './calendar';
 import { categoryBuckets, paymentMethodBuckets, type CategoryBucket, type ExpenseCategory, type PaymentMethodBucket } from './catalog';
@@ -7,6 +7,7 @@ import { categoryBuckets, paymentMethodBuckets, type CategoryBucket, type Expens
 export type ExpenseScope = 'all' | 'shared' | 'just_me';
 
 export interface SpendingFilters {
+  date: 'all' | CalendarDate;
   category: 'all' | CategoryBucket;
   paymentMethod: 'all' | PaymentMethodBucket;
   payer: 'all' | string;
@@ -14,6 +15,7 @@ export interface SpendingFilters {
 }
 
 export const emptySpendingFilters: SpendingFilters = {
+  date: 'all',
   category: 'all',
   paymentMethod: 'all',
   payer: 'all',
@@ -51,6 +53,7 @@ export function isJustMeExpense(expense: Expense): boolean {
 }
 
 export function matchesSpendingFilters(expense: Expense, filters: SpendingFilters): boolean {
+  if (filters.date !== 'all' && expense.expense_date !== filters.date) return false;
   if (filters.category !== 'all' && categoryBucketFor(expense) !== filters.category) return false;
   if (filters.paymentMethod !== 'all' && paymentMethodBucketFor(expense) !== filters.paymentMethod) return false;
   if (filters.payer !== 'all' && normalizeLogin(expense.paid_by) !== normalizeLogin(filters.payer)) return false;
@@ -76,6 +79,10 @@ export function deriveSpendingSummary(
   let totalSpentMinor = 0;
   let currentUserPaidMinor = 0;
   let currentUserShareMinor = 0;
+  let justMeMinor = 0;
+  let futureDatedMinor = 0;
+  let actualToDateMinor = 0;
+  const dailyAmounts = new Map<CalendarDate, number>();
 
   for (const expense of expenses) {
     totalSpentMinor = checkedAdd(totalSpentMinor, expense.amount_minor);
@@ -87,6 +94,10 @@ export function deriveSpendingSummary(
     for (const [login, share] of Object.entries(expense.shares_minor)) {
       if (normalizeLogin(login) === normalizedCurrentUser) currentUserShareMinor = checkedAdd(currentUserShareMinor, share);
     }
+    dailyAmounts.set(expense.expense_date, checkedAdd(dailyAmounts.get(expense.expense_date) ?? 0, expense.amount_minor));
+    if (isJustMeExpense(expense)) justMeMinor = checkedAdd(justMeMinor, expense.amount_minor);
+    if (expense.expense_date > today) futureDatedMinor = checkedAdd(futureDatedMinor, expense.amount_minor);
+    else actualToDateMinor = checkedAdd(actualToDateMinor, expense.amount_minor);
   }
 
   let budget: SpendingSummary['budget'] = null;
@@ -130,6 +141,81 @@ export function deriveSpendingSummary(
     };
   }
 
+  const buckets = [...dailyAmounts.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([date, amountMinor]) => ({ date, amountMinor }));
+  const period = plan?.starts_on && plan.ends_on ? { startsOn: plan.starts_on, endsOn: plan.ends_on, totalDays: inclusiveCalendarDays(plan.starts_on, plan.ends_on) } : null;
+  let preTripMinor = 0;
+  let afterTripMinor = 0;
+  if (period) {
+    for (const bucket of buckets) {
+      if (bucket.date < period.startsOn) preTripMinor = checkedAdd(preTripMinor, bucket.amountMinor);
+      else if (bucket.date > period.endsOn) afterTripMinor = checkedAdd(afterTripMinor, bucket.amountMinor);
+    }
+  }
+
+  let pace: SpendingSummary['analytics']['pace'] = null;
+  if (period && budget && trip?.phase === 'during' && trip.currentDay !== null) {
+    const elapsedDays = trip.currentDay;
+    const quotient = Math.floor(budget.budgetMinor / period.totalDays);
+    const remainder = budget.budgetMinor % period.totalDays;
+    const evenPaceMinor = checkedAdd(quotient * elapsedDays, Math.floor((remainder * elapsedDays) / period.totalDays));
+    const deltaMinor = actualToDateMinor - evenPaceMinor;
+    let cumulativeMinor = preTripMinor;
+    const events: NonNullable<SpendingSummary['analytics']['pace']>['events'] = [];
+    const startAmount = dailyAmounts.get(period.startsOn) ?? 0;
+    cumulativeMinor = checkedAdd(cumulativeMinor, startAmount);
+    events.push({ date: period.startsOn, cumulativeMinor });
+    for (const bucket of buckets) {
+      if (bucket.date <= period.startsOn || bucket.date > today || bucket.date > period.endsOn) continue;
+      cumulativeMinor = checkedAdd(cumulativeMinor, bucket.amountMinor);
+      events.push({ date: bucket.date, cumulativeMinor });
+    }
+    if (events.at(-1)?.date !== today) events.push({ date: today, cumulativeMinor });
+    pace = {
+      actualToDateMinor,
+      evenPaceMinor,
+      deltaMinor,
+      direction: deltaMinor < 0 ? 'below' : deltaMinor > 0 ? 'above' : 'on',
+      elapsedDays,
+      totalDays: period.totalDays,
+      events,
+      referenceEvents: [
+        { date: period.startsOn, cumulativeMinor: Math.floor(budget.budgetMinor / period.totalDays) },
+        { date: period.endsOn, cumulativeMinor: budget.budgetMinor },
+      ],
+    };
+  }
+
+  const categoryOrder = new Map(categoryBuckets.map((category, index) => [category, index]));
+  const categoryMix = categoryBuckets.filter((category) => categorySpentMinor[category] > 0).map((category) => ({
+    category,
+    spentMinor: categorySpentMinor[category],
+    sharePercentage: totalSpentMinor ? percentage(categorySpentMinor[category], totalSpentMinor) : 0,
+  })).sort((left, right) => right.spentMinor - left.spentMinor || (categoryOrder.get(left.category) ?? 0) - (categoryOrder.get(right.category) ?? 0));
+  const sharedMinor = totalSpentMinor - justMeMinor;
+  const insights: SpendingInsight[] = [];
+  if (totalSpentMinor > 0) {
+    if (pace) insights.push({ kind: 'pace', actualToDateMinor: pace.actualToDateMinor, evenPaceMinor: pace.evenPaceMinor, deltaMinor: pace.deltaMinor, direction: pace.direction });
+    if (budget?.status === 'over') insights.push({ kind: 'budget_overage', overMinor: Math.abs(budget.remainingMinor) });
+    else if (budget) {
+      const categoryOverage = (Object.entries(budget.categoryLimits) as [ExpenseCategory, NonNullable<SpendingSummary['budget']>['categoryLimits'][ExpenseCategory]][])
+        .filter((entry): entry is [ExpenseCategory, NonNullable<typeof entry[1]>] => entry[1]?.status === 'over')
+        .sort((left, right) => Math.abs(right[1].remainingMinor) - Math.abs(left[1].remainingMinor) || (categoryOrder.get(left[0]) ?? 0) - (categoryOrder.get(right[0]) ?? 0))[0];
+      if (categoryOverage) insights.push({ kind: 'category_overage', category: categoryOverage[0], overMinor: Math.abs(categoryOverage[1].remainingMinor), spentMinor: categoryOverage[1].spentMinor, limitMinor: categoryOverage[1].limitMinor });
+    }
+    const largestCategory = categoryMix[0];
+    if (largestCategory) insights.push({ kind: 'largest_category', ...largestCategory });
+    const fundingGap = currentUserPaidMinor - currentUserShareMinor;
+    if (fundingGap !== 0) insights.push({ kind: 'funding_gap', gapMinor: fundingGap });
+    if (period) {
+      const tripBuckets = buckets.filter((bucket) => bucket.date >= period.startsOn && bucket.date <= period.endsOn);
+      if (tripBuckets.length >= 2) {
+        const highest = [...tripBuckets].sort((left, right) => right.amountMinor - left.amountMinor || left.date.localeCompare(right.date))[0]!;
+        insights.push({ kind: 'highest_day', date: highest.date, amountMinor: highest.amountMinor });
+      }
+    }
+    if (sharedMinor > 0 && justMeMinor > 0) insights.push({ kind: 'scope_split', sharedMinor, justMeMinor });
+  }
+
   return {
     totalSpentMinor,
     currentUserPaidMinor,
@@ -138,6 +224,14 @@ export function deriveSpendingSummary(
     paymentMethodSpentMinor,
     budget,
     trip,
+    analytics: {
+      today,
+      daily: { buckets, period, preTripMinor, afterTripMinor, futureDatedMinor, distinctExpenseDateCount: buckets.length },
+      pace,
+      categoryMix,
+      scopeMix: { sharedMinor, justMeMinor },
+      insights: insights.slice(0, 3),
+    },
   };
 }
 

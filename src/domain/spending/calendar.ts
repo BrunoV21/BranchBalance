@@ -33,6 +33,12 @@ export function inclusiveCalendarDays(start: CalendarDate, end: CalendarDate): n
   return calendarDayOrdinal(end) - calendarDayOrdinal(start) + 1;
 }
 
+export function calendarDateAtOffset(start: CalendarDate, offset: number): CalendarDate {
+  if (!Number.isSafeInteger(offset)) throw new Error(`Invalid calendar offset: ${offset}`);
+  const ordinal = calendarDayOrdinal(start) + offset;
+  return new Date(ordinal * 86_400_000).toISOString().slice(0, 10);
+}
+
 export const systemLocalCalendar: LocalCalendar = {
   today: () => calendarDateFromLocalDate(new Date()),
 };
