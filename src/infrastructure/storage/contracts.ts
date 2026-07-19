@@ -1,4 +1,4 @@
-import type { AccountProfile, DiscoveredGroup, GroupKey, PendingGroupCreation, RemoteGroupSnapshot, StoredCredentialV1 } from '@/domain/types';
+import type { AccountProfile, ActivityInboxV1, DiscoveredGroup, GroupKey, PendingGroupCreation, RemoteGroupSnapshot, StoredCredentialV1 } from '@/domain/types';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
 
@@ -20,6 +20,9 @@ export interface SnapshotStore {
   removeGroup(accountId: number, key: GroupKey): Promise<void>;
   readPendingGroup(accountId: number): Promise<PendingGroupCreation | null>;
   writePendingGroup(accountId: number, value: PendingGroupCreation | null): Promise<void>;
+  readActivity(accountId: number): Promise<ActivityInboxV1 | null>;
+  writeActivity(accountId: number, value: ActivityInboxV1): Promise<void>;
+  removeActivity(accountId: number): Promise<void>;
   clearAccount(accountId: number): Promise<void>;
   readTheme(): Promise<ThemePreference>;
   writeTheme(value: ThemePreference): Promise<void>;

@@ -4,7 +4,7 @@ import { act, renderHook, waitFor } from '@testing-library/react-native';
 import { calculateBalances, simplifySettlements } from '@/domain/balances';
 import { AppFailure } from '@/domain/errors';
 import { deriveSpendingSummary } from '@/domain/spending';
-import type { DiscoveredGroup, Expense, PendingGroupInvitation, RemoteGroupSnapshot } from '@/domain/types';
+import type { ActivityInboxV1, DiscoveredGroup, Expense, PendingGroupInvitation, RemoteGroupSnapshot } from '@/domain/types';
 import { githubGateway, snapshotStore } from '@/infrastructure/runtime';
 
 import { GroupsProvider, useGroups } from './groups-provider';
@@ -12,10 +12,10 @@ import { useSession } from './session-provider';
 
 jest.mock('@/infrastructure/runtime', () => ({
   githubGateway: {
-    discoverGroups: jest.fn(), listGroupInvitations: jest.fn(), acceptGroupInvitation: jest.fn(), declineGroupInvitation: jest.fn(),
+    discoverGroups: jest.fn(), listGroupActivityCommits: jest.fn(), listGroupInvitations: jest.fn(), acceptGroupInvitation: jest.fn(), declineGroupInvitation: jest.fn(),
   },
   snapshotStore: {
-    readGroups: jest.fn(), readPendingGroup: jest.fn(), writeGroup: jest.fn(), writeGroups: jest.fn(), removeGroup: jest.fn(),
+    readGroups: jest.fn(), readPendingGroup: jest.fn(), writeGroup: jest.fn(), writeGroups: jest.fn(), removeGroup: jest.fn(), readActivity: jest.fn(), writeActivity: jest.fn(), removeActivity: jest.fn(),
   },
   systemClock: { now: () => new Date('2026-07-17T12:00:00.000Z') },
   systemLocalCalendar: { today: () => '2026-07-17' },
@@ -58,11 +58,14 @@ describe('GroupsProvider snapshot summaries', () => {
     jest.mocked(useSession).mockReturnValue({ session: { status: 'authenticated', account: { id: 7, login: 'owner', name: null, avatarUrl: null }, error: null }, expire: jest.fn() } as never);
     jest.mocked(snapshotStore.readGroups).mockResolvedValue([{ key: 'owner/branch-balance-trip', repository, group, summary: null }]);
     jest.mocked(snapshotStore.readPendingGroup).mockResolvedValue(null);
+    jest.mocked(snapshotStore.readActivity).mockResolvedValue(null);
     jest.mocked(snapshotStore.writeGroup).mockResolvedValue(undefined);
     jest.mocked(snapshotStore.writeGroups).mockResolvedValue(undefined);
     jest.mocked(snapshotStore.removeGroup).mockResolvedValue(undefined);
+    jest.mocked(snapshotStore.writeActivity).mockResolvedValue(undefined);
     jest.mocked(githubGateway.discoverGroups).mockResolvedValue({ groups: [descriptor], warnings: [], installationCount: 1, hasAllRepositoriesInstallation: true });
     jest.mocked(githubGateway.listGroupInvitations).mockResolvedValue({ invitations: [], warnings: [] });
+    jest.mocked(githubGateway.listGroupActivityCommits).mockResolvedValue({ commits: [], checkpointFound: false, hasMore: false, warnings: [] });
     jest.mocked(githubGateway.acceptGroupInvitation).mockResolvedValue(undefined);
     jest.mocked(githubGateway.declineGroupInvitation).mockResolvedValue(undefined);
   });
@@ -165,6 +168,60 @@ describe('GroupsProvider snapshot summaries', () => {
       invitationDeferred.resolve({ invitations: [], warnings: [] });
       await Promise.all([first, second]);
     });
+  });
+
+  it('persists remote commit activity and exposes an unread inbox state', async () => {
+    const oldSha = '1'.repeat(40);
+    const newSha = '2'.repeat(40);
+    const cached: ActivityInboxV1 = {
+      version: 1,
+      initializedAt: '2026-07-17T10:00:00.000Z',
+      items: [],
+      checkpoints: [{ repositoryId: repository.id, groupKey: descriptor.key, headCommitSha: oldSha, initializedAt: '2026-07-17T10:00:00.000Z', lastCheckedAt: '2026-07-17T10:00:00.000Z' }],
+      localCommitReceipts: [],
+      seenInvitations: [],
+    };
+    jest.mocked(snapshotStore.readActivity).mockResolvedValueOnce(cached);
+    jest.mocked(githubGateway.listGroupActivityCommits).mockResolvedValueOnce({
+      commits: [
+        { sha: newSha, firstMessageLine: `Update expense ${expense.id}`, authorLogin: 'owner', committedAt: '2026-07-17T11:00:00.000Z' },
+        { sha: oldSha, firstMessageLine: 'Initialize BranchBalance group', authorLogin: 'owner', committedAt: '2026-07-17T10:00:00.000Z' },
+      ],
+      checkpointFound: true,
+      hasMore: false,
+      warnings: [],
+    });
+    const wrapper = ({ children }: PropsWithChildren) => <GroupsProvider>{children}</GroupsProvider>;
+    const view = await renderHook(() => useGroups(), { wrapper });
+    await waitFor(() => expect(view.result.current.activityState.status).toBe('ready'));
+
+    await act(() => view.result.current.refresh());
+
+    expect(view.result.current.hasUnreadActivity).toBe(true);
+    expect(view.result.current.activityState.data).toEqual([expect.objectContaining({ sourceId: newSha, kind: 'expense_updated', actorLogin: 'owner', readAt: null })]);
+    expect(snapshotStore.writeActivity).toHaveBeenLastCalledWith(7, expect.objectContaining({ checkpoints: [expect.objectContaining({ headCommitSha: newSha })] }));
+  });
+
+  it('caps activity history concurrency and stops scheduling after a rate limit', async () => {
+    const groups = Array.from({ length: 5 }, (_, index) => ({
+      ...descriptor,
+      key: `owner/branch-balance-trip-${index + 1}` as `${string}/${string}`,
+      repository: { ...repository, id: index + 1, name: `branch-balance-trip-${index + 1}` },
+      group: { ...group, name: `Trip ${index + 1}` },
+    }));
+    jest.mocked(githubGateway.discoverGroups).mockResolvedValueOnce({ groups, warnings: [], installationCount: 1, hasAllRepositoriesInstallation: true });
+    jest.mocked(githubGateway.listGroupActivityCommits).mockImplementation(async (target) => {
+      if (target.id === 1) throw new AppFailure({ kind: 'rate_limit', retryable: true, retryAt: '2026-07-17T12:30:00.000Z', secondary: false });
+      return { commits: [], checkpointFound: false, hasMore: false, warnings: [] };
+    });
+    const wrapper = ({ children }: PropsWithChildren) => <GroupsProvider>{children}</GroupsProvider>;
+    const view = await renderHook(() => useGroups(), { wrapper });
+    await waitFor(() => expect(view.result.current.state.data).toHaveLength(1));
+
+    await act(() => view.result.current.refresh());
+
+    expect(githubGateway.listGroupActivityCommits).toHaveBeenCalledTimes(3);
+    expect(view.result.current.activityWarning).toContain('2026-07-17T12:30:00.000Z');
   });
 
   it('accepts once, removes the invitation, and inserts the discovered group', async () => {

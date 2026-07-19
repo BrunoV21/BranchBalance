@@ -278,6 +278,97 @@ export interface PendingGroupCreation {
   group: Group;
 }
 
+export type ActivityKind =
+  | 'expense_added'
+  | 'expense_updated'
+  | 'expense_deleted'
+  | 'spending_plan_updated'
+  | 'spending_plan_removed'
+  | 'settlement_recorded'
+  | 'settlement_confirmed'
+  | 'settlement_deleted'
+  | 'group_created'
+  | 'group_updated'
+  | 'group_invitation_received'
+  | 'group_added'
+  | 'additional_activity';
+
+export type ActivityDestination =
+  | { kind: 'groups' }
+  | { kind: 'overview' }
+  | { kind: 'expense'; expenseId: string }
+  | { kind: 'spending' }
+  | { kind: 'balances' };
+
+export interface ActivityItem {
+  id: string;
+  source: 'commit' | 'invitation' | 'group' | 'summary';
+  sourceId: string;
+  repositoryId: number;
+  groupKey: GroupKey | null;
+  groupName: string;
+  kind: ActivityKind;
+  destination: ActivityDestination;
+  actorLogin: string | null;
+  eventAt: IsoInstant;
+  observedAt: IsoInstant;
+  readAt: IsoInstant | null;
+}
+
+export interface ActivityCheckpoint {
+  repositoryId: number;
+  groupKey: GroupKey;
+  headCommitSha: string | null;
+  initializedAt: IsoInstant;
+  lastCheckedAt: IsoInstant;
+}
+
+export interface LocalCommitReceipt {
+  repositoryId: number;
+  groupKey: GroupKey;
+  commitSha: string;
+  observedAt: IsoInstant;
+}
+
+export interface SeenInvitationReceipt {
+  invitationId: number;
+  lastObservedAt: IsoInstant;
+  resolvedAt: IsoInstant | null;
+}
+
+export interface ActivityInboxV1 {
+  version: 1;
+  initializedAt: IsoInstant;
+  items: ActivityItem[];
+  checkpoints: ActivityCheckpoint[];
+  localCommitReceipts: LocalCommitReceipt[];
+  seenInvitations: SeenInvitationReceipt[];
+}
+
+export interface UnclassifiedGroupCommit {
+  sha: string;
+  firstMessageLine: string;
+  authorLogin: string | null;
+  committedAt: IsoInstant | null;
+}
+
+export interface GroupCommitSlice {
+  commits: UnclassifiedGroupCommit[];
+  checkpointFound: boolean;
+  hasMore: boolean;
+  warnings: DataWarning[];
+}
+
+export interface RepositoryCommitRef {
+  sha: string;
+  committedAt: IsoInstant | null;
+}
+
+export interface CommittedMutation<T> {
+  value: T;
+  commit: RepositoryCommitRef | null;
+}
+
 export function normalizeLogin(login: string): string {
   return login.trim().toLowerCase();
 }

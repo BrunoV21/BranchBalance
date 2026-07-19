@@ -1,6 +1,6 @@
 import { AppFailure, DomainValidationError } from '@/domain/errors';
 import { createRepositoryName } from '@/domain/slug';
-import { groupKey, type CurrencyCode, type DiscoveredGroup, type Group, type RepositoryRef } from '@/domain/types';
+import { groupKey, type CommittedMutation, type CurrencyCode, type DiscoveredGroup, type Group, type RepositoryRef } from '@/domain/types';
 import type { Clock } from '@/features/auth/contracts';
 import type { GitHubGateway } from '@/infrastructure/github/contracts';
 import type { SnapshotStore } from '@/infrastructure/storage/contracts';
@@ -14,7 +14,7 @@ export async function createGroupRepository(input: {
   currency: CurrencyCode;
   canCreate: boolean;
   clock: Clock;
-}): Promise<DiscoveredGroup> {
+}): Promise<CommittedMutation<DiscoveredGroup>> {
   if (!input.canCreate) throw new DomainValidationError('Install BranchBalance with access to all repositories before creating a group.');
   const name = input.name.trim();
   if (!name) throw new DomainValidationError('Group name is required.', 'name');
@@ -27,10 +27,11 @@ export async function createGroupRepository(input: {
     }
     throw error;
   }
-  try { await input.gateway.createGroupFile(repository, group); }
+  let initialized;
+  try { initialized = await input.gateway.createGroupFile(repository, group); }
   catch {
     await input.store.writePendingGroup(input.accountId, { repository, group });
     throw new AppFailure({ kind: 'partial_group_creation', repository });
   }
-  return { key: groupKey(repository.owner, repository.name), repository, group, summary: null };
+  return { value: { key: groupKey(repository.owner, repository.name), repository, group, summary: null }, commit: initialized.commit };
 }

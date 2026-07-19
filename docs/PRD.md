@@ -1,6 +1,6 @@
 # BranchBalance — Phase 1 Product Requirements Document
 
-**Status:** Phase 1 and CR-001 through CR-003 implemented; CR-003 physical-device acceptance blocked by a known GitHub App token limitation
+**Status:** Phase 1 and CR-001 through CR-003 implemented; CR-004 specified and ready for implementation; CR-003 physical-device acceptance blocked by a known GitHub App token limitation
 
 **Last updated:** 2026-07-19
 
@@ -8,7 +8,7 @@
 
 **Repository prefix:** `branch-balance`
 
-**Active change requests:** None; CR-001, CR-002, and CR-003 are implemented
+**Active change requests:** CR-004 — On-device activity inbox
 
 ## 1. Product summary
 
@@ -1339,7 +1339,257 @@ The manual two-account Android test must invite the second account from one devi
 
 These require separate product, permission, and synchronization requirements before implementation.
 
-## 19. Technical references
+## 19. Change request CR-004 — On-device activity inbox
+
+**Status:** Specified; ready for implementation
+
+**Requested:** 2026-07-19
+
+**Target:** Next product increment; release name to be decided
+
+### 19.1 Context and motivation
+
+BranchBalance intentionally has no application backend, push-notification service, or background synchronization. A member therefore learns about another member's expenses, spending-plan changes, or settlement actions only after opening and refreshing the relevant group. Even when the app has already observed those changes, the top-level **Your groups** screen gives no indication that there is something new to review.
+
+CR-004 adds a local activity inbox that provides a recent, best-effort account of changes BranchBalance discovers while the app is active. It is an in-app history and unread indicator, not a replacement for push notifications and not a guarantee of real-time delivery.
+
+GitHub remains authoritative for shared group data. Inbox items, read state, dismissal state, and discovery checkpoints exist only on the current device and are never written to a group repository.
+
+### 19.2 Product outcome
+
+The **Your groups** screen gains an inbox-style icon in its top-right header area. When this device has newly observed activity that the user has not yet viewed, a small dot appears on the icon.
+
+Tapping the icon opens a newest-first activity list across the signed-in user's accepted groups. The list gives enough context to understand what changed and where, and an actionable item opens the relevant group destination when possible. A user can dismiss one item or clear the entire local inbox.
+
+Activity is discovered only through existing foreground lifecycle refreshes and explicit user refreshes. BranchBalance performs no polling, scheduled work, or network access while the app is backgrounded or closed.
+
+### 19.3 Confirmed decisions
+
+| Area | Decision |
+|---|---|
+| Surface | An inbox-style header icon on **Your groups** opens a top-level activity screen |
+| Indicator | A dot, rather than a numeric badge, appears when at least one locally stored item is unread |
+| Delivery model | Best-effort foreground discovery; this is not push delivery and no delivery-time promise is made |
+| Repository source | Inspect accepted groups' default-branch commit history with the GitHub REST API without downloading every group snapshot |
+| Other sources | Reuse existing group and invitation discovery for newly eligible invitations and newly accessible groups |
+| Authority | Repository data and GitHub invitations remain authoritative; activity items are non-authoritative summaries |
+| Read behavior | Opening a successfully hydrated inbox marks the items rendered in that inbox as read and removes the dot when no unread items remain |
+| Local actions | A successful mutation made on this device may appear in history but starts as read because the user already observed it |
+| Clearing | A user can dismiss one item with its explicit action or a right swipe, and clear all items after confirmation; none of these actions changes GitHub data |
+| Persistence | Items, read state, and per-group discovery checkpoints are account-scoped AsyncStorage data on this device only |
+| Retention | Keep at most 100 items and remove items more than 30 days old, whichever limit is reached first |
+| Compatibility | The first activity check creates a baseline and may import recent history as already read; it must not present old commits as newly arrived activity |
+
+### 19.4 Foreground activity discovery
+
+After a successful accepted-group discovery on **Your groups**, BranchBalance checks recent commits for each accessible group repository with:
+
+```text
+GET /repos/{owner}/{repo}/commits?sha={default_branch}&per_page=50
+```
+
+The check uses the repository's reported default branch. Requests across repositories use bounded concurrency and join the existing group-list single-flight refresh. Opening the activity inbox and pulling to refresh may invoke the same coalesced operation; screens must not create an independent polling loop.
+
+For each group, BranchBalance stores the newest successfully inspected commit SHA as a local checkpoint:
+
+- On the first check for an existing group, retain at most the 20 most recent recognizable commits from the previous 30 days as read history and establish the newest commit as the checkpoint. The initial baseline never activates the unread dot.
+- On later checks, traverse commits newest first until the stored checkpoint is found, with a maximum of two 50-item pages per repository per refresh. Commits before that checkpoint are new observations.
+- Deduplicate repository activity by normalized repository key and full commit SHA. The same commit must never create two inbox items.
+- Advance a checkpoint only after that repository's response has been validated and its items and checkpoint can be persisted together.
+- If the checkpoint is not found within the bounded response, whether because more than 100 commits were added or history was rewritten, do not label every returned commit as new. Retain the newest recognizable items, add one generic **Additional group activity was detected** item, re-baseline at the newest inspected SHA, and let a normal group refresh establish current application state. The inbox is intentionally a recent summary, not a complete audit log.
+- A repository with no commits is a valid empty baseline.
+
+The app may insert an item immediately after one of its own confirmed repository mutations. That item uses the returned commit SHA as its source identifier and starts as read. The later commit check deduplicates against it, including when the server response to the original mutation was reconciled after an ambiguous network result. A change made by the same GitHub account on another device remains unread when this device first observes it.
+
+This activity check reads commit metadata only. It does not fetch commit diffs, arbitrary file contents, or complete expense and settlement snapshots for every group. Opening an activity item performs the normal selected-group refresh before displaying authoritative details.
+
+### 19.5 Activity types and presentation
+
+BranchBalance recognizes its deterministic commit subjects and maps them to user-facing activity:
+
+| Repository commit subject | Inbox presentation | Destination |
+|---|---|---|
+| `Add expense <uuid>` | Expense added | Group Overview; open the expense when it still exists |
+| `Update expense <uuid>` | Expense updated | Expense detail after refresh |
+| `Delete expense <uuid>` | Expense deleted | Group Overview |
+| `Update spending plan` | Spending plan updated | Spending |
+| `Remove spending plan` | Spending plan removed | Spending |
+| `Record settlement payment <uuid>` | Payment recorded; awaiting confirmation | Balances |
+| `Confirm settlement payment <uuid>` | Payment confirmed | Balances |
+| `Delete settlement payment <uuid>` | Payment record removed | Balances |
+| `Initialize BranchBalance group` | Group created | Group Overview |
+| Any other commit subject | Group data updated | Group Overview |
+
+The parser uses only the first commit-message line and must match the complete expected subject. It never displays a raw UUID, untrusted commit body, author email, or arbitrary commit message. An unknown or externally created commit becomes the generic presentation rather than exposing its text.
+
+Each commit-backed item stores and displays the validated group name, action label, best available GitHub actor login, and commit time. Prefer the linked GitHub `author.login`; if GitHub cannot associate an author account, show **A collaborator** and do not persist or display the commit email or free-form author name.
+
+Existing non-commit refresh domains may also create these items:
+
+- **Group invitation received** when a previously unseen eligible CR-003 invitation is returned by GitHub
+- **Group added to Your groups** when accepted-group discovery first makes a valid group accessible on this device after the initial baseline
+
+Invitation discovery retains the known CR-003 limitation: an invitation that GitHub does not return cannot create an inbox item. Accepting or declining on this device records the result as read, and the existing invitation card remains the authoritative decision surface.
+
+Items are ordered by event time descending, then observation time descending, normalized group name, and stable item ID. Future or malformed timestamps fall back to observation time and must not break the list.
+
+### 19.6 Your groups and inbox experience
+
+The inbox icon sits in the top-right header area of **Your groups** and has a minimum accessible touch target. Its accessible name is **Activity inbox** when no unread items exist and **Activity inbox, new activity** when the dot is visible. The dot is not the only accessible indication of unread activity.
+
+The activity screen contains:
+
+- An **Activity** heading and a **Clear all** action when at least one item exists
+- A newest-first list, visually distinguishing unread items without relying on colour alone
+- For each item, its action, group name, actor when known, relative time with an accessible absolute timestamp, an explicit **Dismiss** action, and an optional right-swipe shortcut to the same dismissal
+- A loading indicator that does not hide cached items during refresh
+- A scoped stale/error message and retry action when activity discovery fails
+- Pull-to-refresh using the same coalesced group-list and activity refresh
+- An empty state explaining that new activity appears after BranchBalance observes changes during an app refresh
+
+After the local inbox has hydrated and its current items have rendered, those items are marked read in one account-scoped state update. New items observed after that point remain unread until rendered. Reading never dismisses an item.
+
+Tapping an actionable row navigates to its destination and triggers the existing selected-group refresh. If an expense or payment no longer exists, the app keeps the user in the relevant group tab and explains that the item changed or was removed; it must not restore stale data or treat the activity summary as authoritative.
+
+**Dismiss** removes only that item. Swiping an item to the right past the clear threshold invokes the same exact-item dismissal; a short or vertically dominant gesture resets without action, and vertical list scrolling must remain available. The explicit accessible **Dismiss** button remains available because swipe is not the sole interaction. **Clear all** requires confirmation explaining that it clears this device's activity history but does not undo group actions. Clearing does not reset commit checkpoints, so previously dismissed commits do not reappear on the next refresh.
+
+### 19.7 Local persistence, privacy, and lifecycle
+
+Persist one versioned activity record under the immutable numeric GitHub account ID. It contains only:
+
+- Stable item ID and source type
+- Normalized group key and last validated group display name
+- Closed activity kind and optional resource UUID used for navigation
+- Actor login when GitHub supplies one
+- Event time, observation time, and read state
+- Per-group commit checkpoint and initialization time
+- Seen invitation IDs needed for deduplication
+
+The local record must not contain access or refresh tokens, authorization headers, raw GitHub responses, commit bodies, commit author emails, expense amounts or descriptions, settlement amounts or notes, external transaction references, bank or financial-account details, or file diffs.
+
+Validate the complete record before use. A corrupt or unsupported version is removed and treated as a first-run baseline, meaning old remote history is not turned into unread activity. Insert, read, dismiss, clear, prune, and checkpoint changes must publish one coherent in-memory state and persist the corresponding account-scoped state without transiently showing an incorrect unread dot.
+
+Signing out, losing the session because credentials are invalid or revoked, or explicitly clearing account data removes the activity record. Confirmed loss of access to one repository removes that group's private items and checkpoint. A transient network error or failed discovery never purges items or advances checkpoints.
+
+### 19.8 Synchronization, errors, and limits
+
+Activity checks run only when BranchBalance is active and one of these events occurs:
+
+- Authenticated app launch
+- **Your groups** screen focus
+- App return to the foreground while **Your groups** or Activity is visible
+- Pull-to-refresh or explicit retry on **Your groups** or Activity
+- A confirmed local mutation that can immediately append a read item
+
+There is no interval timer, Android background task, headless JavaScript task, push token, notification permission request, operating-system notification, or server-side scheduler.
+
+Accepted groups and activity are separate result domains:
+
+- Failure to refresh activity must not hide accepted groups, pending invitations, or the last valid inbox.
+- Failure to discover groups must not erase cached inbox items, but no commit checkpoint advances from an incomplete group-discovery generation.
+- One repository's `403`, `404`, `409`, malformed response, timeout, or rate limit must not discard successful activity results for other repositories.
+- Authentication failures use the shared token-refresh behavior. Confirmed repository access loss follows section 19.7; ambiguous permission failures preserve local state and offer retry.
+- Primary or secondary rate limiting stops additional activity requests safely, preserves every unadvanced checkpoint, and shows GitHub's retry time when supplied.
+- The unread dot represents locally stored unread items, not whether the last network check succeeded. A failed check never removes the dot or claims the inbox is current.
+
+Because this feature is foreground-only and bounded, activity can be delayed until the next app refresh, collapsed by the retention limit, or summarized after a large or rewritten history. The UI must describe the inbox as **Recent activity**, never as a complete audit trail or real-time notification center. GitHub history and current repository files remain the recovery sources.
+
+### 19.9 GitHub API and permission impact
+
+CR-004 adds one read endpoint to the foreground group-list flow:
+
+| Action | Endpoint |
+|---|---|
+| List commits on an accepted group's default branch | `GET /repos/{owner}/{repo}/commits` |
+
+The request uses the existing GitHub App user access token, recommended media type, pinned API version, pagination rules, and shared error model. GitHub documents this endpoint for GitHub App user access tokens with **Contents: read** repository permission. BranchBalance already requires **Contents: read and write**, so CR-004 adds no GitHub App permission, application secret, or backend component.
+
+### 19.10 User stories
+
+#### US-CR004-01 — Notice new activity
+
+As a group member, I want a visible dot on **Your groups** when this device discovers new group activity so that I know there is something new to review.
+
+#### US-CR004-02 — Review recent changes
+
+As a group member, I want one recent activity list across my groups so that I can understand what has changed without opening every group.
+
+#### US-CR004-03 — Open relevant context
+
+As a group member, I want an activity item to take me to the relevant group area so that I can review authoritative current data.
+
+#### US-CR004-04 — Clear one item
+
+As a group member, I want to dismiss an activity item I no longer need so that the inbox remains useful.
+
+#### US-CR004-05 — Clear the inbox
+
+As a group member, I want to clear all local activity after confirmation so that I can reset the list without changing shared group data.
+
+#### US-CR004-06 — Understand delivery limits
+
+As a group member, I want the app to describe activity as recently observed rather than real-time so that I am not misled when the app was closed or offline.
+
+### 19.11 Acceptance criteria
+
+- [ ] **Your groups** shows an accessible inbox-style icon in the top-right header area.
+- [ ] The icon shows a dot exactly when the signed-in account has at least one locally stored unread activity item.
+- [ ] The dot's meaning is exposed to assistive technology and does not rely on colour alone.
+- [ ] Opening the icon displays a newest-first recent activity list across accepted groups and marks the rendered items read without dismissing them.
+- [ ] Recognized BranchBalance expense, spending-plan, and settlement commit subjects map to the action labels and destinations in section 19.5.
+- [ ] Unknown or externally created commits appear as a safe generic group update without exposing raw commit text, bodies, emails, or diffs.
+- [ ] First-run history is at most 20 items from the previous 30 days, starts read, and does not activate the unread dot.
+- [ ] Subsequent commit checks create unread items once per repository key and commit SHA and persist a checkpoint atomically.
+- [ ] A successful local mutation may appear immediately as read and is not duplicated by the next commit check.
+- [ ] A change by the same GitHub account on another device appears unread when first observed on this device.
+- [ ] Newly observed eligible invitations and newly accessible valid groups can create the non-commit items in section 19.5 without duplicating the existing invitation state.
+- [ ] Tapping an actionable item opens the appropriate group destination, refreshes authoritative data, and safely handles a resource that was later changed or removed.
+- [ ] Every row exposes an explicit accessible **Dismiss** action; dismissing it does not mutate GitHub data.
+- [ ] Swiping a row right past the deliberate threshold dismisses that item through the same local path; a short or vertically dominant gesture resets and does not block vertical scrolling.
+- [ ] **Clear all** requires confirmation, removes all local items, preserves checkpoints, and does not mutate GitHub data.
+- [ ] Items and read state survive an app restart for the same account and remain isolated from every other signed-in account on the device.
+- [ ] Retention removes items older than 30 days and limits the inbox to the newest 100 items.
+- [ ] Activity refresh coalesces with authenticated launch, relevant screen focus, app foreground, pull-to-refresh, and retry and uses bounded repository concurrency.
+- [ ] No activity request, timer, task, or notification delivery runs while the app is backgrounded or closed.
+- [ ] Activity failure preserves accepted groups and cached inbox state; group discovery failure never advances activity checkpoints.
+- [ ] Sign-out and confirmed repository access loss purge the applicable private activity data.
+- [ ] The inbox copy clearly describes a best-effort recent activity view and never promises push, real-time, or complete audit delivery.
+
+### 19.12 Test requirements
+
+Unit coverage must include commit-subject parsing, UUID validation, safe generic fallback, actor fallback without email exposure, stable item IDs, deduplication, deterministic ordering, read-dot derivation, retention pruning, initial-baseline behavior, checkpoint transitions, unreachable-checkpoint fallback, and account-scoped record validation.
+
+Integration coverage with mocked GitHub responses must include:
+
+- Empty history, first-run history, one new commit, multiple commits, pagination to a checkpoint, and the bounded unreachable-checkpoint summary
+- Every recognized expense, spending-plan, and settlement subject plus partial, malicious, multiline, and unknown commit messages
+- Immediate read insertion after a confirmed local write followed by commit-history deduplication
+- A same-account commit first observed from another device
+- New invitation and accepted-group observations, including CR-003's empty-success limitation
+- Per-repository success mixed with `401`, refreshed authentication, `403`, `404`, `409`, timeout, malformed data, primary rate limit, and secondary rate limit
+- Checkpoint missing after a large or rewritten history, atomic persistence failure, retry without duplicate items, and no checkpoint advancement after incomplete discovery
+- Sign-out, account switching, corrupt-cache removal, repository access loss, and transient-failure preservation
+
+Component coverage must verify icon placement, minimum touch target, dot visibility and accessible naming, cached-list rendering during refresh, unread presentation without colour dependence, accessible absolute timestamps, item destination behavior, explicit per-row dismissal, right-swipe threshold and reset behavior, clear-all confirmation, empty state, stale/error state, pull-to-refresh, and large-text layout.
+
+The manual physical-device test must use two Android app sessions and two accepted group members. Establish an empty/read baseline, create and update an expense on device A, return device B to **Your groups**, verify the dot and activity text, open the item and confirm refreshed expense data, dismiss one item, then create and confirm a settlement and verify **Clear all**. Repeat with device B offline and backgrounded to confirm that no item appears until the app is foregrounded and a successful refresh occurs. Restart the app and switch accounts to verify persistence and isolation.
+
+### 19.13 Explicitly deferred from CR-004
+
+- Android or iOS push notifications, notification-center entries, badges, sounds, or push-token registration
+- Background fetch, background polling, scheduled jobs, or network work while the app is closed or backgrounded
+- A BranchBalance backend, webhook receiver, message queue, or notification-delivery service
+- Real-time delivery guarantees or a complete cross-device audit log
+- Synchronizing read, unread, dismissal, or clear state between devices
+- Email, SMS, payment reminders, digests, snoozing, or per-activity notification preferences
+- Fetching every commit diff or historical file version to generate content-rich summaries
+- Treating arbitrary GitHub commits as trusted user-facing text
+- Full GitHub notification-center parity, organization activity, issues, pull requests, releases, or unrelated repositories
+- Guaranteed invitation activity when GitHub omits pending private invitations under the known CR-003 limitation
+
+These require separate product, privacy, permission, delivery, and architecture decisions before implementation.
+
+## 20. Technical references
 
 - [Generating a user access token for a GitHub App](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)
 - [Refreshing GitHub App user access tokens](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/refreshing-user-access-tokens)
@@ -1347,3 +1597,4 @@ These require separate product, permission, and synchronization requirements bef
 - [Repository endpoints](https://docs.github.com/en/rest/repos/repos)
 - [Repository collaborator endpoints](https://docs.github.com/en/rest/collaborators/collaborators)
 - [Repository invitation endpoints](https://docs.github.com/en/rest/collaborators/invitations)
+- [Repository commit endpoints](https://docs.github.com/en/rest/commits/commits)

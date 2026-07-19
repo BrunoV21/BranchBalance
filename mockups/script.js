@@ -45,6 +45,27 @@
     document.querySelectorAll('[data-active-group-count]').forEach((count) => { count.textContent = '4'; });
   }
 
+  function syncActivityMockup() {
+    const items = Array.from(document.querySelectorAll('[data-activity-item]'));
+    const unread = items.filter((item) => item.hasAttribute('data-activity-unread'));
+    const list = document.querySelector('[data-activity-list]');
+    const empty = document.querySelector('[data-activity-empty]');
+    const clear = document.querySelector('[data-activity-clear]');
+    const count = document.querySelector('[data-new-activity-count]');
+
+    if (list) list.classList.toggle('hidden', items.length === 0);
+    if (empty) empty.classList.toggle('hidden', items.length !== 0);
+    if (clear) clear.classList.toggle('hidden', items.length === 0);
+    if (count) {
+      count.innerHTML = `<span class="dot"></span>${unread.length} new`;
+      count.classList.toggle('hidden', unread.length === 0);
+    }
+
+    document.querySelectorAll('.activity-section').forEach((section) => {
+      section.classList.toggle('hidden', section.querySelectorAll('[data-activity-item]').length === 0);
+    });
+  }
+
   document.addEventListener('click', (event) => {
     const themeButton = event.target.closest('[data-theme-toggle]');
     if (themeButton) {
@@ -101,6 +122,23 @@
         resolveInvitation(card);
       }, 650);
     }
+
+    const dismissActivity = event.target.closest('[data-activity-dismiss]');
+    if (dismissActivity) {
+      const item = dismissActivity.closest('[data-activity-item]');
+      if (!item) return;
+      item.remove();
+      syncActivityMockup();
+      showToast('Activity dismissed on this device');
+    }
+
+    const clearActivity = event.target.closest('[data-activity-clear]');
+    if (clearActivity) {
+      if (!window.confirm('Clear all recent activity from this device? This will not undo any group actions.')) return;
+      document.querySelectorAll('[data-activity-item]').forEach((item) => item.remove());
+      syncActivityMockup();
+      showToast('Recent activity cleared on this device');
+    }
   });
 
   function applyExpenseFilters() {
@@ -134,4 +172,5 @@
 
   syncThemeIcons();
   applyExpenseFilters();
+  syncActivityMockup();
 })();

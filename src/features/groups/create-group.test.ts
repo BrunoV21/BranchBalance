@@ -6,9 +6,10 @@ import { createGroupRepository } from './create-group';
 
 const repository = { id: 1, owner: 'alice', name: 'branch-balance-trip', defaultBranch: 'trunk', installationId: 10, private: true as const, canAdmin: true, canWrite: true };
 const input = { accountId: 7, login: 'alice', name: 'Trip', currency: 'EUR' as const, canCreate: true, clock: { now: () => new Date('2026-07-16T12:00:00.000Z') } };
+const group = { schema_version: 1 as const, name: 'Trip', currency: 'EUR' as const, created_by: 'alice', created_at: '2026-07-16T12:00:00.000Z' };
 
 function gateway(overrides: Partial<GitHubGateway> = {}) {
-  return { createPrivateRepository: jest.fn().mockResolvedValue(repository), createGroupFile: jest.fn().mockResolvedValue(undefined), ...overrides } as unknown as GitHubGateway;
+  return { createPrivateRepository: jest.fn().mockResolvedValue(repository), createGroupFile: jest.fn().mockResolvedValue({ value: { group, blobSha: 'blob', path: 'group.json', sourceDocument: group }, commit: null }), ...overrides } as unknown as GitHubGateway;
 }
 
 describe('createGroupRepository', () => {
@@ -18,7 +19,7 @@ describe('createGroupRepository', () => {
     const result = await createGroupRepository({ ...input, gateway: remote, store });
     expect(remote.createPrivateRepository).toHaveBeenCalledWith('branch-balance-trip');
     expect(remote.createGroupFile).toHaveBeenCalledWith(repository, expect.objectContaining({ name: 'Trip', currency: 'EUR' }));
-    expect(result.key).toBe('alice/branch-balance-trip');
+    expect(result.value.key).toBe('alice/branch-balance-trip');
   });
 
   it('persists partial creation for bootstrap-only recovery', async () => {

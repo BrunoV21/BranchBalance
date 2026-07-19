@@ -4,7 +4,7 @@ import { AppFailure, DomainValidationError } from '@/domain/errors';
 import { parseExpenseDocument, parseGroupDocument } from '@/domain/schemas';
 import { deriveSettlementReservations, parseSettlementLedgerDocument, parseSettlementPayment, settlementCreationMatches, sortSettlementPayments } from '@/domain/settlements';
 import { deriveSpendingSummary, systemLocalCalendar, type LocalCalendar } from '@/domain/spending';
-import { groupKey, normalizeLogin, type AccountProfile, type CurrencyCode, type DataWarning, type DiscoveredGroup, type ExpenseFile, type Group, type GroupFile, type InvitationDiscoveryResult, type IsoInstant, type Member, type PendingMember, type RemoteGroupSnapshot, type RepositoryRef, type SettlementLedgerFile, type SettlementLedgerState, type SettlementPayment, type SettlementReservation, type SettlementValidationBasis, type SpendingPlan, type WritableExpense } from '@/domain/types';
+import { groupKey, normalizeLogin, type AccountProfile, type CommittedMutation, type CurrencyCode, type DataWarning, type DiscoveredGroup, type ExpenseFile, type Group, type GroupCommitSlice, type GroupFile, type InvitationDiscoveryResult, type IsoInstant, type Member, type PendingMember, type RemoteGroupSnapshot, type RepositoryCommitRef, type RepositoryRef, type SettlementLedgerFile, type SettlementLedgerState, type SettlementPayment, type SettlementReservation, type SettlementValidationBasis, type SpendingPlan, type UnclassifiedGroupCommit, type WritableExpense } from '@/domain/types';
 import type { Clock } from '@/features/auth/contracts';
 import { discoverEligibleGroupInvitations } from '@/features/invitations/eligibility';
 
@@ -22,6 +22,7 @@ type GitHubRepository = {
 
 type ContentFile = { type: 'file'; sha: string; content: string; encoding?: string };
 type TreeItem = { type: 'blob' | 'tree'; path: string; sha: string };
+type ContentMutationData = { content?: { sha?: string }; commit?: { sha?: string; committer?: { date?: string | null } | null } };
 
 export class GitHubGatewayImpl implements GitHubGateway {
   private readonly profileCache = new Map<string, { name: string | null; avatarUrl: string | null; expiresAt: number }>();
@@ -61,6 +62,46 @@ export class GitHubGatewayImpl implements GitHubGateway {
       return discoverEligibleGroupInvitations(rows, currentLogin);
     } catch (error) {
       if (error instanceof AppFailure && error.detail.kind === 'permission') throw new AppFailure({ kind: 'invitation_permission', operation: 'list' });
+      throw error;
+    }
+  }
+
+  async listGroupActivityCommits(repository: RepositoryRef, stopAtSha: string | null, signal?: AbortSignal): Promise<GroupCommitSlice> {
+    const normalizedStop = stopAtSha?.toLowerCase() ?? null;
+    if (normalizedStop !== null && !isCommitSha(normalizedStop)) throw new DomainValidationError('Invalid activity checkpoint.');
+    const commits: UnclassifiedGroupCommit[] = [];
+    let checkpointFound = false;
+    let hasMore = false;
+    try {
+      for (let page = 1; page <= 2; page += 1) {
+        const response = await this.client.request<unknown[]>('GET /repos/{owner}/{repo}/commits', {
+          owner: repository.owner,
+          repo: repository.name,
+          sha: repository.defaultBranch,
+          page,
+          per_page: 50,
+          request: { signal },
+        });
+        if (!Array.isArray(response.data)) throw new DomainValidationError('GitHub returned invalid commit history.');
+        for (const row of response.data) {
+          const parsed = parseActivityCommit(row);
+          commits.push(parsed);
+          if (normalizedStop && parsed.sha === normalizedStop) {
+            checkpointFound = true;
+            break;
+          }
+        }
+        if (checkpointFound || response.data.length < 50) {
+          hasMore = false;
+          break;
+        }
+        hasMore = response.data.length === 50;
+      }
+      return { commits, checkpointFound, hasMore, warnings: [] };
+    } catch (error) {
+      if (error instanceof AppFailure && error.detail.kind === 'github' && error.detail.status === 409 && /empty/i.test(error.detail.safeMessage)) {
+        return { commits: [], checkpointFound: normalizedStop === null, hasMore: false, warnings: [] };
+      }
       throw error;
     }
   }
@@ -112,13 +153,14 @@ export class GitHubGatewayImpl implements GitHubGateway {
     return { file: { group: parsed.group, blobSha: file.sha, path: 'group.json', sourceDocument: parsed.sourceDocument }, spendingPlanWarning: parsed.spendingPlanWarning };
   }
 
-  async createGroupFile(repository: RepositoryRef, group: Group, signal?: AbortSignal): Promise<GroupFile> {
-    const response = await this.client.request<{ content?: { sha?: string } }>('PUT /repos/{owner}/{repo}/contents/{path}', {
+  async createGroupFile(repository: RepositoryRef, group: Group, signal?: AbortSignal): Promise<CommittedMutation<GroupFile>> {
+    const response = await this.client.request<ContentMutationData>('PUT /repos/{owner}/{repo}/contents/{path}', {
       owner: repository.owner, repo: repository.name, path: 'group.json', branch: repository.defaultBranch,
       message: 'Initialize BranchBalance group', content: encodeUtf8Base64(serializeJson(group)), request: { signal },
     });
     const sha = response.data.content?.sha;
-    return sha ? { group, blobSha: sha, path: 'group.json', sourceDocument: { ...group } } : this.readGroup(repository, signal);
+    const value = sha ? { group, blobSha: sha, path: 'group.json' as const, sourceDocument: { ...group } } : await this.readGroup(repository, signal);
+    return { value, commit: repositoryCommitFromMutation(response.data) };
   }
 
   async refreshGroup(repository: RepositoryRef, currentLogin: string, signal?: AbortSignal): Promise<RemoteGroupSnapshot> {
@@ -192,15 +234,23 @@ export class GitHubGatewayImpl implements GitHubGateway {
     }
   }
 
-  async createExpense(repository: RepositoryRef, expense: WritableExpense, signal?: AbortSignal): Promise<ExpenseFile> {
+  async createExpense(repository: RepositoryRef, expense: WritableExpense, signal?: AbortSignal): Promise<CommittedMutation<ExpenseFile>> {
     const path = `expenses/${expense.id}.json` as const;
-    const response = await this.client.request<{ content?: { sha?: string } }>('PUT /repos/{owner}/{repo}/contents/{path}', {
-      owner: repository.owner, repo: repository.name, path, branch: repository.defaultBranch,
-      message: `Add expense ${expense.id}`, content: encodeUtf8Base64(serializeJson(expense)), request: { signal },
-    });
-    const sha = response.data.content?.sha;
-    if (!sha) return await this.requireExpense(repository, expense.id, signal);
-    return { expense, blobSha: sha, path, sourceDocument: { ...expense } };
+    const subject = `Add expense ${expense.id}`;
+    try {
+      const response = await this.client.request<ContentMutationData>('PUT /repos/{owner}/{repo}/contents/{path}', {
+        owner: repository.owner, repo: repository.name, path, branch: repository.defaultBranch,
+        message: subject, content: encodeUtf8Base64(serializeJson(expense)), request: { signal },
+      });
+      const sha = response.data.content?.sha;
+      const value = sha ? { expense, blobSha: sha, path, sourceDocument: { ...expense } } : await this.requireExpense(repository, expense.id, signal);
+      return { value, commit: repositoryCommitFromMutation(response.data) };
+    } catch (error) {
+      if (!isRetryable(error)) throw error;
+      const value = await this.readExpense(repository, expense.id, signal);
+      if (!value || JSON.stringify(value.expense) !== JSON.stringify(expense)) throw error;
+      return { value, commit: await this.resolveConfirmedCommit(repository, path, subject, expense.created_by, signal) };
+    }
   }
 
   async readExpense(repository: RepositoryRef, id: string, signal?: AbortSignal): Promise<ExpenseFile | null> {
@@ -216,31 +266,45 @@ export class GitHubGatewayImpl implements GitHubGateway {
     }
   }
 
-  async updateExpense(repository: RepositoryRef, current: ExpenseFile, expense: WritableExpense, signal?: AbortSignal): Promise<ExpenseFile> {
+  async updateExpense(repository: RepositoryRef, current: ExpenseFile, expense: WritableExpense, signal?: AbortSignal): Promise<CommittedMutation<ExpenseFile>> {
     const path = `expenses/${expense.id}.json` as const;
     const sourceDocument = { ...current.sourceDocument, ...expense };
+    const subject = `Update expense ${expense.id}`;
     try {
-      const response = await this.client.request<{ content?: { sha?: string } }>('PUT /repos/{owner}/{repo}/contents/{path}', {
+      const response = await this.client.request<ContentMutationData>('PUT /repos/{owner}/{repo}/contents/{path}', {
         owner: repository.owner, repo: repository.name, path, branch: repository.defaultBranch, sha: current.blobSha,
-        message: `Update expense ${expense.id}`, content: encodeUtf8Base64(serializeJson(sourceDocument)), request: { signal },
+        message: subject, content: encodeUtf8Base64(serializeJson(sourceDocument)), request: { signal },
       });
-      return { expense, blobSha: response.data.content?.sha ?? current.blobSha, path, sourceDocument };
+      return { value: { expense, blobSha: response.data.content?.sha ?? current.blobSha, path, sourceDocument }, commit: repositoryCommitFromMutation(response.data) };
     } catch (error) {
       if (isConflict(error)) throw new AppFailure({ kind: 'expense_conflict', latest: await this.readExpense(repository, expense.id, signal), operation: 'edit' });
+      if (isRetryable(error)) {
+        const value = await this.readExpense(repository, expense.id, signal);
+        if (value && JSON.stringify(value.expense) === JSON.stringify(expense)) {
+          return { value, commit: await this.resolveConfirmedCommit(repository, path, subject, expense.updated_by ?? expense.created_by, signal) };
+        }
+      }
       throw error;
     }
   }
 
-  async deleteExpense(repository: RepositoryRef, current: ExpenseFile, signal?: AbortSignal) {
+  async deleteExpense(repository: RepositoryRef, current: ExpenseFile, signal?: AbortSignal): Promise<CommittedMutation<null>> {
     const expense = current.expense;
+    const subject = `Delete expense ${expense.id}`;
     try {
-      await this.client.request('DELETE /repos/{owner}/{repo}/contents/{path}', {
+      const response = await this.client.request<ContentMutationData>('DELETE /repos/{owner}/{repo}/contents/{path}', {
         owner: repository.owner, repo: repository.name, path: `expenses/${expense.id}.json`, branch: repository.defaultBranch, sha: current.blobSha,
-        message: `Delete expense ${expense.id}`, request: { signal },
+        message: subject, request: { signal },
       });
+      return { value: null, commit: repositoryCommitFromMutation(response.data) };
     } catch (error) {
       if (isConflict(error)) throw new AppFailure({ kind: 'expense_conflict', latest: await this.readExpense(repository, expense.id, signal), operation: 'delete' });
-      if (error instanceof AppFailure && error.detail.kind === 'not_found' && await this.readExpense(repository, expense.id, signal) === null) return;
+      if ((isRetryable(error) || (error instanceof AppFailure && error.detail.kind === 'not_found')) && await this.readExpense(repository, expense.id, signal) === null) {
+        const commit = isRetryable(error)
+          ? await this.resolveConfirmedCommit(repository, `expenses/${expense.id}.json`, subject, expense.updated_by ?? expense.created_by, signal)
+          : null;
+        return { value: null, commit };
+      }
       throw error;
     }
   }
@@ -269,7 +333,7 @@ export class GitHubGatewayImpl implements GitHubGateway {
     intended: SettlementPayment,
     basis: SettlementValidationBasis,
     signal?: AbortSignal,
-  ): Promise<SettlementLedgerFile> {
+  ): Promise<CommittedMutation<SettlementLedgerFile>> {
     return this.writeSettlementPayment(repository, current, intended, basis, signal, true);
   }
 
@@ -280,7 +344,7 @@ export class GitHubGatewayImpl implements GitHubGateway {
     basis: SettlementValidationBasis,
     signal: AbortSignal | undefined,
     allowSafeRetry: boolean,
-  ): Promise<SettlementLedgerFile> {
+  ): Promise<CommittedMutation<SettlementLedgerFile>> {
     if (current.kind === 'unverified' || current.kind === 'invalid') throw new AppFailure({ kind: 'settlement_ledger_invalid' });
     if (intended.status !== 'pending' || intended.confirmed_by !== null || intended.confirmed_at !== null) {
       throw new DomainValidationError('New settlement payments must be pending.');
@@ -291,7 +355,7 @@ export class GitHubGatewayImpl implements GitHubGateway {
     const currentPayments = current.kind === 'ready' ? current.file.payments : [];
     const existing = currentPayments.find((payment) => payment.id === intended.id);
     if (existing) {
-      if (settlementCreationMatches(existing, intended) && current.kind === 'ready') return current.file;
+      if (settlementCreationMatches(existing, intended) && current.kind === 'ready') return { value: current.file, commit: null };
       throw new AppFailure({ kind: 'settlement_record_conflict' });
     }
     if (current.kind === 'ready' && hasRawPaymentId(current.file, intended.id)) throw new AppFailure({ kind: 'settlement_record_conflict' });
@@ -300,19 +364,20 @@ export class GitHubGatewayImpl implements GitHubGateway {
       ? { ...current.file.sourceDocument, payments: [...sourcePayments(current.file), intended] }
       : { schema_version: 1, payments: [intended] };
     const serialized = serializeSettlementLedger(sourceDocument);
+    const subject = `Record settlement payment ${intended.id}`;
     try {
       const parameters: Record<string, unknown> = {
         owner: repository.owner, repo: repository.name, path: 'settlements.json', branch: repository.defaultBranch,
-        message: `Record settlement payment ${intended.id}`, content: encodeUtf8Base64(serialized), request: { signal },
+        message: subject, content: encodeUtf8Base64(serialized), request: { signal },
       };
       if (current.kind === 'ready') parameters.sha = current.file.blobSha;
-      const response = await this.client.request<{ content?: { sha?: string } }>('PUT /repos/{owner}/{repo}/contents/{path}', parameters);
+      const response = await this.client.request<ContentMutationData>('PUT /repos/{owner}/{repo}/contents/{path}', parameters);
       const sha = response.data.content?.sha;
-      if (sha) return settlementFileFromSource(sourceDocument, sha, intended.currency);
+      if (sha) return { value: settlementFileFromSource(sourceDocument, sha, intended.currency), commit: repositoryCommitFromMutation(response.data) };
       const confirmed = await this.readSettlementLedger(repository, intended.currency, signal);
       if (confirmed.kind === 'ready') {
         const remote = confirmed.file.payments.find((payment) => payment.id === intended.id);
-        if (remote && settlementCreationMatches(remote, intended)) return confirmed.file;
+        if (remote && settlementCreationMatches(remote, intended)) return { value: confirmed.file, commit: null };
       }
       throw new AppFailure({ kind: 'settlement_record_conflict' });
     } catch (error) {
@@ -321,7 +386,7 @@ export class GitHubGatewayImpl implements GitHubGateway {
       if (latest.kind === 'ready') {
         const remote = latest.file.payments.find((payment) => payment.id === intended.id);
         if (remote) {
-          if (settlementCreationMatches(remote, intended)) return latest.file;
+          if (settlementCreationMatches(remote, intended)) return { value: latest.file, commit: await this.resolveConfirmedCommit(repository, 'settlements.json', subject, intended.recorded_by, signal) };
           throw new AppFailure({ kind: 'settlement_record_conflict' });
         }
         if (hasRawPaymentId(latest.file, intended.id)) throw new AppFailure({ kind: 'settlement_record_conflict' });
@@ -341,7 +406,7 @@ export class GitHubGatewayImpl implements GitHubGateway {
     recipient: string,
     confirmedAt: IsoInstant,
     signal?: AbortSignal,
-  ): Promise<SettlementLedgerFile> {
+  ): Promise<CommittedMutation<SettlementLedgerFile>> {
     return this.writeSettlementConfirmation(repository, current, paymentId, recipient, confirmedAt, signal, true);
   }
 
@@ -353,12 +418,12 @@ export class GitHubGatewayImpl implements GitHubGateway {
     confirmedAt: IsoInstant,
     signal: AbortSignal | undefined,
     allowSafeRetry: boolean,
-  ): Promise<SettlementLedgerFile> {
+  ): Promise<CommittedMutation<SettlementLedgerFile>> {
     const payment = current.payments.find((item) => item.id === paymentId);
     if (!payment) throw new AppFailure({ kind: 'settlement_confirmation_conflict' });
     if (normalizeLogin(payment.to) !== normalizeLogin(recipient)) throw new AppFailure({ kind: 'settlement_confirmation_unauthorized' });
     if (payment.status === 'confirmed') {
-      if (payment.confirmed_by && normalizeLogin(payment.confirmed_by) === normalizeLogin(recipient)) return current;
+      if (payment.confirmed_by && normalizeLogin(payment.confirmed_by) === normalizeLogin(recipient)) return { value: current, commit: null };
       throw new AppFailure({ kind: 'settlement_confirmation_conflict' });
     }
     if (Date.parse(confirmedAt) < Date.parse(payment.recorded_at)) throw new DomainValidationError('Confirmation time cannot predate the payment record.');
@@ -373,17 +438,18 @@ export class GitHubGatewayImpl implements GitHubGateway {
         : raw),
     };
     const serialized = serializeSettlementLedger(sourceDocument);
+    const subject = `Confirm settlement payment ${paymentId}`;
     try {
-      const response = await this.client.request<{ content?: { sha?: string } }>('PUT /repos/{owner}/{repo}/contents/{path}', {
+      const response = await this.client.request<ContentMutationData>('PUT /repos/{owner}/{repo}/contents/{path}', {
         owner: repository.owner, repo: repository.name, path: 'settlements.json', branch: repository.defaultBranch, sha: current.blobSha,
-        message: `Confirm settlement payment ${paymentId}`, content: encodeUtf8Base64(serialized), request: { signal },
+        message: subject, content: encodeUtf8Base64(serialized), request: { signal },
       });
       const sha = response.data.content?.sha;
-      if (sha) return settlementFileFromSource(sourceDocument, sha, payment.currency);
+      if (sha) return { value: settlementFileFromSource(sourceDocument, sha, payment.currency), commit: repositoryCommitFromMutation(response.data) };
       const confirmed = await this.readSettlementLedger(repository, payment.currency, signal);
       if (confirmed.kind === 'ready') {
         const remote = confirmed.file.payments.find((item) => item.id === paymentId);
-        if (remote?.status === 'confirmed' && settlementCreationMatches(remote, payment) && normalizeLogin(remote.confirmed_by ?? '') === normalizeLogin(recipient)) return confirmed.file;
+        if (remote?.status === 'confirmed' && settlementCreationMatches(remote, payment) && normalizeLogin(remote.confirmed_by ?? '') === normalizeLogin(recipient)) return { value: confirmed.file, commit: null };
       }
       throw new AppFailure({ kind: 'settlement_confirmation_conflict' });
     } catch (error) {
@@ -393,7 +459,7 @@ export class GitHubGatewayImpl implements GitHubGateway {
       const remote = latest.file.payments.find((item) => item.id === paymentId);
       if (!remote || !settlementCreationMatches(remote, payment)) throw new AppFailure({ kind: 'settlement_confirmation_conflict' });
       if (remote.status === 'confirmed') {
-        if (normalizeLogin(remote.confirmed_by ?? '') === normalizeLogin(recipient)) return latest.file;
+        if (normalizeLogin(remote.confirmed_by ?? '') === normalizeLogin(recipient)) return { value: latest.file, commit: await this.resolveConfirmedCommit(repository, 'settlements.json', subject, recipient, signal) };
         throw new AppFailure({ kind: 'settlement_confirmation_conflict' });
       }
       if (allowSafeRetry) return this.writeSettlementConfirmation(repository, latest.file, paymentId, recipient, confirmedAt, signal, false);
@@ -406,7 +472,7 @@ export class GitHubGatewayImpl implements GitHubGateway {
     current: SettlementLedgerFile,
     paymentId: string,
     signal?: AbortSignal,
-  ): Promise<SettlementLedgerState> {
+  ): Promise<CommittedMutation<SettlementLedgerState>> {
     return this.writeSettlementDeletion(repository, current, paymentId, signal, true);
   }
 
@@ -416,11 +482,11 @@ export class GitHubGatewayImpl implements GitHubGateway {
     paymentId: string,
     signal: AbortSignal | undefined,
     allowSafeRetry: boolean,
-  ): Promise<SettlementLedgerState> {
+  ): Promise<CommittedMutation<SettlementLedgerState>> {
     const targetPayment = current.payments.find((payment) => payment.id === paymentId);
     if (!targetPayment) {
       if (hasRawPaymentId(current, paymentId)) throw new AppFailure({ kind: 'settlement_ledger_invalid' });
-      return { kind: 'ready', file: current };
+      return { value: { kind: 'ready', file: current }, commit: null };
     }
     const rawPayments = sourcePayments(current);
     const matchingIndexes = rawPayments.flatMap((raw, index) => isRecord(raw) && raw.id === paymentId ? [index] : []);
@@ -428,28 +494,29 @@ export class GitHubGatewayImpl implements GitHubGateway {
     const targetIndex = matchingIndexes[0]!;
     const sourceDocument = { ...current.sourceDocument, payments: rawPayments.filter((_, index) => index !== targetIndex) };
     const serialized = serializeSettlementLedger(sourceDocument);
+    const subject = `Delete settlement payment ${paymentId}`;
     try {
-      const response = await this.client.request<{ content?: { sha?: string } }>('PUT /repos/{owner}/{repo}/contents/{path}', {
+      const response = await this.client.request<ContentMutationData>('PUT /repos/{owner}/{repo}/contents/{path}', {
         owner: repository.owner, repo: repository.name, path: 'settlements.json', branch: repository.defaultBranch, sha: current.blobSha,
-        message: `Delete settlement payment ${paymentId}`, content: encodeUtf8Base64(serialized), request: { signal },
+        message: subject, content: encodeUtf8Base64(serialized), request: { signal },
       });
       const sha = response.data.content?.sha;
-      if (sha) return { kind: 'ready', file: settlementFileFromSource(sourceDocument, sha, targetPayment.currency) };
+      if (sha) return { value: { kind: 'ready', file: settlementFileFromSource(sourceDocument, sha, targetPayment.currency) }, commit: repositoryCommitFromMutation(response.data) };
       const confirmed = await this.readSettlementLedger(repository, targetPayment.currency, signal);
-      if (confirmed.kind === 'missing') return confirmed;
+      if (confirmed.kind === 'missing') return { value: confirmed, commit: null };
       if (confirmed.kind === 'ready' && !confirmed.file.payments.some((payment) => payment.id === paymentId)) {
         if (hasRawPaymentId(confirmed.file, paymentId)) throw new AppFailure({ kind: 'settlement_ledger_invalid' });
-        return confirmed;
+        return { value: confirmed, commit: null };
       }
       throw new AppFailure({ kind: 'settlement_record_conflict' });
     } catch (error) {
       if (!(isConflict(error) || isRetryable(error))) throw error;
       const latest = await this.readSettlementLedger(repository, targetPayment.currency, signal);
-      if (latest.kind === 'missing') return latest;
+      if (latest.kind === 'missing') return { value: latest, commit: await this.resolveConfirmedCommit(repository, 'settlements.json', subject, null, signal) };
       if (latest.kind === 'invalid' || latest.kind === 'unverified') throw new AppFailure({ kind: 'settlement_ledger_invalid' });
       if (!latest.file.payments.some((payment) => payment.id === paymentId)) {
         if (hasRawPaymentId(latest.file, paymentId)) throw new AppFailure({ kind: 'settlement_ledger_invalid' });
-        return latest;
+        return { value: latest, commit: await this.resolveConfirmedCommit(repository, 'settlements.json', subject, null, signal) };
       }
       if (allowSafeRetry) return this.writeSettlementDeletion(repository, latest.file, paymentId, signal, false);
       throw new AppFailure({ kind: 'settlement_record_conflict' });
@@ -469,23 +536,24 @@ export class GitHubGatewayImpl implements GitHubGateway {
     return reservations.find((item) => normalizeLogin(item.from) === normalizeLogin(intended.from) && normalizeLogin(item.to) === normalizeLogin(intended.to))?.availableToRecordMinor ?? 0;
   }
 
-  async updateSpendingPlan(repository: RepositoryRef, current: GroupFile, next: SpendingPlan | null, signal?: AbortSignal): Promise<GroupFile> {
+  async updateSpendingPlan(repository: RepositoryRef, current: GroupFile, next: SpendingPlan | null, signal?: AbortSignal): Promise<CommittedMutation<GroupFile>> {
     return this.writeSpendingPlan(repository, current, next, signal, true);
   }
 
-  private async writeSpendingPlan(repository: RepositoryRef, current: GroupFile, next: SpendingPlan | null, signal: AbortSignal | undefined, allowSafeRetry: boolean): Promise<GroupFile> {
+  private async writeSpendingPlan(repository: RepositoryRef, current: GroupFile, next: SpendingPlan | null, signal: AbortSignal | undefined, allowSafeRetry: boolean): Promise<CommittedMutation<GroupFile>> {
     const sourceDocument = { ...current.sourceDocument };
     if (next) sourceDocument.spending_plan = next;
     else delete sourceDocument.spending_plan;
+    const subject = next ? 'Update spending plan' : 'Remove spending plan';
     try {
-      const response = await this.client.request<{ content?: { sha?: string } }>('PUT /repos/{owner}/{repo}/contents/{path}', {
+      const response = await this.client.request<ContentMutationData>('PUT /repos/{owner}/{repo}/contents/{path}', {
         owner: repository.owner, repo: repository.name, path: 'group.json', branch: repository.defaultBranch, sha: current.blobSha,
-        message: next ? 'Update spending plan' : 'Remove spending plan', content: encodeUtf8Base64(serializeJson(sourceDocument)), request: { signal },
+        message: subject, content: encodeUtf8Base64(serializeJson(sourceDocument)), request: { signal },
       });
       const sha = response.data.content?.sha;
-      if (sha) return { group: parseGroupDocument(sourceDocument).group, blobSha: sha, path: 'group.json', sourceDocument };
+      if (sha) return { value: { group: parseGroupDocument(sourceDocument).group, blobSha: sha, path: 'group.json', sourceDocument }, commit: repositoryCommitFromMutation(response.data) };
       const confirmed = await this.readGroup(repository, signal);
-      if (spendingPlanMatches(confirmed, next)) return confirmed;
+      if (spendingPlanMatches(confirmed, next)) return { value: confirmed, commit: null };
       throw new AppFailure({ kind: 'spending_plan_conflict', latest: confirmed, submitted: next });
     } catch (error) {
       if (error instanceof AppFailure && error.detail.kind === 'spending_plan_conflict') throw error;
@@ -494,7 +562,9 @@ export class GitHubGatewayImpl implements GitHubGateway {
       }
       if (isRetryable(error)) {
         const latest = await this.readGroup(repository, signal);
-        if (spendingPlanMatches(latest, next)) return latest;
+        if (spendingPlanMatches(latest, next)) {
+          return { value: latest, commit: await this.resolveConfirmedCommit(repository, 'group.json', subject, next?.updated_by ?? null, signal) };
+        }
         if (latest.blobSha === current.blobSha) {
           if (allowSafeRetry) return this.writeSpendingPlan(repository, latest, next, signal, false);
           throw error;
@@ -509,6 +579,40 @@ export class GitHubGatewayImpl implements GitHubGateway {
     const file = await this.readExpense(repository, id, signal);
     if (!file) throw new AppFailure({ kind: 'github', status: 502, safeMessage: 'GitHub did not confirm the expense write.', retryable: true });
     return file;
+  }
+
+  private async resolveConfirmedCommit(
+    repository: RepositoryRef,
+    path: string,
+    subject: string,
+    expectedLogin: string | null,
+    signal?: AbortSignal,
+  ): Promise<RepositoryCommitRef | null> {
+    try {
+      const response = await this.client.request<unknown[]>('GET /repos/{owner}/{repo}/commits', {
+        owner: repository.owner,
+        repo: repository.name,
+        sha: repository.defaultBranch,
+        path,
+        page: 1,
+        per_page: 10,
+        request: { signal },
+      });
+      if (!Array.isArray(response.data)) return null;
+      const normalizedExpected = expectedLogin ? normalizeLogin(expectedLogin) : null;
+      const matches = response.data.flatMap((row) => {
+        try {
+          const parsed = parseActivityCommit(row);
+          const actorMatches = normalizedExpected === null || parsed.authorLogin === normalizedExpected;
+          return parsed.firstMessageLine === subject && actorMatches ? [{ sha: parsed.sha, committedAt: parsed.committedAt }] : [];
+        } catch {
+          return [];
+        }
+      });
+      return matches.length === 1 ? matches[0]! : null;
+    } catch {
+      return null;
+    }
   }
 
   private async readContent(repository: RepositoryRef, path: string, signal?: AbortSignal): Promise<ContentFile> {
@@ -606,6 +710,36 @@ function serializeSettlementLedger(sourceDocument: Record<string, unknown>): str
 
 function isRecord(input: unknown): input is Record<string, unknown> {
   return typeof input === 'object' && input !== null && !Array.isArray(input);
+}
+
+function isCommitSha(input: string): boolean {
+  return /^[0-9a-f]{40,64}$/.test(input);
+}
+
+function repositoryCommitFromMutation(input: ContentMutationData): RepositoryCommitRef | null {
+  const sha = typeof input.commit?.sha === 'string' ? input.commit.sha.toLowerCase() : '';
+  if (!isCommitSha(sha)) return null;
+  const rawDate = input.commit?.committer?.date;
+  const parsedDate = typeof rawDate === 'string' ? Date.parse(rawDate) : Number.NaN;
+  return { sha, committedAt: Number.isFinite(parsedDate) ? new Date(parsedDate).toISOString() : null };
+}
+
+function parseActivityCommit(input: unknown): UnclassifiedGroupCommit {
+  if (!isRecord(input) || typeof input.sha !== 'string' || !isCommitSha(input.sha.toLowerCase()) || !isRecord(input.commit) || typeof input.commit.message !== 'string') {
+    throw new DomainValidationError('GitHub returned invalid commit history.');
+  }
+  const rawAuthor = isRecord(input.author) && typeof input.author.login === 'string' ? normalizeLogin(input.author.login) : '';
+  const author = /^[a-z\d](?:[a-z\d-]*[a-z\d])?$/.test(rawAuthor) && rawAuthor.length <= 39 ? rawAuthor : null;
+  const committer = isRecord(input.commit.committer) ? input.commit.committer : null;
+  const rawDate = committer && typeof committer.date === 'string' ? committer.date : null;
+  const parsedDate = rawDate ? Date.parse(rawDate) : Number.NaN;
+  const firstMessageLine = input.commit.message.split(/\r?\n/, 1)[0] ?? '';
+  return {
+    sha: input.sha.toLowerCase(),
+    firstMessageLine,
+    authorLogin: author,
+    committedAt: Number.isFinite(parsedDate) ? new Date(parsedDate).toISOString() : null,
+  };
 }
 
 async function mapConcurrent<T, R>(values: T[], limit: number, mapper: (value: T) => Promise<R>): Promise<R[]> {

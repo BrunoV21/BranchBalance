@@ -1,7 +1,7 @@
-# BranchBalance — Phase 1 Architecture and CR-001/CR-002/CR-003 Increments
+# BranchBalance — Phase 1 Architecture and CR-001/CR-002/CR-003/CR-004 Increments
 
-**Status:** Phase 1 implementation guide; CR-001 through CR-003 implemented; CR-003 physical-device acceptance blocked by a known GitHub App token limitation
-**Applies to:** Phase 1 Android application, CR-001 trip and group spending intelligence, CR-002 settlement payment recording, and CR-003 in-app group invitation decisions
+**Status:** Phase 1 implementation guide; CR-001 through CR-003 implemented; CR-004 specified and ready for implementation; CR-003 physical-device acceptance blocked by a known GitHub App token limitation
+**Applies to:** Phase 1 Android application, CR-001 trip and group spending intelligence, CR-002 settlement payment recording, CR-003 in-app group invitation decisions, and CR-004 on-device activity inbox
 **Companion specification:** [`PRD.md`](PRD.md)
 **Last updated:** 2026-07-19
 
@@ -1563,3 +1563,389 @@ CR-003 was implemented after the existing Phase 1/CR-001/CR-002 gates were green
 5. **Hardening and acceptance:** exercise ambiguous outcomes, pre-mutation refresh races, rate limits, large text, two physical accounts, and the existing typecheck/lint/test/doctor/APK gates.
 
 Organization/team invitations, unrelated GitHub repository invitations, read-only membership, pre-accept repository previews, push/background notifications, invitation history, owner-side cancellation, permission editing, leaving accepted repositories, and offline decisions remain outside CR-003.
+
+## 19. CR-004 architecture delta — On-device activity inbox
+
+CR-004 is specified for implementation. This section defines the additive architecture for PRD change request CR-004; every Phase 1 and CR-001 through CR-003 decision remains in force unless explicitly changed below. The increment supersedes the earlier generic exclusion of “notifications” only for a device-local, foreground-discovered activity summary. Operating-system notifications, push delivery, background work, and a BranchBalance backend remain excluded.
+
+The inbox is not shared application data and is not authoritative. GitHub repository files, commit history, repository access, and open invitations remain authoritative; AsyncStorage holds a bounded account-scoped presentation history, read state, deduplication receipts, and commit checkpoints for this device.
+
+### 19.1 Ownership, source organization, and navigation
+
+Extend `GroupsProvider` rather than adding an `ActivityProvider`. It already lives above the authenticated stack, owns accepted-group and received-invitation discovery, survives navigation between **Your groups** and a selected group, and coalesces every dashboard lifecycle trigger. A second provider with its own GitHub effect would create duplicate or out-of-order discovery generations.
+
+Keep the implementation modular behind an activity feature and storage boundary:
+
+```text
+src/
+├── app/(app)/
+│   ├── _layout.tsx                         # registers groups/activity
+│   └── groups/
+│       ├── index.tsx                       # inbox icon and unread dot
+│       └── activity.tsx                    # recent activity list
+├── domain/
+│   └── types.ts                            # closed activity/runtime contracts
+├── features/
+│   └── activity/
+│       ├── commit-classifier.ts            # exact safe subject mapping
+│       ├── reconciliation.ts               # baseline/checkpoint/dedupe transitions
+│       ├── retention.ts                    # deterministic age/count pruning
+│       └── destinations.ts                 # typed destination resolution
+├── infrastructure/
+│   ├── github/
+│   │   ├── contracts.ts                    # bounded commit-history operation
+│   │   └── gateway.ts                      # DTO validation and pagination
+│   └── storage/
+│       ├── contracts.ts                    # activity record operations
+│       └── snapshot-store.ts               # versioned account activity key
+└── providers/
+    ├── groups-provider.tsx                 # activity resource and dashboard orchestration
+    └── group-provider.tsx                  # reports confirmed local mutations
+```
+
+Add `/(app)/groups/activity` to the authenticated stack as a normal pushed screen, not a modal and not a group tab. It remains inside the root `GroupsProvider`. `/(app)/groups` follows the CR-004 update to mockup 03; the activity route follows mockup 12. The mockup script illustrates dismissal and clearing only and is not a persistence or synchronization implementation.
+
+Activity destinations are closed domain values rather than arbitrary route strings. A presentation resolver maps them to the groups screen, selected-group Overview, one expense detail, Spending, or Balances. It constructs owner/repository parameters only from the current validated `DiscoveredGroup`; stored display text and route parameters are never treated as proof of repository access.
+
+No new runtime dependency is required. Use the existing Expo Router, React Context, Zod, AsyncStorage, Lucide icons, confirmation dialog, banners, empty states, refresh control, and accessibility announcement primitives.
+
+### 19.2 Domain and local-record types
+
+Add transport-independent closed types equivalent to:
+
+```ts
+type ActivityKind =
+  | 'expense_added'
+  | 'expense_updated'
+  | 'expense_deleted'
+  | 'spending_plan_updated'
+  | 'spending_plan_removed'
+  | 'settlement_recorded'
+  | 'settlement_confirmed'
+  | 'settlement_deleted'
+  | 'group_created'
+  | 'group_updated'
+  | 'group_invitation_received'
+  | 'group_added'
+  | 'additional_activity';
+
+type ActivityDestination =
+  | { kind: 'groups' }
+  | { kind: 'overview' }
+  | { kind: 'expense'; expenseId: string }
+  | { kind: 'spending' }
+  | { kind: 'balances' };
+
+interface ActivityItem {
+  id: string;
+  source: 'commit' | 'invitation' | 'group' | 'summary';
+  sourceId: string;
+  repositoryId: number;
+  groupKey: GroupKey | null;       // null only before an invitation becomes an accepted group
+  groupName: string;
+  kind: ActivityKind;
+  destination: ActivityDestination;
+  actorLogin: string | null;
+  eventAt: IsoInstant;
+  observedAt: IsoInstant;
+  readAt: IsoInstant | null;
+}
+
+interface ActivityCheckpoint {
+  repositoryId: number;
+  groupKey: GroupKey;
+  headCommitSha: string | null;
+  initializedAt: IsoInstant;
+  lastCheckedAt: IsoInstant;
+}
+
+interface LocalCommitReceipt {
+  repositoryId: number;
+  groupKey: GroupKey;
+  commitSha: string;
+  observedAt: IsoInstant;
+}
+
+interface SeenInvitationReceipt {
+  invitationId: number;
+  lastObservedAt: IsoInstant;
+  resolvedAt: IsoInstant | null;
+}
+
+interface ActivityInboxV1 {
+  version: 1;
+  initializedAt: IsoInstant;
+  items: ActivityItem[];
+  checkpoints: ActivityCheckpoint[];
+  localCommitReceipts: LocalCommitReceipt[];
+  seenInvitations: SeenInvitationReceipt[];
+}
+```
+
+The activity `id` is deterministic and contains no user-entered text:
+
+- commit: `commit:<normalized-group-key>:<lowercase-full-sha>`;
+- invitation: `invitation:<positive-invitation-id>`; and
+- first accepted discovery: `group:<positive-repository-id>:added`; and
+- bounded-history fallback: `summary:<normalized-group-key>:<lowercase-newest-sha>`.
+
+Validate UUID resource IDs with the same canonical expense/settlement UUID rule already used by those domains. `sourceId` is the commit SHA, decimal invitation ID, or decimal repository ID only. Validate repository IDs and invitation IDs as positive safe integers; normalize group keys through `groupKey()`; normalize actor logins through `normalizeLogin()`; and validate every instant. An invitation item may retain the provisional name and repository ID supplied by the validated CR-003 model, but it never gains a `GroupKey`, repository route, or decision action before accepted discovery succeeds.
+
+`ActivityItem` stores already-classified labels, not commit messages. UI copy comes from the closed `ActivityKind` catalogue. The destination is derived from the kind and validated UUID, never from remote free text.
+
+### 19.3 Safe commit classification
+
+The gateway may return one short-lived unclassified commit value to the feature boundary:
+
+```ts
+interface UnclassifiedGroupCommit {
+  sha: string;
+  firstMessageLine: string;
+  authorLogin: string | null;
+  committedAt: IsoInstant | null;
+}
+```
+
+This value must be classified immediately. Do not place it in provider state, React props, AsyncStorage, logs, telemetry, crash reports, errors, or test snapshots containing arbitrary remote text.
+
+The parser is case-sensitive, examines only the first line, and anchors the complete subject. It maps exactly:
+
+```text
+Add expense <uuid>                   -> expense_added / expense
+Update expense <uuid>                -> expense_updated / expense
+Delete expense <uuid>                -> expense_deleted / overview
+Update spending plan                 -> spending_plan_updated / spending
+Remove spending plan                 -> spending_plan_removed / spending
+Record settlement payment <uuid>     -> settlement_recorded / balances
+Confirm settlement payment <uuid>    -> settlement_confirmed / balances
+Delete settlement payment <uuid>     -> settlement_deleted / balances
+Initialize BranchBalance group       -> group_created / overview
+anything else                         -> group_updated / overview
+```
+
+A partially matching prefix, invalid UUID, extra suffix, leading whitespace, multiline payload with an unexpected first line, or externally chosen message maps to `group_updated`. The UI never renders the raw subject or UUID. This prevents a collaborator from injecting arbitrary notification copy through a commit message while still providing a safe indication that group data changed.
+
+Use the linked top-level GitHub commit `author.login` when it validates. Do not fall back to the free-form Git author name, committer name, or email. An unlinked or malformed author maps to `actorLogin: null` and is presented as **A collaborator**. Use the validated commit committer timestamp as `eventAt`; if it is absent, invalid, or implausibly in the future, use the local `observedAt` without failing the repository's entire activity check.
+
+### 19.4 GitHub gateway and bounded history reads
+
+Extend the gateway with a product-level bounded operation:
+
+```ts
+interface GroupCommitSlice {
+  commits: UnclassifiedGroupCommit[];
+  checkpointFound: boolean;
+  hasMore: boolean;
+  warnings: DataWarning[];
+}
+
+interface GitHubGateway {
+  // Existing operations remain.
+  listGroupActivityCommits(
+    repository: RepositoryRef,
+    stopAtSha: string | null,
+    signal?: AbortSignal,
+  ): Promise<GroupCommitSlice>;
+}
+```
+
+Call `GET /repos/{owner}/{repo}/commits` with `sha=repository.defaultBranch`, `per_page=50`, and page numbers beginning at one. Validate repository fields before transport and validate every returned SHA, linked login, message string, and timestamp before mapping. The operation reads no more than two pages and stops as soon as `stopAtSha` is encountered. It returns newest first and includes the checkpoint commit only as the traversal boundary; reconciliation never turns that boundary into a new item.
+
+Follow the shared recommended media type, pinned API version, authentication, pagination-link parsing, token-refresh, timeout, and error mapping. GitHub App user access tokens support this endpoint with **Contents: read**; the existing **Contents: read and write** permission is sufficient. Add no installation permission or authorization scope.
+
+A `409` whose validated GitHub error means the Git repository is empty maps to an empty successful slice. Other `409` responses remain typed repository failures. A malformed page or failure on page two fails that repository's whole slice; do not publish or checkpoint a partial traversal. `403`, `404`, rate limits, and authentication retain their shared meanings, but an activity-only `403`/`404` is not by itself permission to purge the group until accepted-group discovery or the existing complete group path confirms access loss.
+
+Do not use GitHub's Events, Notifications, webhooks, commit-diff, compare, branch-polling, or repository-contents endpoints for the dashboard activity check. Do not filter by a device timestamp: clock skew and rewritten history make the stored commit SHA the traversal boundary.
+
+### 19.5 Baseline, checkpoint, and deduplication algorithm
+
+Activity reconciliation is a pure function over the current `ActivityInboxV1`, validated groups, validated invitations when available, per-repository commit results, and one injected `Clock` instant. It returns one complete next record plus safe per-repository failures; React state does not build items incrementally.
+
+On the first successful activity generation for an account:
+
+1. Set `initializedAt` once.
+2. For every accepted group, inspect the bounded commit slice and store its newest SHA as the checkpoint.
+3. From all recognized commits whose effective event time is within the previous 30 days, retain the newest 20 across the account and set `readAt` to the initialization instant.
+4. Store currently visible eligible invitation IDs as seen without producing unread invitation items.
+5. Do not create `group_added` items for groups present in this baseline.
+
+If one repository fails during the first generation, store a checkpoint with a null head as a baseline-pending sentinel. Its later first success follows baseline behavior and imports only read history; an intermittent first-run failure must not turn old commits into unread activity. This sentinel also distinguishes an existing group whose initial history read failed from a repository first discovered after account initialization.
+
+For an initialized repository with a checkpoint:
+
+1. Request its bounded slice with `stopAtSha=headCommitSha`.
+2. If the checkpoint is found, classify only commits before it as new observations.
+3. If the checkpoint is not found, classify only the newest safe recognizable commits that fit retention, append one `additional_activity` summary, and do not claim that the cause was definitely volume or rewritten history.
+4. Deduplicate against current item IDs and `localCommitReceipts`.
+5. Set every genuinely remote observation to `readAt: null`, including a commit whose linked actor equals the current account when this device did not record its commit SHA locally.
+6. Advance to the newest inspected SHA only after the complete next record can be persisted.
+
+One activity refresh uses at most three concurrent repository-history requests. When a primary or secondary rate limit occurs, stop scheduling additional repositories, allow already-running calls to settle, preserve every uninspected checkpoint, and surface the supplied retry time. Successful repository results may commit alongside failures from other repositories because checkpoints and items are independent per repository; the write still replaces the account activity record once.
+
+For invitations, compare a successful fresh CR-003 list with `seenInvitations`. A new eligible ID creates one unread `group_invitation_received` item and a seen receipt. Update `lastObservedAt` while it remains open; when absent from a fresh list, set `resolvedAt`. Retain an unresolved receipt while its invitation remains visible and retain resolved receipts for 30 days so dismissal or **Clear all** does not recreate recently resolved items. An invitation list failure performs no transition. GitHub's known empty-success limitation remains indistinguishable from a genuine empty list and must not be described as reliable delivery.
+
+For accepted groups, repository IDs already represented by a checkpoint are known. After account initialization, a newly discovered valid repository creates one unread `group_added` item before its read-history baseline is established. A confirmed local create or in-app invitation acceptance registers the repository and corresponding item as read before the post-mutation discovery generation, preventing a false unread item for an action already observed on this device.
+
+### 19.6 Confirmed local repository mutations
+
+The Contents API returns both content/blob state and the commit created by a successful mutation. Preserve that commit reference at the gateway boundary instead of discarding it:
+
+```ts
+interface RepositoryCommitRef {
+  sha: string;
+  committedAt: IsoInstant | null;
+}
+
+interface CommittedMutation<T> {
+  value: T;
+  commit: RepositoryCommitRef | null;
+}
+```
+
+CR-004 changes repository-writing gateway results to `CommittedMutation<T>` for group-file initialization, expense create/update/delete, spending-plan update/removal, and settlement record/confirm/delete. Delete uses `CommittedMutation<null>` or the updated retained ledger state as appropriate. The commit is null only when GitHub confirmed the authoritative mutation but did not provide, or BranchBalance could not uniquely prove, its commit reference. Keep `ExpenseFile`, `GroupFile`, and `SettlementLedgerFile` focused on current file/blob state; a commit SHA is mutation metadata and must not be added to those file types.
+
+The existing write use cases unwrap `value` for snapshot reconciliation, then call `GroupsProvider.recordLocalActivity()` with the group, closed activity kind, optional validated resource UUID, and commit reference. `GroupsProvider` inserts or updates the deterministic commit item as read and stores a `LocalCommitReceipt`; it does not advance the repository checkpoint. The next commit traversal can therefore discover other members' commits that occurred before the local commit, suppress the already-seen local SHA, advance normally, and then remove receipts at or behind the new checkpoint.
+
+If an ambiguous write is proven successful by the existing semantic read-back logic, the gateway resolves its commit reference with one bounded, path-targeted recent-commit read using the deterministic subject and intended audit identity. If a unique matching commit cannot be proven, finish the authoritative data mutation without inventing activity; the next normal commit traversal may report a remote observation. Activity bookkeeping failure never rolls back or reports failure for a repository mutation GitHub already confirmed.
+
+Dismissal or **Clear all** preserves uncheckpointed `LocalCommitReceipt` values. This prevents a locally observed commit from reappearing as unread if the user clears the item before the next activity traversal. Receipts are removed after a successful traversal passes their SHA or after 30 days.
+
+Invitation accept/decline has no repository commit. The CR-003 decision path records its local invitation resolution as seen/read and, for a confirmed accepted group, registers the repository ID before post-decision discovery. Actions completed on another device are remote observations on this device.
+
+### 19.7 Activity storage and privacy boundary
+
+Extend `SnapshotStore` with narrow operations:
+
+```ts
+interface SnapshotStore {
+  // Existing operations remain.
+  readActivity(accountId: number): Promise<ActivityInboxV1 | null>;
+  writeActivity(accountId: number, value: ActivityInboxV1): Promise<void>;
+  removeActivity(accountId: number): Promise<void>;
+}
+```
+
+Use `bb:v1:activity:<account-id>`. This is a new record, not a change to `GroupSnapshotV1`, so existing group-cache keys and schemas do not need a version bump. Add the activity key to `clearAccount()`. Validate the complete record with strict bounds before returning it: maximum 100 items, sane checkpoint/receipt collection limits, unique IDs and repository checkpoints, recognized enums, normalized keys/logins, valid SHAs/UUIDs/instants, and no unknown source or destination variant. Remove a corrupt or unsupported record and treat it as a first-run baseline.
+
+AsyncStorage writes one JSON value atomically at the key boundary. Every hydrate, refresh, local insert, mark-read, dismiss, clear, access-loss purge, and retention operation computes a complete next record, writes it, and only then publishes the matching provider state. If persistence fails, preserve the previous published record and show a scoped local-cache error; never show a dot state that a restart would immediately contradict. A confirmed GitHub mutation remains successful even if its optional local activity insert fails.
+
+Prune items deterministically by effective event time, then observation time and stable ID: remove entries older than 30 days and retain the newest 100. Checkpoints survive item pruning and **Clear all**. Prune resolved invitation receipts and passed/expired local commit receipts after 30 days. Put defensive collection caps above normal retention so a malformed cache cannot allocate unbounded memory.
+
+This record is app-sandboxed private cache data, not a credential vault. It may contain group names and GitHub logins already available elsewhere in the account cache, but must never contain:
+
+- access/refresh tokens, device codes, authorization headers, or raw GitHub response bodies;
+- raw commit subjects/bodies, diffs, author names, emails, or arbitrary URLs;
+- expense descriptions, amounts, shares, categories, or payment methods;
+- settlement amounts, notes, transaction references, bank names, or financial-account identifiers; or
+- complete invitation/repository DTOs or data that can authorize an invitation decision.
+
+Sign-out, terminal session expiry, revoked credentials, and explicit account clearing remove the entire record. `GroupsProvider.removeGroup()` also removes that repository's items, checkpoint, and local receipts after confirmed access loss, then persists group and activity cache changes before exposing the final state. Pending invitation items remain non-actionable summaries; decisions always resolve against the current validated `invitationState`.
+
+### 19.8 GroupsProvider state and foreground orchestration
+
+Extend the context without changing selected-group snapshot ownership:
+
+```ts
+interface GroupsContextValue {
+  // Existing members remain.
+  activityState: ResourceState<ActivityItem[]>;
+  hasUnreadActivity: boolean;
+  activityWarning: string | null;
+  markActivityRead(itemIds: readonly string[]): Promise<void>;
+  dismissActivity(itemId: string): Promise<void>;
+  clearActivity(): Promise<void>;
+  recordLocalActivity(input: ConfirmedLocalActivity): Promise<void>;
+}
+```
+
+Hydrate activity with the same account-ID/epoch and revision guards used by groups so a slow old-account read cannot overwrite a newer account or remote generation. Derive `hasUnreadActivity` exclusively from validated items whose `readAt` is null; the header dot has no separate boolean to drift out of sync.
+
+`GroupsProvider.refresh()` remains the only dashboard single-flight promise. Extend its all-settled orchestration:
+
+1. Start accepted-group and invitation discovery as CR-003 defines.
+2. When accepted-group discovery succeeds, start bounded commit checks against that validated group generation.
+3. Reconcile successful fresh invitations when available; invitation failure preserves receipts and items.
+4. Persist and publish accepted groups, invitation memory state, and activity as separate result domains so one failure does not erase another domain.
+5. Resolve the shared refresh promise only after every started branch settles; pull-to-refresh indicators observe group, invitation, and activity refreshing state.
+
+Authenticated launch, **Your groups** focus, Activity focus, foreground return while either screen is visible, pull-to-refresh, and explicit retry all call this same `refresh()`. Activity adds no timer, root background listener, headless task, worker, or notification registration. The existing visible-resource rule remains: foregrounding a selected group refreshes that group, not the account-wide inbox; its confirmed remote snapshot may later contribute only through normal top-level activity discovery.
+
+An activity screen that focuses while a group-list refresh is already running joins it. A group screen mutation may call `recordLocalActivity()` without triggering commit discovery. Account changes increment the existing epoch, reset activity state, cancel/ignore old read results, and hydrate only the new account's key.
+
+`markActivityRead()` receives the exact IDs rendered by the committed activity-screen generation. It sets those items' `readAt` once in one store update; an item inserted after that render remains unread. `dismissActivity()` removes exactly one validated current ID. `clearActivity()` requires UI confirmation and replaces only `items` with an empty array while retaining checkpoints, invitation receipts, and local commit receipts. Repeated calls are idempotent.
+
+### 19.9 UI behavior, destinations, and accessibility
+
+On **Your groups**, place an inbox icon button in the account heading row before the account avatar. Use at least a 44-by-44 logical-pixel target. Overlay a small accent dot when `hasUnreadActivity` is true. The button's complete accessible label is **Activity inbox** or **Activity inbox, new activity**; the dot is hidden from the accessibility tree and is not the only unread signal.
+
+The Activity screen renders cached items immediately in one virtualized newest-first list. Its list header contains the foreground-delivery explanation, last successful check, scoped stale/error banner, and **Clear all** when items exist. Rows show only the closed action label, validated group/provisional name, `@actor` or **A collaborator**, relative visual time, and accessible absolute timestamp. Unread rows include a textual/accessibility **New** state and a non-colour visual treatment.
+
+Each row has one primary navigation press target and a separate, explicitly labelled **Dismiss** icon button. A horizontal right swipe progressively reveals a safe **Clear** affordance; crossing the deliberate distance or velocity threshold animates the row away and calls the same exact-item dismissal path, while an incomplete or vertically dominant gesture returns the row to rest. Swipe is an enhancement, never the only way to dismiss an item, and must not capture ordinary vertical list scrolling. Do not use a hidden long-press menu. **Clear all** uses the shared confirmation dialog and explicitly says it clears this device only and does not undo group actions. After dismissal or clearing, announce the result through the existing live-region/status pattern. The empty state explains that items appear after a foreground GitHub refresh.
+
+After a committed Activity list generation renders, call `markActivityRead(renderedIds)` once for that generation. Do not mark items during storage hydration before they have been rendered, during a failed route transition, or merely because the header icon was focused. Keep the visible **New** styling stable for the current render to avoid an immediate visual flash; the dot and future render derive the persisted read state.
+
+Resolve navigation against the latest `GroupsProvider.state.data`:
+
+- invitation items return to **Your groups**, where only a current live invitation card can accept or decline;
+- group added/created/updated and deleted-expense items open Overview;
+- added/updated expense items open the expense detail after the selected `GroupProvider` completes its normal refresh and confirms the ID still exists;
+- spending-plan items open Spending; and
+- settlement items open Balances.
+
+If the group is no longer accessible, purge under section 19.7 and remain on **Your groups** with the existing access-loss explanation. If a target expense/payment was changed or deleted, keep the user in the relevant current tab, announce that the item is no longer available, and never reconstruct it from activity metadata.
+
+### 19.10 Failure, consistency, and operational limits
+
+Activity errors are scoped presentation failures:
+
+- A transient commit-history failure preserves current items, read state, and that repository's checkpoint and marks the inbox stale.
+- A persistence failure preserves the previously published dot/list and offers retry; it does not invalidate accepted groups or live invitations.
+- Accepted-group failure prevents commit checkpoint advancement for that dashboard generation, but a separately successful invitation result may still update its seen receipts.
+- One repository failure does not discard successful slices for other repositories. Summarize failed group count without exposing private repository names in global errors or logs.
+- A failed check never clears unread state or updates “checked just now.” `lastSuccessfulAt` advances only for the domains that committed validated results.
+- Terminal authentication follows session expiry and account-cache clearing. A one-time authenticated-request replay after `401` remains safe because all activity reads are idempotent.
+- Rate limiting preserves unscheduled and failed checkpoints and presents GitHub's retry time when supplied.
+
+Commit history can be delayed, rewritten, exceed the 100-commit traversal bound, or contain changes from clients that do not use BranchBalance's deterministic subjects. The generic and `additional_activity` kinds are deliberate truth-preserving fallbacks. UI and accessibility copy must say **Recent activity** and **observed**; do not say delivered, notified in real time, complete, or audited.
+
+The feature performs one bounded history read per accepted group when the top-level dashboard refreshes. It does not refresh every group snapshot, inspect file diffs, fetch historical file versions, or recompute balances. Large-account latency and rate usage must be measured during implementation; keep concurrency at three and the two-page cap unless a later CR changes the product tradeoff.
+
+### 19.11 CR-004 test architecture
+
+Add table-driven unit coverage for:
+
+- every exact deterministic subject, canonical UUID extraction, and destination mapping;
+- invalid UUIDs, partial prefixes, extra suffixes, whitespace, casing, multiline and malicious messages, and safe generic fallback;
+- author normalization/fallback without name or email leakage and timestamp fallback;
+- deterministic IDs/order, commit/invitation/group deduplication, same-login remote unread behavior, and local-receipt suppression;
+- first account/repository baseline, 30-day read backfill, maximum 20 initial items, normal checkpoint traversal, unreachable checkpoint summary, and empty history;
+- item age/count pruning, checkpoint survival, invitation-receipt lifecycle, local-receipt expiry, read derivation, dismiss, clear, and account isolation; and
+- strict `ActivityInboxV1` validation, duplicate checkpoint rejection, collection bounds, and corrupt-cache removal.
+
+Gateway/service tests use the scripted GitHub transport, fake clock, and in-memory store to cover:
+
+- default-branch `sha`, 50-item pages, one-page stop, second-page checkpoint, two-page cap, Link handling, and no timestamp filtering;
+- valid/invalid commit DTOs, nullable linked authors, empty-repository `409`, malformed page-two atomic failure, `401` refresh, `403`, `404`, other `409`, timeout, network failure, and both rate-limit classes;
+- first-run partial repository failure followed by read baseline, mixed repository success/failure, stopped scheduling after rate limit, and atomic per-account persistence;
+- local expense, spending-plan, settlement, and group-init commit insertion, later history deduplication, other commits before a local SHA, clear-before-checkpoint receipt protection, and ambiguous-write commit resolution;
+- fresh/failed/empty invitation generations, CR-003 visibility limitation, in-app acceptance/decline, external acceptance, and newly accessible group classification;
+- stale cache hydration versus newer refresh, account epoch switch, sign-out, confirmed access loss, and cache-write failure without mutation rollback; and
+- launch/focus/foreground/pull/retry single-flight behavior with no request while the app is backgrounded or closed.
+
+Component/navigation coverage verifies mockups 03 and 12: icon placement and touch target, dot/no-dot labels, cached items during refresh, New state without colour dependence, relative plus accessible absolute time, actor fallback, list ordering, scoped errors, refresh control, every destination, missing-resource fallback, separate Dismiss targets, clear confirmation/cancel/success, empty state, live announcements, and large-text/small-screen layout.
+
+Run the PRD section 19.12 physical two-device scenario. Additionally inspect Android network logs while the app is backgrounded and closed to prove no history request occurs, interrupt one activity refresh after page one, exercise a rate-limited repository beside a successful one, clear before a local commit is checkpointed, restart and switch accounts, and verify that no settlement note, amount, expense description, raw commit text, or author email appears in AsyncStorage or logs.
+
+### 19.12 Implementation sequence
+
+Implement CR-004 after the PRD and this architecture are approved, in this order:
+
+1. **Pure activity domain:** closed kinds/destinations, exact safe classifier, deterministic IDs/order, baseline/checkpoint reconciliation, receipts, retention, and unit tests.
+2. **Versioned local store:** strict `ActivityInboxV1` schema, account key, atomic transforms, clear-account/access-loss cleanup, corruption behavior, and storage tests.
+3. **GitHub read path:** bounded default-branch commit operation, DTO validation, two-page/checkpoint behavior, concurrency/rate-limit policy, and scripted gateway coverage.
+4. **Dashboard orchestration:** hydrate and expose activity in `GroupsProvider`, extend the dashboard single flight, reconcile invitations/new groups, implement read/dismiss/clear, and harden account-generation races.
+5. **Local mutation receipts:** preserve Contents API commit references, report successful group/expense/plan/settlement actions, resolve ambiguous successes, and prove no duplicates or mutation rollback.
+6. **Your groups and Activity UI:** implement mockups 03/12, typed destinations, missing-target behavior, accessibility, empty/stale/error states, and component/navigation tests.
+7. **Hardening and acceptance:** retention and large-history cases, rate usage, privacy inspection, background network proof, two-device manual flow, and the existing typecheck/lint/test/doctor/docs/APK gates.
+
+Push notifications, background fetch/polling, webhooks, a backend, cross-device read/dismiss synchronization, complete audit history, reminders/digests, custom notification preferences, diff-derived content summaries, and GitHub notification-center parity remain outside CR-004.

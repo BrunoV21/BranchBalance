@@ -38,7 +38,7 @@ describe('GitHubGateway settlement ledger', () => {
     const request = jest.fn().mockResolvedValue({ data: { content: { sha: 'created-sha' } }, headers: {}, status: 201 });
     const gateway = new GitHubGatewayImpl({ request }, { now: () => new Date() });
     const file = await gateway.recordSettlementPayment(repository, { kind: 'missing', payments: [] }, payment, { currency: 'EUR', expenses: [expense], members });
-    expect(file).toMatchObject({ blobSha: 'created-sha', payments: [payment] });
+    expect(file).toMatchObject({ value: { blobSha: 'created-sha', payments: [payment] } });
     const parameters = request.mock.calls[0]?.[1] as Record<string, unknown>;
     expect(parameters).not.toHaveProperty('sha');
     expect(parameters.message).toBe(`Record settlement payment ${payment.id}`);
@@ -60,15 +60,15 @@ describe('GitHubGateway settlement ledger', () => {
     const gateway = new GitHubGatewayImpl({ request }, { now: () => new Date() });
     await expect(gateway.confirmSettlementPayment(repository, ledgerFile(), payment.id, 'friend', '2026-07-19T12:01:00.000Z')).rejects.toMatchObject({ detail: { kind: 'settlement_confirmation_unauthorized' } });
     const confirmed = await gateway.confirmSettlementPayment(repository, ledgerFile(), payment.id, 'OWNER', '2026-07-19T12:01:00.000Z');
-    expect(confirmed.payments[0]).toMatchObject({ note: payment.note, status: 'confirmed', confirmed_by: 'OWNER' });
-    expect(confirmed.sourceDocument).toMatchObject({ future_top: true, payments: [{ future: { retained: true }, note: payment.note }] });
+    expect(confirmed.value.payments[0]).toMatchObject({ note: payment.note, status: 'confirmed', confirmed_by: 'OWNER' });
+    expect(confirmed.value.sourceDocument).toMatchObject({ future_top: true, payments: [{ future: { retained: true }, note: payment.note }] });
   });
 
   it('retains an empty ledger and top-level passthrough data after deletion', async () => {
     const request = jest.fn().mockResolvedValue({ data: { content: { sha: 'empty-sha' } }, headers: {}, status: 200 });
     const gateway = new GitHubGatewayImpl({ request }, { now: () => new Date() });
     const result = await gateway.deleteSettlementPayment(repository, ledgerFile(), payment.id);
-    expect(result).toMatchObject({ kind: 'ready', file: { blobSha: 'empty-sha', payments: [], sourceDocument: { future_top: true, payments: [] } } });
+    expect(result).toMatchObject({ value: { kind: 'ready', file: { blobSha: 'empty-sha', payments: [], sourceDocument: { future_top: true, payments: [] } } } });
   });
 
   it('does not treat a concurrently duplicated target ID as an already-absent delete', async () => {
