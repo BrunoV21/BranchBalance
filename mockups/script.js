@@ -129,6 +129,19 @@
       showToast(toastTrigger.dataset.toastMessage);
     }
 
+    const inviteGuidance = event.target.closest('[data-invite-guidance]');
+    if (inviteGuidance) {
+      const inviteCard = inviteGuidance.closest('.card');
+      const invitedLogin = inviteCard?.querySelector('input')?.value.trim() || 'the invited user';
+      const repository = inviteGuidance.dataset.repository || 'this repository';
+      const notice = document.querySelector('[data-invite-notice]');
+      if (notice) {
+        notice.textContent = `Invitation sent to @${invitedLogin}. Ask them to go to github.com and accept the invitation to collaborate on ${repository}. After accepting, they should open BranchBalance and refresh Your groups.`;
+        notice.hidden = false;
+      }
+      showToast('Invitation sent through GitHub');
+    }
+
     const invitationAction = event.target.closest('[data-invitation-action]');
     if (invitationAction) {
       const card = invitationAction.closest('[data-invitation]');
