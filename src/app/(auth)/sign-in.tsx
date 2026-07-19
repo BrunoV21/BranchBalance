@@ -10,7 +10,7 @@ export default function SignInScreen() {
   const { session } = useSession();
   return <Screen contentStyle={{ justifyContent: 'center' }}>
     <Image accessibilityLabel="BranchBalance" resizeMode="contain" source={require('../../../assets/images/icon.png')} style={{ width: 72, height: 72 }} />
-    <Title eyebrow="Shared expenses, backed by GitHub">Balance life{`\n`}without a backend.</Title>
+    <Title eyebrow="Shared expenses, backed by GitHub">Balance life.{`\n`}Keep it private.</Title>
     <Body muted>Sign in with GitHub to create private expense groups with the people you trust.</Body>
     {session.error ? <Card><Body>{session.error}</Body></Card> : null}
     <Button disabled={!isGitHubConfigured || Platform.OS === 'web'} onPress={() => router.push('/device-code' as never)}>Sign in with GitHub</Button>
