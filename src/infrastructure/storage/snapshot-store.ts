@@ -29,7 +29,27 @@ export class MemoryKeyValueStore implements KeyValueStore {
 
 const accountSchema = z.object({ id: z.number().int(), login: z.string(), name: z.string().nullable(), avatarUrl: z.string().nullable() });
 const groupsSchema = z.array(z.object({ key: z.string(), repository: z.object({ id: z.number() }).passthrough(), group: z.object({ schema_version: z.literal(1) }).passthrough(), summary: z.unknown().nullable() }).passthrough());
-const snapshotSchema = z.object({ key: z.string(), repository: z.object({ id: z.number() }).passthrough(), group: z.object({ schema_version: z.literal(1) }).passthrough(), expenses: z.array(z.unknown()), syncedAt: z.string() }).passthrough();
+const repositorySchema = z.object({
+  id: z.number().int(), owner: z.string(), name: z.string(), defaultBranch: z.string(), installationId: z.number().int().nullable(),
+  private: z.literal(true), canAdmin: z.boolean(), canWrite: z.boolean(),
+}).passthrough();
+const memberSchema = z.object({ login: z.string(), name: z.string().nullable(), avatarUrl: z.string().nullable(), role: z.enum(['owner', 'member']) });
+const pendingMemberSchema = z.object({ login: z.string(), avatarUrl: z.string().nullable() });
+const expenseFileSchema = z.object({
+  expense: z.record(z.string(), z.unknown()), blobSha: z.string().min(1), path: z.string().regex(/^expenses\/[0-9a-f-]{36}\.json$/i),
+  sourceDocument: z.record(z.string(), z.unknown()).optional(),
+}).passthrough();
+const groupFileSchema = z.object({
+  group: z.record(z.string(), z.unknown()), blobSha: z.string().min(1), path: z.literal('group.json'), sourceDocument: z.record(z.string(), z.unknown()),
+}).passthrough();
+const snapshotSchema = z.object({
+  key: z.string(), repository: repositorySchema,
+  group: z.object({ schema_version: z.literal(1), name: z.string(), currency: z.enum(['EUR', 'USD', 'GBP']), created_by: z.string(), created_at: z.string() }).passthrough(),
+  groupFile: groupFileSchema.nullable().optional(),
+  members: z.array(memberSchema), pendingMembers: z.array(pendingMemberSchema).nullable(), expenses: z.array(expenseFileSchema),
+  balances: z.unknown(), settlements: z.array(z.unknown()), spending: z.unknown().nullable().optional(),
+  warnings: z.array(z.object({ path: z.string(), reason: z.string() })), syncedAt: z.string(),
+}).passthrough().transform((value) => ({ ...value, groupFile: value.groupFile ?? null, spending: null }));
 const pendingSchema = z.object({ repository: z.object({ id: z.number() }).passthrough(), group: z.object({ schema_version: z.literal(1) }).passthrough() }).passthrough();
 
 const ACTIVE_ACCOUNT = 'bb:v1:active-account';

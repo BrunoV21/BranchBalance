@@ -2,7 +2,9 @@ import type { PropsWithChildren } from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 
 import { calculateBalances, simplifySettlements } from '@/domain/balances';
-import type { Expense, RemoteGroupSnapshot } from '@/domain/types';
+import { AppFailure } from '@/domain/errors';
+import { deriveSpendingSummary } from '@/domain/spending';
+import type { Expense, RemoteGroupSnapshot, WritableExpense } from '@/domain/types';
 import { type ConfirmedExpenseMutation, reconcileConfirmedExpenseMutations } from '@/features/expenses/snapshot-reconciliation';
 import { githubGateway, snapshotStore } from '@/infrastructure/runtime';
 
@@ -11,9 +13,10 @@ import { useGroups } from './groups-provider';
 import { useSession } from './session-provider';
 
 jest.mock('@/infrastructure/runtime', () => ({
-  githubGateway: { refreshGroup: jest.fn(), createExpense: jest.fn(), readExpense: jest.fn(), updateExpense: jest.fn(), deleteExpense: jest.fn() },
-  snapshotStore: { readGroup: jest.fn() },
+  githubGateway: { refreshGroup: jest.fn(), createExpense: jest.fn(), readExpense: jest.fn(), updateExpense: jest.fn(), deleteExpense: jest.fn(), updateSpendingPlan: jest.fn() },
+  snapshotStore: { readGroup: jest.fn(), removeGroup: jest.fn() },
   systemClock: { now: () => new Date('2026-07-17T12:00:00.000Z') },
+  systemLocalCalendar: { today: () => '2026-07-17' },
 }));
 jest.mock('./groups-provider', () => ({ useGroups: jest.fn() }));
 jest.mock('./session-provider', () => ({ useSession: jest.fn(), isTerminalAuthError: () => false }));
@@ -23,16 +26,16 @@ const members = [
   { login: 'owner', name: null, avatarUrl: null, role: 'owner' as const },
   { login: 'friend', name: null, avatarUrl: null, role: 'member' as const },
 ];
-const originalExpense: Expense = {
+const originalExpense: WritableExpense = {
   schema_version: 1, id: '6f2c1a3e-2b1d-4a3a-9c3e-9d2f9a0b1234', description: 'Old dinner', amount_minor: 1000,
-  currency: 'EUR', paid_by: 'owner', split_type: 'equal', participants: ['owner', 'friend'], shares_minor: { owner: 500, friend: 500 },
+  currency: 'EUR', category: 'food_drink', payment_method: 'card', paid_by: 'owner', split_type: 'equal', participants: ['owner', 'friend'], shares_minor: { owner: 500, friend: 500 },
   expense_date: '2026-07-17', created_by: 'owner', created_at: '2026-07-17T10:00:00.000Z', updated_by: null, updated_at: null,
 };
-const updatedExpense: Expense = {
+const updatedExpense: WritableExpense = {
   ...originalExpense, description: 'Updated dinner', amount_minor: 2000, shares_minor: { owner: 1000, friend: 1000 },
   updated_by: 'owner', updated_at: '2026-07-17T12:00:00.000Z',
 };
-const newExpense: Expense = {
+const newExpense: WritableExpense = {
   ...originalExpense,
   id: '7a3d2c4b-1e5f-4a8b-9c6d-2f0e1a3b4c5d',
   description: 'Train tickets',
@@ -42,16 +45,17 @@ const newExpense: Expense = {
 };
 
 function snapshot(expense: Expense, blobSha: string): RemoteGroupSnapshot {
-  return snapshotWithFiles([{ expense, blobSha, path: `expenses/${expense.id}.json` }]);
+  return snapshotWithFiles([{ expense, blobSha, path: `expenses/${expense.id}.json`, sourceDocument: { ...expense } }]);
 }
 
 function snapshotWithFiles(expenses: RemoteGroupSnapshot['expenses']): RemoteGroupSnapshot {
   const balances = calculateBalances(expenses.map((file) => file.expense), members);
+  const group = { schema_version: 1 as const, name: 'Trip', currency: 'EUR' as const, created_by: 'owner', created_at: '2026-07-17T09:00:00.000Z' };
   return {
     key: 'owner/branch-balance-trip', repository,
-    group: { schema_version: 1, name: 'Trip', currency: 'EUR', created_by: 'owner', created_at: '2026-07-17T09:00:00.000Z' },
+    group, groupFile: { group, blobSha: 'group-sha', path: 'group.json', sourceDocument: { ...group } },
     members, pendingMembers: [], expenses,
-    balances, settlements: simplifySettlements(balances.members), warnings: [], syncedAt: '2026-07-17T11:00:00.000Z',
+    balances, settlements: simplifySettlements(balances.members), spending: deriveSpendingSummary(expenses.map((file) => file.expense), undefined, 'owner', '2026-07-17'), warnings: [], syncedAt: '2026-07-17T11:00:00.000Z',
   };
 }
 
@@ -69,7 +73,8 @@ describe('GroupProvider expense mutations', () => {
   const recordConfirmedExpenseMutation = jest.fn((_key: string, mutation: ConfirmedExpenseMutation) => {
     confirmedMutations.set(mutation.kind === 'upsert' ? mutation.file.expense.id : mutation.expenseId, mutation);
   });
-  const reconcileRemoteGroupSnapshot = jest.fn((remote: RemoteGroupSnapshot) => reconcileConfirmedExpenseMutations(remote, confirmedMutations));
+  const recordConfirmedSpendingPlanMutation = jest.fn();
+  const reconcileRemoteGroupSnapshot = jest.fn((remote: RemoteGroupSnapshot) => reconcileConfirmedExpenseMutations(remote, confirmedMutations, 'owner', '2026-07-17'));
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -77,12 +82,24 @@ describe('GroupProvider expense mutations', () => {
     jest.mocked(useSession).mockReturnValue({ session: { status: 'authenticated', account: { id: 7, login: 'owner', name: null, avatarUrl: null }, error: null }, expire: jest.fn() } as never);
     jest.mocked(useGroups).mockReturnValue({
       state: { data: [{ key: originalSnapshot.key, repository, group: originalSnapshot.group, summary: null }] },
-      applyGroupSnapshot, recordConfirmedExpenseMutation, reconcileRemoteGroupSnapshot, removeGroup,
+      applyGroupSnapshot, recordConfirmedExpenseMutation, recordConfirmedSpendingPlanMutation, reconcileRemoteGroupSnapshot, removeGroup,
     } as never);
     jest.mocked(snapshotStore.readGroup).mockResolvedValue(originalSnapshot);
-    jest.mocked(githubGateway.createExpense).mockResolvedValue({ expense: newExpense, blobSha: 'created-sha', path: `expenses/${newExpense.id}.json` });
-    jest.mocked(githubGateway.updateExpense).mockResolvedValue({ expense: updatedExpense, blobSha: 'new-sha', path: `expenses/${updatedExpense.id}.json` });
+    jest.mocked(githubGateway.createExpense).mockResolvedValue({ expense: newExpense, blobSha: 'created-sha', path: `expenses/${newExpense.id}.json`, sourceDocument: { ...newExpense } });
+    jest.mocked(githubGateway.updateExpense).mockResolvedValue({ expense: updatedExpense, blobSha: 'new-sha', path: `expenses/${updatedExpense.id}.json`, sourceDocument: { ...updatedExpense } });
     jest.mocked(githubGateway.refreshGroup).mockResolvedValue(originalSnapshot);
+    jest.mocked(githubGateway.updateSpendingPlan).mockImplementation(async (_repository, current, plan) => {
+      const sourceDocument: Record<string, unknown> = { ...current.sourceDocument };
+      const group = { ...current.group };
+      if (plan) {
+        sourceDocument.spending_plan = plan;
+        group.spending_plan = plan;
+      } else {
+        delete sourceDocument.spending_plan;
+        delete group.spending_plan;
+      }
+      return { group, blobSha: 'next-group-sha', path: 'group.json', sourceDocument };
+    });
   });
 
   it('does not let a focus refresh replace a confirmed edit with a stale remote snapshot', async () => {
@@ -90,7 +107,7 @@ describe('GroupProvider expense mutations', () => {
     const view = await renderHook(() => useGroup(), { wrapper });
     await waitFor(() => expect(view.result.current.state.data?.expenses[0]?.expense.description).toBe('Old dinner'));
 
-    await act(() => view.result.current.updateExpense(updatedExpense, 'old-sha'));
+    await act(() => view.result.current.updateExpense(updatedExpense, originalSnapshot.expenses[0]!));
     expect(view.result.current.state.data?.expenses[0]?.expense.description).toBe('Updated dinner');
 
     await act(() => view.result.current.refresh());
@@ -188,10 +205,41 @@ describe('GroupProvider expense mutations', () => {
 
     jest.mocked(useGroups).mockReturnValue({
       state: { data: [{ key: originalSnapshot.key, repository: { ...repository }, group: { ...originalSnapshot.group }, summary: null }] },
-      applyGroupSnapshot, recordConfirmedExpenseMutation, reconcileRemoteGroupSnapshot, removeGroup,
+      applyGroupSnapshot, recordConfirmedExpenseMutation, recordConfirmedSpendingPlanMutation, reconcileRemoteGroupSnapshot, removeGroup,
     } as never);
     await view.rerender({ descriptorVersion: 2 });
 
     expect(view.result.current.refresh).toBe(initialRefresh);
+  });
+
+  it('publishes a confirmed spending plan and every derived value atomically', async () => {
+    const wrapper = ({ children }: PropsWithChildren) => <GroupProvider owner="owner" repo="branch-balance-trip">{children}</GroupProvider>;
+    const view = await renderHook(() => useGroup(), { wrapper });
+    await waitFor(() => expect(view.result.current.state.data).not.toBeNull());
+    const plan = { budget_minor: 5000, starts_on: '2026-07-17', ends_on: '2026-07-18', updated_by: 'owner', updated_at: '2026-07-17T12:00:00.000Z' } as const;
+
+    await act(() => view.result.current.updateSpendingPlan(plan));
+
+    const next = view.result.current.state.data!;
+    expect(next.group.spending_plan).toEqual(plan);
+    expect(next.groupFile?.blobSha).toBe('next-group-sha');
+    expect(next.spending?.budget).toMatchObject({ budgetMinor: 5000, remainingMinor: 4000, status: 'under' });
+    expect(next.spending?.trip).toMatchObject({ phase: 'during', currentDay: 1, availableDays: 2, dailyAvailableMinor: 2000 });
+    expect(recordConfirmedSpendingPlanMutation).toHaveBeenCalledWith(next.key, next.groupFile);
+    expect(applyGroupSnapshot).toHaveBeenLastCalledWith(next);
+  });
+
+  it('clears private selected-group state after confirmed GitHub access loss', async () => {
+    jest.mocked(githubGateway.refreshGroup).mockRejectedValueOnce(new AppFailure({ kind: 'not_found', resource: 'GitHub resource' }));
+    const wrapper = ({ children }: PropsWithChildren) => <GroupProvider owner="owner" repo="branch-balance-trip">{children}</GroupProvider>;
+    const view = await renderHook(() => useGroup(), { wrapper });
+    await waitFor(() => expect(view.result.current.state.data).not.toBeNull());
+
+    await act(async () => { await view.result.current.refresh().catch(() => undefined); });
+
+    expect(view.result.current.accessLost).toBe(true);
+    expect(view.result.current.state.data).toBeNull();
+    expect(view.result.current.state.error).toMatch(/no longer available/i);
+    expect(removeGroup).toHaveBeenCalledWith('owner/branch-balance-trip');
   });
 });

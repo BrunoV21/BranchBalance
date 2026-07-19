@@ -36,9 +36,9 @@ export function Button({ children, onPress, disabled, loading, variant = 'primar
   </Pressable>;
 }
 
-export function Field({ label, error, ...props }: TextInputProps & { label: string; error?: string }) {
+export function Field({ label, labelIcon, error, ...props }: TextInputProps & { label: string; labelIcon?: ReactNode; error?: string }) {
   const { colors } = useTheme();
-  return <View style={styles.field}><Text style={[styles.label, { color: colors.text }]}>{label}</Text><TextInput accessibilityLabel={label} placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceStrong, borderColor: error ? colors.negative : colors.border, color: colors.text }]} {...props} />{error ? <Text accessibilityLiveRegion="polite" style={[styles.help, { color: colors.negative }]}>{error}</Text> : null}</View>;
+  return <View style={styles.field}><View style={styles.labelRow}>{labelIcon}<Text style={[styles.label, { color: colors.text }]}>{label}</Text></View><TextInput accessibilityLabel={label} placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceStrong, borderColor: error ? colors.negative : colors.border, color: colors.text }]} {...props} />{error ? <Text accessibilityLiveRegion="polite" style={[styles.help, { color: colors.negative }]}>{error}</Text> : null}</View>;
 }
 
 export function Banner({ children, tone = 'warning', action }: PropsWithChildren<{ tone?: 'warning' | 'error' | 'info'; action?: ReactNode }>) {
@@ -79,7 +79,7 @@ const styles = StyleSheet.create({
   flex: { flex: 1 }, content: { flexGrow: 1, padding: 20, gap: 16 }, titleBlock: { gap: 5, marginBottom: 8 }, eyebrow: { fontSize: 12, fontWeight: '800', letterSpacing: 1.2 },
   title: { fontFamily: Platform.select({ android: 'serif', default: undefined }), fontSize: 32, fontWeight: '700', lineHeight: 38 }, subtitle: { fontSize: 20, fontWeight: '700' },
   body: { fontSize: 15, lineHeight: 22 }, card: { borderWidth: 1, borderRadius: 16, padding: 16, gap: 12 }, button: { minHeight: 48, borderRadius: 12, borderWidth: 1, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center' }, buttonText: { fontSize: 15, fontWeight: '800' },
-  field: { gap: 7 }, label: { fontSize: 14, fontWeight: '700' }, input: { minHeight: 50, borderRadius: 11, borderWidth: 1, paddingHorizontal: 14, fontSize: 16 }, help: { fontSize: 12, lineHeight: 17 },
+  field: { gap: 7 }, labelRow: { flexDirection: 'row', alignItems: 'center', gap: 8 }, label: { fontSize: 14, fontWeight: '700' }, input: { minHeight: 50, borderRadius: 11, borderWidth: 1, paddingHorizontal: 14, fontSize: 16 }, help: { fontSize: 12, lineHeight: 17 },
   banner: { borderLeftWidth: 4, borderRadius: 10, padding: 13, gap: 10 }, bannerText: { flex: 1 }, avatar: { alignItems: 'center', justifyContent: 'center' }, empty: { flex: 1, minHeight: 280, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 10 },
   modalOverlay: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }, dialog: { width: '100%', maxWidth: 440, borderRadius: 18, borderWidth: 1, padding: 20, gap: 16, elevation: 12 }, dialogTitle: { fontSize: 22, lineHeight: 28, fontWeight: '800' }, dialogActions: { flexDirection: 'row', gap: 10, marginTop: 4 }, dialogAction: { flex: 1 },
 });

@@ -1,0 +1,25 @@
+name: Documentation fix
+description: Report unclear BranchBalance docs, stale setup steps, broken links, or missing examples.
+title: "Docs: "
+labels:
+  - documentation
+body:
+  - type: input
+    id: page
+    attributes:
+      label: Page or section
+      placeholder: "README.md, docs/official/documentation/data-ownership.md, docs/TESTING.md, ..."
+    validations:
+      required: true
+  - type: textarea
+    id: issue
+    attributes:
+      label: What should change?
+      description: Describe the stale, missing, incorrect, or confusing documentation.
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested wording or example
+      description: Share replacement text, commands, screenshots, or a concrete example if available.

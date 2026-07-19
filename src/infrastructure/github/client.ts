@@ -6,11 +6,21 @@ import type { TokenSource } from '@/features/auth/contracts';
 import type { GitHubRequestClient, GitHubResponse } from './gateway';
 
 const API_VERSION = '2022-11-28';
+const quietOctokitLog = {
+  debug: (_message: string) => undefined,
+  info: (_message: string) => undefined,
+  warn: (_message: string) => undefined,
+  error: (_message: string) => undefined,
+};
+
+function createRequester(token: string) {
+  return new Octokit({ auth: token, request: { timeout: 20_000 }, userAgent: 'BranchBalance/1.0', log: quietOctokitLog });
+}
 
 export class AuthenticatedGitHubClient implements GitHubRequestClient {
   constructor(
     private readonly tokens: TokenSource,
-    private readonly requesterFactory: (token: string) => { request(route: string, parameters: Record<string, unknown>): Promise<unknown> } = (token) => new Octokit({ auth: token, request: { timeout: 20_000 }, userAgent: 'BranchBalance/1.0' }) as never,
+    private readonly requesterFactory: (token: string) => { request(route: string, parameters: Record<string, unknown>): Promise<unknown> } = createRequester as never,
   ) {}
 
   async request<T = unknown>(route: string, parameters: Record<string, unknown> = {}): Promise<GitHubResponse<T>> {

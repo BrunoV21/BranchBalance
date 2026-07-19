@@ -1,12 +1,14 @@
 # BranchBalance — Phase 1 Product Requirements Document
 
-**Status:** Ready for implementation
+**Status:** Phase 1 and CR-001 implemented; physical-device acceptance pending
 
-**Last updated:** 2026-07-16
+**Last updated:** 2026-07-18
 
 **Platform:** Android
 
 **Repository prefix:** `branch-balance`
+
+**Active change requests:** CR-001 — Trip and group spending intelligence
 
 ## 1. Product summary
 
@@ -448,7 +450,358 @@ Run the complete Phase 1 goal with two real GitHub accounts and at least two phy
 - iOS support
 - Push notifications, which would require revisiting the no-backend constraint
 
-## 16. Technical references
+## 16. Change request CR-001 — Trip and group spending intelligence
+
+**Status:** Implemented; physical-device acceptance pending
+
+**Requested:** 2026-07-17
+
+**Target:** First post-Phase-1 product increment; release name to be decided
+
+### 16.1 Context and motivation
+
+Phase 1 answers the settlement question: who paid, who participated, and who owes whom. CR-001 extends BranchBalance into a shared spending companion that also answers:
+
+- How much has the group spent?
+- Where did the money go?
+- Is the group above or below its budget?
+- How much remains available for the rest of a trip?
+- Was an expense paid by card or cash?
+
+The primary use case is a shared vacation or trip, but the design must remain useful for events, households, couples, and other groups. Travel-specific dates and pacing are optional. A group without dates continues to work as a general-purpose expense group.
+
+This change is additive. It does not alter Phase 1 balance calculations, settlement simplification, GitHub membership, one-currency-per-group behavior, or the no-backend architecture.
+
+### 16.2 Product outcome
+
+BranchBalance must provide one coherent spending-intelligence experience rather than a set of unrelated metadata fields. Categories describe where money went, the budget establishes the group's target, trip dates provide time context, and payment method describes how the payer funded the purchase.
+
+The selected-group experience gains a **Spending** tab. The Overview tab retains a compact budget summary, while Spending provides the detailed budget, category, payment-method, and trip-pacing views.
+
+### 16.3 Confirmed decisions
+
+| Area | Decision |
+|---|---|
+| Budget basis | The group budget measures all valid tracked expenses, including payer-only “Just me” expenses |
+| Individual context | Show “You paid” and “Your share” separately; neither value replaces total group spending |
+| Budget type | One optional, one-time budget per group in the group's existing currency |
+| Category budgets | Optional limits per category; they do not need to add up to the total budget |
+| Budget enforcement | Informational only; reaching or exceeding a budget never blocks an expense |
+| Categories | Fixed taxonomy with a general-purpose `other` option; no custom categories in CR-001 |
+| Payment methods | `card`, `cash`, and `other`; store no card, bank, or wallet identifiers |
+| Personal spending | “Just me” is a form shortcut represented by an equal split whose only participant is the payer |
+| Trip context | Optional inclusive start and end calendar dates enable remaining-per-day guidance |
+| Permissions | Any accepted member with write access may update the shared spending plan |
+| Balance impact | Category, budget, dates, and payment method never change shares, balances, or settlements |
+| Data visibility | All spending-plan and expense metadata is shared with group members through the private repository |
+| Compatibility | Existing groups and expenses remain valid and receive explicit legacy presentation states |
+
+### 16.4 Expense categories
+
+CR-001 defines this persisted category taxonomy:
+
+| Value | Display label | Examples |
+|---|---|---|
+| `accommodation` | Accommodation | Hotel, hostel, rental home |
+| `food_drink` | Food & drinks | Restaurants, cafés, bars |
+| `groceries` | Groceries | Supermarket and shared supplies |
+| `transport` | Transport | Flights, rail, taxis, fuel, parking |
+| `activities` | Activities | Tours, tickets, museums, entertainment |
+| `shopping` | Shopping | Souvenirs and retail purchases |
+| `fees` | Fees | Tourist taxes, booking fees, service charges |
+| `other` | Other | Valid spending that does not fit another category |
+
+New expenses require a category. The form must make the choice fast with accessible labelled controls and a distinct icon or visual marker. Meaning must not depend on colour alone.
+
+An existing expense without `category` is valid and appears as **Uncategorized**. `Uncategorized` is a derived legacy state, not a value that new clients persist. When a member edits a legacy expense, the form requires them to choose one of the persisted categories before saving.
+
+The expense list supports category filtering and displays the category on every row and detail screen. The Spending tab shows the amount and percentage of total tracked spending in each category, including a separate Uncategorized row while legacy expenses remain.
+
+### 16.5 Group budget and category limits
+
+A group may operate without a budget. Any accepted member may open group spending settings and configure, update, or remove:
+
+- One total group budget in positive integer minor units
+- Optional positive limits for one or more persisted categories
+- Optional trip start and end dates as described in section 16.6
+
+Budget calculations use active, valid expenses only:
+
+```text
+total_spent = sum(expense.amount_minor)
+remaining = budget_minor - total_spent
+category_spent[category] = sum(amount_minor for expenses in category)
+current_user_share = sum(expense.shares_minor[current_user])
+current_user_paid = sum(amount_minor for expenses paid by current_user)
+```
+
+- Positive `remaining` means the group is under budget.
+- Zero `remaining` means the group is exactly at budget.
+- Negative `remaining` means the group is over budget by its absolute value.
+- Payer-only “Just me” expenses count toward `total_spent` and their category total even though they create no debt.
+- Uncategorized legacy expenses count toward the total budget but not toward any configured category limit.
+- Category limits are independent guidance. Their sum may be below or above the total budget and does not change the total budget.
+- Adding, editing, or deleting an expense recalculates every affected value immediately after the remote mutation succeeds.
+
+The UI must show spent, remaining or over-budget amount, and percentage used. An over-budget state must include text and cannot rely on colour alone. Budget status never disables or rejects expense creation.
+
+### 16.6 Optional trip dates and daily guidance
+
+A group may define both `starts_on` and `ends_on`, or neither. Dates are calendar facts in `YYYY-MM-DD` format and are inclusive. `ends_on` must be on or after `starts_on`.
+
+When both a total budget and trip dates exist, BranchBalance shows remaining-per-day guidance:
+
+```text
+if today < starts_on:
+    available_days = inclusive days from starts_on through ends_on
+else if today <= ends_on:
+    available_days = inclusive days from today through ends_on
+else:
+    available_days = 0
+
+if available_days > 0:
+    daily_available = max(remaining, 0) / available_days
+```
+
+Round `daily_available` down to whole minor units for display so the guidance does not imply that more money is available than remains. Expenses paid before the trip still count against the budget. During the trip, the calculation therefore answers how much of the remaining budget is available across the remaining days.
+
+- Before the trip, label the value **Planned per day**.
+- During the trip, show the current inclusive day, total trip days, and **Available per remaining day**.
+- After the trip, show final under-budget or over-budget performance and omit a daily allowance.
+- If dates or a total budget are absent, omit daily guidance without showing an error.
+- Device-local calendar date determines `today`; no timezone conversion is applied to stored trip dates.
+
+### 16.7 Payment method
+
+New expenses require one payment method:
+
+- **Card**
+- **Cash**
+- **Other**
+
+Payment method describes how `paid_by` funded the expense. It does not identify a card or financial account and has no effect on balances.
+
+An existing expense without `payment_method` remains valid and appears as **Unspecified**. `Unspecified` is a derived legacy state and cannot be persisted by new clients. Editing a legacy expense requires a persisted payment method before saving.
+
+The expense list and detail view display payment method. The Spending tab shows total tracked spending by payment method, including Unspecified while necessary, and supports filtering expenses by method. BranchBalance must never request or store a card number, card suffix, bank name, account identifier, or wallet credential as part of CR-001.
+
+### 16.8 “Just me” expense shortcut
+
+The split selector gains a **Just me** option. It is a presentation shortcut, not a new persisted split type:
+
+```json
+{
+  "paid_by": "octocat",
+  "split_type": "equal",
+  "participants": ["octocat"],
+  "shares_minor": {
+    "octocat": 4250
+  }
+}
+```
+
+This expense increases total and category spending but leaves every net balance unchanged. If the payer changes while Just me is selected, the sole participant and full share change to the new payer. The UI explains that the expense is visible to the group and counts toward the shared budget even though nobody owes the payer.
+
+### 16.9 Spending experience
+
+The selected-group navigation adds **Spending** alongside Overview, Balances, and Members.
+
+Overview shows a compact summary when a budget exists:
+
+- Total budget
+- Total spent
+- Remaining or over-budget amount
+- Percentage used
+- Remaining-per-day guidance when available
+
+The full Spending tab shows:
+
+- Total budget progress, or an invitation to set a budget
+- Group total spent
+- Current user's paid total and attributable share
+- Remaining or over-budget amount
+- Trip dates and remaining-per-day guidance when configured
+- Spending by category with category-limit progress where configured
+- Spending by payment method
+- Filters for category, payment method, payer, and shared versus Just me expenses
+- Explicit empty states when no expenses or no budget exist
+
+Charts are optional presentation enhancements. Every value represented graphically must also be available as text and exposed accessibly. The first implementation must prioritize understandable totals and progress over complex visualization.
+
+### 16.10 User stories
+
+#### US-CR001-01 — Categorize an expense
+
+As a group member, I want to assign a category when adding or editing an expense so that the group can understand where its money went.
+
+#### US-CR001-02 — Set a group budget
+
+As a group member, I want to set an optional total budget so that everyone can see whether tracked spending is under or over the agreed amount.
+
+#### US-CR001-03 — Set category limits
+
+As a group member, I want to set optional category limits so that the group can monitor areas such as accommodation, food, and transport independently.
+
+#### US-CR001-04 — Follow trip spending pace
+
+As a traveller, I want to add trip dates and see how much remains available per day so that the group can adjust its spending before the trip ends.
+
+#### US-CR001-05 — Record card or cash
+
+As a group member, I want to record whether an expense was paid by card, cash, or another method so that the group can understand and filter how purchases were funded.
+
+#### US-CR001-06 — Track personal trip spending
+
+As a group member, I want a Just me shortcut so that personal spending can contribute to the trip budget without creating a debt for another member.
+
+#### US-CR001-07 — Review spending insights
+
+As a group member, I want one Spending view that combines budget, category, payment-method, and personal-share information so that I do not need to calculate trip status manually.
+
+#### US-CR001-08 — Continue using an existing group
+
+As a member of a group created before CR-001, I want its existing expenses and balances to remain usable even when category and payment-method metadata is absent.
+
+### 16.11 Persistence changes
+
+`group.json` may add an optional `spending_plan` object while retaining `schema_version: 1`:
+
+```json
+{
+  "schema_version": 1,
+  "name": "Road trip 2026",
+  "currency": "EUR",
+  "spending_plan": {
+    "budget_minor": 200000,
+    "category_budgets_minor": {
+      "accommodation": 80000,
+      "food_drink": 40000,
+      "transport": 25000
+    },
+    "starts_on": "2026-08-10",
+    "ends_on": "2026-08-16",
+    "updated_by": "octocat",
+    "updated_at": "2026-07-17T14:00:00Z"
+  },
+  "created_by": "octocat",
+  "created_at": "2026-07-16T12:00:00Z"
+}
+```
+
+Rules:
+
+- `spending_plan` is optional.
+- It must contain a total budget, a valid date pair, or both.
+- `budget_minor` is optional but, when present, is a positive safe integer.
+- `category_budgets_minor` is optional and is allowed only when `budget_minor` exists.
+- Every category limit is a positive safe integer keyed by a persisted category value.
+- `starts_on` and `ends_on` must either both exist or both be absent.
+- `updated_by` and `updated_at` are required whenever `spending_plan` exists.
+- Removing the spending plan removes the object rather than persisting empty or null fields.
+- Updates to `group.json` include its latest blob SHA. A stale SHA produces the same review-and-reapply conflict behavior used for expense edits.
+
+New expense writes add `category` and `payment_method` while retaining `schema_version: 1`:
+
+```json
+{
+  "schema_version": 1,
+  "id": "6f2c1a3e-2b1d-4a3a-9c3e-9d2f9a0b1234",
+  "description": "Dinner at Nando's",
+  "amount_minor": 4250,
+  "currency": "EUR",
+  "category": "food_drink",
+  "payment_method": "card",
+  "paid_by": "octocat",
+  "split_type": "equal",
+  "participants": ["monalisa", "octocat"],
+  "shares_minor": {
+    "monalisa": 2125,
+    "octocat": 2125
+  },
+  "expense_date": "2026-07-16",
+  "created_by": "octocat",
+  "created_at": "2026-07-16T18:32:00Z",
+  "updated_by": null,
+  "updated_at": null
+}
+```
+
+The additions are backward-compatible within schema version 1 because current readers already ignore unknown fields. CR-001 readers accept missing `category` and `payment_method` only for legacy files and derive the presentation states described above. CR-001 writers always include both fields and preserve them during edits.
+
+### 16.12 Synchronization and cache impact
+
+- Group snapshots include the validated spending plan and all derived spending summaries.
+- Group-list cached summaries may include budget progress, but mixed currencies across different groups remain separated as required by the existing architecture.
+- Refresh applies expenses, balances, budget values, and spending summaries as one state update so the tabs cannot temporarily disagree.
+- Invalid spending-plan data produces a safe group data warning. It does not invalidate otherwise valid expenses or balances.
+- Invalid category or payment method on an expense makes that expense invalid under the same warning and exclusion rules as other malformed expense data.
+- Concurrent spending-plan edits use optimistic concurrency and are never silently overwritten.
+
+### 16.13 Acceptance criteria
+
+- [ ] An accepted member can add an expense with one persisted category and one persisted payment method.
+- [ ] An accepted member can edit category and payment method without changing the expense's shares or resulting balances.
+- [ ] Existing expenses without the new fields remain visible, valid for balances, and clearly labelled Uncategorized and Unspecified.
+- [ ] Category totals equal the sum of active valid expenses shown in each category.
+- [ ] Payment-method totals equal the sum of active valid expenses shown for each method.
+- [ ] Any accepted member can set, edit, or remove an optional group budget.
+- [ ] Any accepted member can configure optional category limits that do not have to equal the total budget.
+- [ ] Total spent includes shared and Just me expenses and excludes deleted or invalid expenses.
+- [ ] The UI distinguishes total group spending, current-user paid total, and current-user share.
+- [ ] Under-budget, at-budget, and over-budget states show the correct amount and do not rely on colour alone.
+- [ ] Exceeding a total or category budget does not block adding or editing an expense.
+- [ ] A group can save a valid inclusive trip date range, and invalid or partial ranges are rejected.
+- [ ] Remaining-per-day guidance follows section 16.6 before, during, and after the trip.
+- [ ] A Just me expense counts toward spending while leaving all net balances unchanged.
+- [ ] Changing the payer on a Just me draft updates its sole participant and share.
+- [ ] Overview shows a compact budget summary and Spending shows the complete breakdown.
+- [ ] Expense filters can combine category, payment method, payer, and shared/Just me scope without modifying stored data.
+- [ ] A stale concurrent spending-plan update is not silently overwritten.
+- [ ] No CR-001 screen requests or stores identifying card or bank information.
+- [ ] Two physical Android sessions reading the same repository derive the same totals and budget state.
+
+### 16.14 Test requirements
+
+Unit coverage must include:
+
+- Category and payment-method schema validation
+- Legacy missing-field fallbacks
+- Total, category, and payment-method aggregation
+- Shared versus Just me classification
+- Budget remaining and percentage calculations
+- Inclusive date and remaining-day calculations before, during, and after a trip
+- Minor-unit rounding for daily guidance
+- The invariant that metadata changes do not change balances
+
+Integration coverage with mocked GitHub responses must include:
+
+- Reading groups with no spending plan
+- Creating, updating, removing, and conflicting on a spending plan
+- Adding and editing categorized card/cash expenses
+- Loading a mixture of legacy and CR-001 expense files
+- Immediate recalculation after expense create, edit, and delete
+- Cache hydration followed by a remote spending-plan change
+- Combined expense filters and their empty states
+
+The manual two-account Android test must add a budget and trip dates, record card and cash expenses in different categories, add a Just me expense, exceed one category limit, edit the spending plan from both sessions to produce a conflict, and verify identical totals after refresh.
+
+### 16.15 Explicitly deferred from CR-001
+
+- Custom or user-created categories
+- Recurring weekly or monthly budgets
+- Private per-user budgets hidden from other group members
+- Planned or forecast expenses that have not yet been paid
+- Cash withdrawals, cash-on-hand balances, or shared cash wallets
+- Automatic category prediction
+- Card or bank transaction import
+- Receipt scanning or itemization
+- Budget push notifications or background alerts
+- Multi-currency budgeting or foreign-exchange conversion
+- Offline writes or offline conflict resolution
+
+These remain candidates for later product changes and require separate requirements before implementation.
+
+## 17. Technical references
 
 - [Generating a user access token for a GitHub App](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)
 - [Refreshing GitHub App user access tokens](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/refreshing-user-access-tokens)

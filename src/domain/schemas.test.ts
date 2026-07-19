@@ -1,4 +1,4 @@
-import { parseExpenseFile, parseGroup } from './schemas';
+import { parseExpenseDocument, parseExpenseFile, parseGroup, parseGroupDocument, parseSpendingPlan } from './schemas';
 
 const baseExpense = {
   schema_version: 1,
@@ -29,8 +29,25 @@ describe('GitHub document schemas', () => {
   });
 
   it('derives a legacy expense date from created_at', () => {
-    expect(parseExpenseFile(baseExpense, `expenses/${baseExpense.id}.json`, 'EUR').expense_date)
-      .toBe('2026-07-16');
+    const expense = parseExpenseFile(baseExpense, `expenses/${baseExpense.id}.json`, 'EUR');
+    expect(expense.expense_date).toBe('2026-07-16');
+    expect(expense.category).toBeNull();
+    expect(expense.payment_method).toBeNull();
+  });
+
+  it('accepts the CR-001 metadata taxonomy and preserves passthrough fields', () => {
+    const parsed = parseExpenseDocument({ ...baseExpense, category: 'food_drink', payment_method: 'card', future: { retained: true } }, `expenses/${baseExpense.id}.json`, 'EUR');
+    expect(parsed.expense).toMatchObject({ category: 'food_drink', payment_method: 'card' });
+    expect(parsed.sourceDocument.future).toEqual({ retained: true });
+  });
+
+  it.each([
+    { category: null, payment_method: 'card' },
+    { category: 'uncategorized', payment_method: 'card' },
+    { category: 'food_drink', payment_method: null },
+    { category: 'food_drink', payment_method: 'unspecified' },
+  ])('rejects present invalid or legacy metadata %#', (metadata) => {
+    expect(() => parseExpenseFile({ ...baseExpense, ...metadata }, `expenses/${baseExpense.id}.json`, 'EUR')).toThrow();
   });
 
   it('rejects a path/id mismatch and invalid totals', () => {
@@ -48,5 +65,23 @@ describe('GitHub document schemas', () => {
     };
     expect(parseExpenseFile(full, `expenses/${baseExpense.id}.json`, 'EUR').split_type).toBe('full');
     expect(() => parseExpenseFile({ ...full, participants: ['octocat'], shares_minor: { octocat: 4250 } }, `expenses/${baseExpense.id}.json`, 'EUR')).toThrow();
+  });
+
+  it('parses valid budget/date plans and reports an invalid plan without rejecting the base group', () => {
+    const input = {
+      schema_version: 1, name: 'Road trip', currency: 'EUR', created_by: 'octocat', created_at: '2026-07-16T12:00:00.000Z',
+      spending_plan: { budget_minor: 100_000, category_budgets_minor: { food_drink: 20_000 }, starts_on: '2026-08-10', ends_on: '2026-08-16', updated_by: 'octocat', updated_at: '2026-07-17T14:00:00.000Z' },
+    };
+    expect(parseGroup(input).spending_plan?.budget_minor).toBe(100_000);
+    const invalid = parseGroupDocument({ ...input, spending_plan: { ...input.spending_plan, ends_on: '2026-08-09' } });
+    expect(invalid.group.spending_plan).toBeUndefined();
+    expect(invalid.spendingPlanWarning).toMatch(/end date/i);
+  });
+
+  it('allows a date-only plan and rejects partial dates, empty category limits, and non-calendar dates', () => {
+    expect(parseSpendingPlan({ starts_on: '2028-02-29', ends_on: '2028-03-01', updated_by: 'octocat', updated_at: '2026-07-17T14:00:00.000Z' })).toMatchObject({ starts_on: '2028-02-29' });
+    expect(() => parseSpendingPlan({ starts_on: '2026-08-10', updated_by: 'octocat', updated_at: '2026-07-17T14:00:00.000Z' })).toThrow();
+    expect(() => parseSpendingPlan({ budget_minor: 100, category_budgets_minor: {}, updated_by: 'octocat', updated_at: '2026-07-17T14:00:00.000Z' })).toThrow();
+    expect(() => parseSpendingPlan({ starts_on: '2026-02-30', ends_on: '2026-03-01', updated_by: 'octocat', updated_at: '2026-07-17T14:00:00.000Z' })).toThrow();
   });
 });

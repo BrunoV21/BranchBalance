@@ -16,7 +16,7 @@ jest.mock('@/features/expenses/expense-form', () => {
   return {
     ExpenseForm: ({ onSubmit }: { onSubmit(draft: unknown): Promise<void> }) => React.createElement(
       Pressable,
-      { accessibilityRole: 'button', accessibilityLabel: 'Add expense', onPress: () => { void onSubmit({ description: 'Train tickets', amount: '30.00', paidBy: 'owner', splitType: 'equal', participants: ['owner', 'friend'], expenseDate: '2026-07-17' }); } },
+      { accessibilityRole: 'button', accessibilityLabel: 'Add expense', onPress: () => { void onSubmit({ description: 'Train tickets', amount: '30.00', category: 'transport', paymentMethod: 'card', paidBy: 'owner', splitType: 'equal', participants: ['owner', 'friend'], expenseDate: '2026-07-17' }); } },
       React.createElement(Text, null, 'Add expense'),
     ),
   };
@@ -38,9 +38,10 @@ const snapshot = {
   key: 'owner/branch-balance-trip',
   repository: { id: 1, owner: 'owner', name: 'branch-balance-trip', defaultBranch: 'main', installationId: 10, private: true, canAdmin: true, canWrite: true },
   group: { schema_version: 1, name: 'Trip', currency: 'EUR', created_by: 'owner', created_at: '2026-07-17T09:00:00.000Z' },
+  groupFile: { group: { schema_version: 1, name: 'Trip', currency: 'EUR', created_by: 'owner', created_at: '2026-07-17T09:00:00.000Z' }, blobSha: 'group-sha', path: 'group.json', sourceDocument: { schema_version: 1, name: 'Trip', currency: 'EUR', created_by: 'owner', created_at: '2026-07-17T09:00:00.000Z' } },
   members, pendingMembers: [], expenses: [],
   balances: { totalSpentMinor: 0, members: members.map((member) => ({ login: member.login, totalPaidMinor: 0, totalShareMinor: 0, netMinor: 0, currentMember: true })), zeroSum: true },
-  settlements: [], warnings: [], syncedAt: '2026-07-17T11:00:00.000Z',
+  settlements: [], spending: { totalSpentMinor: 0, currentUserPaidMinor: 0, currentUserShareMinor: 0, categorySpentMinor: { accommodation: 0, food_drink: 0, groceries: 0, transport: 0, activities: 0, shopping: 0, fees: 0, other: 0, uncategorized: 0 }, paymentMethodSpentMinor: { card: 0, cash: 0, other: 0, unspecified: 0 }, budget: null, trip: null }, warnings: [], syncedAt: '2026-07-17T11:00:00.000Z',
 } satisfies RemoteGroupSnapshot;
 
 describe('NewExpenseScreen', () => {

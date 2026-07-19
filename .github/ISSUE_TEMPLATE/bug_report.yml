@@ -1,0 +1,94 @@
+name: Bug report
+description: Report a crash, incorrect balance or spending data, sync failure, or platform-specific problem.
+title: "Bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a BranchBalance bug. Include enough detail to reproduce the behavior, but do not include access tokens, client secrets, signing credentials, or private expense data.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened, and which BranchBalance workflow were you using?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: List the screens, actions, group state, and setup steps that trigger the issue.
+      placeholder: |
+        1. Sign in and open a group
+        2. Open the Spending tab
+        3. Tap ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include relevant sanitized logs or error text.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Authentication or GitHub App setup
+        - Groups, invitations, or membership
+        - Expenses or split calculation
+        - Balances or settlements
+        - Spending plans or insights
+        - GitHub sync or offline cache
+        - Android or Expo UI
+        - Documentation or release
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: BranchBalance version
+      description: Provide a release tag, commit SHA, or indicate that this is an Expo development build.
+      placeholder: "v1.0.0, 82149db, or Expo development build"
+    validations:
+      required: true
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: Runtime
+      options:
+        - Signed Android APK
+        - Expo Go on a physical Android device
+        - Android emulator
+        - Web development build
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device and operating system
+      placeholder: "Pixel 9 / Android 16, macOS 15 with Chrome, ..."
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add sanitized screenshots or logs, network details such as LAN or USB Metro, GitHub App permission context, and whether refreshing changes the result.
+  - type: checkboxes
+    id: sensitive-data
+    attributes:
+      label: Sensitive data
+      options:
+        - label: I removed access tokens, client secrets, signing credentials, and private expense data from this report.
+          required: true

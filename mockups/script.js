@@ -26,10 +26,23 @@
     const segment = event.target.closest('[data-segment]');
     if (segment) {
       const group = segment.closest('[data-segment-group]');
-      if (group) group.querySelectorAll('[data-segment]').forEach((s) => s.classList.remove('active'));
+      if (group) {
+        group.querySelectorAll('[data-segment]').forEach((s) => {
+          s.classList.remove('active');
+          s.setAttribute('aria-pressed', 'false');
+        });
+      }
       segment.classList.add('active');
+      segment.setAttribute('aria-pressed', 'true');
       const target = segment.dataset.target;
-      document.querySelectorAll('[data-split-panel]').forEach((panel) => panel.classList.toggle('hidden', panel.dataset.splitPanel !== target));
+      const scope = segment.closest('[data-segment-scope]') || document;
+      scope.querySelectorAll('[data-split-panel]').forEach((panel) => panel.classList.toggle('hidden', panel.dataset.splitPanel !== target));
+    }
+
+    const resetFilters = event.target.closest('[data-reset-filters]');
+    if (resetFilters) {
+      document.querySelectorAll('[data-expense-filter]').forEach((select) => { select.value = 'all'; });
+      applyExpenseFilters();
     }
 
     const toastTrigger = event.target.closest('[data-toast-message]');
@@ -43,6 +56,28 @@
     }
   });
 
+  function applyExpenseFilters() {
+    const filters = Array.from(document.querySelectorAll('[data-expense-filter]'));
+    const rows = Array.from(document.querySelectorAll('[data-expense-row]'));
+    if (!filters.length || !rows.length) return;
+
+    let visible = 0;
+    rows.forEach((row) => {
+      const matches = filters.every((filter) => filter.value === 'all' || row.dataset[filter.dataset.expenseFilter] === filter.value);
+      row.classList.toggle('hidden', !matches);
+      if (matches) visible += 1;
+    });
+
+    const count = document.querySelector('[data-filter-count]');
+    if (count) count.textContent = `${visible} ${visible === 1 ? 'expense' : 'expenses'} shown`;
+    const empty = document.querySelector('[data-filter-empty]');
+    if (empty) empty.classList.toggle('hidden', visible !== 0);
+  }
+
+  document.addEventListener('change', (event) => {
+    if (event.target.matches('[data-expense-filter]')) applyExpenseFilters();
+  });
+
   window.addEventListener('storage', (event) => {
     if (event.key === 'bb-theme' && (event.newValue === 'dark' || event.newValue === 'light')) {
       root.dataset.theme = event.newValue;
@@ -51,4 +86,5 @@
   });
 
   syncThemeIcons();
+  applyExpenseFilters();
 })();

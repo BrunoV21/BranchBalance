@@ -49,5 +49,6 @@ yarn-error.*
 
 # tests and local builds
 coverage/
+docs/official/.vitepress/cache/
 *.apk
 *.aab

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: BranchBalance documentation
+    url: https://brunov21.github.io/BranchBalance/
+    about: Read the product, usage, data ownership, and release documentation before opening a setup question.
+  - name: GitHub App and local setup
+    url: https://github.com/BrunoV21/BranchBalance#github-app-setup
+    about: Review the GitHub App permissions, environment variables, and Android development prerequisites.

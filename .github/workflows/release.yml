@@ -1,0 +1,326 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag, for example v1.0.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate app and release notes
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install application dependencies
+        run: npm ci
+
+      - name: Validate application
+        run: npm run validate
+
+      - name: Install documentation dependencies
+        working-directory: docs/official
+        run: npm ci
+
+      - name: Validate documentation
+        working-directory: docs/official
+        run: npm run docs:build
+
+      - name: Validate tagged release notes and versions
+        env:
+          TAG_NAME: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          release_version="${TAG_NAME#v}"
+          release_version="${release_version%%-*}"
+          package_version="$(node -p "require('./package.json').version")"
+          app_version="$(node -p "require('./app.json').expo.version")"
+
+          if [ "$release_version" != "$package_version" ] || [ "$release_version" != "$app_version" ]; then
+            echo "Release tag $TAG_NAME must match package.json and app.json version $package_version/$app_version" >&2
+            exit 1
+          fi
+
+          notes_file="docs/official/releases/${TAG_NAME}.md"
+          body_file="/tmp/github-release-notes.md"
+
+          if [ ! -f "$notes_file" ]; then
+            echo "Missing stable release notes file: $notes_file" >&2
+            exit 1
+          fi
+
+          if ! grep -Eq '^status:[[:space:]]*stable[[:space:]]*$' "$notes_file"; then
+            echo "$notes_file must declare status: stable before a release can be staged" >&2
+            exit 1
+          fi
+
+          awk '
+            /<!-- release-notes:start -->/ { emit=1; next }
+            /<!-- release-notes:end -->/ { emit=0 }
+            emit { print }
+          ' "$notes_file" > "$body_file"
+
+          if ! grep -q '[^[:space:]]' "$body_file"; then
+            echo "Release notes must contain content between the release-notes markers" >&2
+            exit 1
+          fi
+
+          github_release_url="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG_NAME}"
+          if ! grep -Fq "$github_release_url" "$body_file"; then
+            echo "Release notes must link to $github_release_url" >&2
+            exit 1
+          fi
+
+  build-apk:
+    name: Build APK and stage draft release
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    needs: validate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install application dependencies
+        run: npm ci
+
+      - name: Setup Android SDK and required packages
+        uses: android-actions/setup-android@v4
+        with:
+          packages: >-
+            platform-tools
+            platforms;android-36
+            build-tools;35.0.0
+            build-tools;36.0.0
+            cmake;3.22.1
+            ndk;27.1.12297006
+
+      - name: Require GitHub App release configuration
+        env:
+          EXPO_PUBLIC_GITHUB_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GITHUB_CLIENT_ID }}
+          EXPO_PUBLIC_GITHUB_APP_SLUG: ${{ secrets.EXPO_PUBLIC_GITHUB_APP_SLUG }}
+        run: |
+          set -euo pipefail
+
+          missing=()
+          for name in EXPO_PUBLIC_GITHUB_CLIENT_ID EXPO_PUBLIC_GITHUB_APP_SLUG; do
+            if [ -z "${!name:-}" ]; then
+              missing+=("$name")
+            fi
+          done
+
+          if [ "${#missing[@]}" -ne 0 ]; then
+            echo "Missing GitHub App release secrets: ${missing[*]}" >&2
+            exit 1
+          fi
+
+      - name: Require and decode Android signing credentials
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          missing=()
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              missing+=("$name")
+            fi
+          done
+
+          if [ "${#missing[@]}" -ne 0 ]; then
+            echo "Missing Android release signing secrets: ${missing[*]}" >&2
+            exit 1
+          fi
+
+          umask 077
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/branchbalance-release.jks"
+          keytool -list \
+            -keystore "$RUNNER_TEMP/branchbalance-release.jks" \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -alias "$ANDROID_KEY_ALIAS" >/dev/null
+
+      - name: Generate native Android project
+        run: |
+          CI=1 npx expo prebuild --platform android --no-install
+          node scripts/configure-android-release-signing.mjs
+
+      - name: Build signed release APK with Gradle
+        working-directory: android
+        env:
+          NODE_ENV: production
+          EXPO_PUBLIC_GITHUB_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GITHUB_CLIENT_ID }}
+          EXPO_PUBLIC_GITHUB_APP_SLUG: ${{ secrets.EXPO_PUBLIC_GITHUB_APP_SLUG }}
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/branchbalance-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew :app:assembleRelease --no-daemon
+
+      - name: Package and verify signed APK
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          source_apk="android/app/build/outputs/apk/release/app-release.apk"
+          asset="BranchBalance-${TAG_NAME}.apk"
+
+          if [ ! -f "$source_apk" ]; then
+            echo "Gradle did not produce $source_apk." >&2
+            exit 1
+          fi
+
+          cp "$source_apk" "$asset"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$asset"
+          unzip -t "$asset" >/dev/null
+          sha256sum "$asset" > SHA256SUMS
+          ls -lh "$asset" SHA256SUMS
+
+      - name: Extract release notes
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          notes_file="docs/official/releases/${TAG_NAME}.md"
+          awk '
+            /<!-- release-notes:start -->/ { emit=1; next }
+            /<!-- release-notes:end -->/ { emit=0 }
+            emit { print }
+          ' "$notes_file" > /tmp/github-release-notes.md
+
+      - name: Create or update draft release and attach APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          asset="BranchBalance-${TAG_NAME}.apk"
+
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            if [ "$(gh release view "$TAG_NAME" --json isDraft --jq .isDraft)" != "true" ]; then
+              echo "Release $TAG_NAME is already published; refusing to replace its APK." >&2
+              exit 1
+            fi
+            gh release edit "$TAG_NAME" --title "BranchBalance $TAG_NAME" --notes-file /tmp/github-release-notes.md
+          else
+            gh release create "$TAG_NAME" --verify-tag --draft --title "BranchBalance $TAG_NAME" --notes-file /tmp/github-release-notes.md
+          fi
+
+          gh release upload "$TAG_NAME" "$asset" SHA256SUMS --clobber
+
+      - name: Preserve packaged release artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: branchbalance-${{ github.ref_name }}-android
+          path: |
+            BranchBalance-${{ github.ref_name }}.apk
+            SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Remove decoded signing keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/branchbalance-release.jks"
+
+  publish-release:
+    name: Verify attached APK and publish
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    needs: validate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+
+      - name: Extract release notes
+        env:
+          TAG_NAME: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          notes_file="docs/official/releases/${TAG_NAME}.md"
+          awk '
+            /<!-- release-notes:start -->/ { emit=1; next }
+            /<!-- release-notes:end -->/ { emit=0 }
+            emit { print }
+          ' "$notes_file" > /tmp/github-release-notes.md
+
+      - name: Verify attached APK and publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          asset="BranchBalance-${TAG_NAME}.apk"
+
+          if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            echo "Draft release $TAG_NAME does not exist. Push the tag and wait for its APK build first." >&2
+            exit 1
+          fi
+
+          if [ "$(gh release view "$TAG_NAME" --json isDraft --jq .isDraft)" != "true" ]; then
+            echo "Release $TAG_NAME is already published." >&2
+            exit 1
+          fi
+
+          asset_names="$(gh release view "$TAG_NAME" --json assets --jq '.assets[].name')"
+          grep -Fxq "$asset" <<< "$asset_names" || {
+            echo "Draft release $TAG_NAME is missing $asset." >&2
+            exit 1
+          }
+          grep -Fxq "SHA256SUMS" <<< "$asset_names" || {
+            echo "Draft release $TAG_NAME is missing SHA256SUMS." >&2
+            exit 1
+          }
+
+          mkdir release-assets
+          gh release download "$TAG_NAME" --dir release-assets --pattern "$asset" --pattern SHA256SUMS
+          (cd release-assets && sha256sum --check SHA256SUMS)
+          unzip -t "release-assets/$asset" >/dev/null
+
+          gh release edit "$TAG_NAME" \
+            --title "BranchBalance $TAG_NAME" \
+            --notes-file /tmp/github-release-notes.md \
+            --draft=false \
+            --latest

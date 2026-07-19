@@ -1,0 +1,42 @@
+name: Feature request
+description: Suggest a new expense-sharing workflow, insight, GitHub integration, or app capability.
+title: "Feature: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user workflow or current limitation should this address?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should BranchBalance do, and how would the experience work?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe current BranchBalance workflows, external tools, or workarounds you tried.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Authentication or GitHub App setup
+        - Groups, invitations, or membership
+        - Expense entry or split options
+        - Balances or settlements
+        - Spending plans or insights
+        - GitHub sync, storage, or offline behavior
+        - Android or Expo experience
+        - Documentation
+        - Release or installation
+        - Other
+    validations:
+      required: true

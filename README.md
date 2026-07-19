@@ -2,7 +2,7 @@
 
 BranchBalance is a peer-distributed expense splitter backed by private GitHub repositories. GitHub provides authentication, storage, and group membership, so Phase 1 does not require an application server.
 
-The Expo application implements the Android Phase 1 described by [`docs/PRD.md`](docs/PRD.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+The Expo application implements the Android Phase 1 and CR-001 spending-intelligence increment described by [`docs/PRD.md`](docs/PRD.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Phase 1
 
@@ -14,6 +14,8 @@ The Android-first Phase 1 is intended to support this complete flow:
 4. Add, edit, and delete expense JSON files in `expenses/` using GitHub blob SHAs for conflict detection.
 5. Compute balances and simplified settlements on the device.
 6. Refresh on screen focus, app foreground, and pull-to-refresh while preserving cached data on transient failure.
+
+CR-001 adds required category and payment-method metadata for new expenses, a Just me split shortcut, optional group and category budgets, optional trip dates, and a Spending tab with summaries, daily guidance, and combined filters. Existing expenses without the new metadata continue to load as Uncategorized and Unspecified, and spending metadata never changes balances or settlements.
 
 Offline Git sync, settle-up records, percentage splits, currency conversion, notifications, and iOS release builds are outside Phase 1.
 
@@ -89,15 +91,32 @@ npm test -- --runInBand
 npm run doctor
 ```
 
-## Android APK
+## Product site and documentation
 
-The `preview` EAS profile produces a sideloadable APK. Install the EAS CLI, authenticate, and build locally on macOS:
+The product website, user guides, source-document reference, and release history are implemented as an isolated VitePress site in [`docs/official`](docs/official). Run it locally with:
 
 ```sh
-npx eas-cli build --platform android --profile preview --local
+cd docs/official
+npm ci
+npm run docs:dev
 ```
 
-Local Android builds also require the Android SDK and Java toolchain expected by Expo. The app identifier is `com.branchbalance.app`.
+Build the exact GitHub Pages output with `npm run docs:build`. Releases use Markdown notes from `docs/official/releases`; see the [release process](docs/official/releases/releasing.md) before creating a version tag.
+
+## Android APK
+
+Generate the native Android project, configure its release signing key, and build a sideloadable APK locally:
+
+```sh
+npm ci
+CI=1 npx expo prebuild --platform android --no-install
+node scripts/configure-android-release-signing.mjs
+(cd android && NODE_ENV=production ./gradlew :app:assembleRelease)
+```
+
+The signing configurator reads `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD` from the environment. The APK is written to `android/app/build/outputs/apk/release/app-release.apk`. Local Android builds require the Android SDK, NDK, and Java 17. The app identifier is `com.branchbalance.app`.
+
+Tagged releases run the same Expo prebuild and Gradle flow on the GitHub-hosted runner and attach the signed APK to a draft GitHub release. Complete the one-time keystore and GitHub Actions secret setup described in the [release process](docs/official/releases/releasing.md) before pushing a stable release tag.
 
 ## Repository data
 
@@ -109,7 +128,7 @@ expenses/
   <uuid>.json
 ```
 
-`group.json` holds the display name, currency, creator, and creation time. Every expense is a separate JSON document containing its amount, date, payer, deterministic shares, and audit fields. GitHub's live collaborator list is the source of truth for membership. No empty expenses directory is created; the first expense creates it.
+`group.json` holds the display name, currency, creator, creation time, and optional shared spending plan. Every expense is a separate JSON document containing its amount, date, payer, deterministic shares, category, payment method, and audit fields. GitHub's live collaborator list is the source of truth for membership. No empty expenses directory is created; the first expense creates it.
 
 See the [Phase 1 PRD](docs/PRD.md) for product requirements, the [architecture guide](docs/ARCHITECTURE.md) for implementation decisions, and the [testing guide](docs/TESTING.md) for automated and physical-device acceptance.
 
