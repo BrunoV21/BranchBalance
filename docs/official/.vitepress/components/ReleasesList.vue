@@ -161,10 +161,10 @@ function readableDate(value: string) {
         <div class="release-body">
           <h2>What is in this release</h2>
           <div class="highlight-grid">
-            <section class="highlight"><div class="point-icon">▣</div><h3>GitHub-backed groups</h3><p>Device-flow sign-in, rotating credentials, private repositories, and collaborator invitations.</p></section>
-            <section class="highlight"><div class="point-icon">▤</div><h3>Complete expense lifecycle</h3><p>Add, edit, and delete dated expenses with conflict detection and deterministic shares.</p></section>
-            <section class="highlight"><div class="point-icon">▥</div><h3>Balances and settlements</h3><p>Per-person paid totals, net balances, and a concise deterministic settlement list.</p></section>
-            <section class="highlight"><div class="point-icon">◷</div><h3>Spending intelligence</h3><p>Group budgets, category limits, payment methods, filters, trip dates, and daily guidance.</p></section>
+            <section class="highlight"><div class="point-icon">▣</div><h3>GitHub-backed groups</h3><p>Private repositories, collaborator invitations, and no BranchBalance application backend.</p></section>
+            <section class="highlight"><div class="point-icon">▤</div><h3>Payments and balances</h3><p>Record, confirm, and review settlement payments alongside deterministic balances.</p></section>
+            <section class="highlight"><div class="point-icon">▥</div><h3>Recent activity</h3><p>Catch up on changes observed while the app is active through a private on-device inbox.</p></section>
+            <section class="highlight"><div class="point-icon">◷</div><h3>Spending analytics</h3><p>Understand pace, daily and category mix, personal scope, and expense funding fairness.</p></section>
           </div>
           <div class="release-notes" v-html="latest.html" />
         </div>
