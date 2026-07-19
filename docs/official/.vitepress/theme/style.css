@@ -205,11 +205,19 @@
   border-radius: 7px !important;
   background: var(--surface-soft);
   color: var(--accent);
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 
 .vp-doc table {
-  display: table;
+  display: block;
   width: 100%;
+  overflow-x: auto;
+}
+
+.vp-doc .responsive-fact-table {
+  display: table;
 }
 
 .vp-doc th,
@@ -685,6 +693,32 @@
   }
 }
 
+@media (max-width: 900px) {
+  .VPNavBarMenu,
+  .VPNavBarTranslations,
+  .VPNavBarAppearance,
+  .VPNavBarSocialLinks,
+  .VPNavBarExtra {
+    display: none !important;
+  }
+
+  .VPNavBarHamburger {
+    display: flex !important;
+  }
+
+  .VPNavScreen {
+    display: block !important;
+  }
+
+  .VPNavScreen > .container {
+    max-width: 420px;
+  }
+
+  .bb-home .hero {
+    padding-top: 62px;
+  }
+}
+
 @media (max-width: 640px) {
   :root {
     --vp-nav-height: 68px;
@@ -695,11 +729,164 @@
     height: 38px;
   }
 
+  .VPNavBarSearchButton,
+  .VPNavBarHamburger {
+    width: 42px !important;
+    height: 42px !important;
+    border: 1px solid var(--line) !important;
+    border-radius: 13px !important;
+    background: var(--surface-soft) !important;
+  }
+
+  .VPNavBarSearchButton .text,
+  .VPNavBarSearchButton .keys {
+    display: none !important;
+  }
+
+  .VPDoc {
+    padding-right: 14px !important;
+    padding-bottom: 80px !important;
+    padding-left: 14px !important;
+  }
+
   .bb-home .hero {
-    padding-top: 55px;
+    padding: 46px 0 30px;
+  }
+
+  .bb-docs-hub .docs-section {
+    padding-top: 32px;
+  }
+
+  .raw-markdown-link {
+    margin-bottom: 24px;
+  }
+
+  .vp-doc h1 {
+    font-size: clamp(38px, 11.5vw, 46px);
+  }
+
+  .vp-doc h2 {
+    margin-top: 42px;
+    padding-top: 24px;
+    font-size: 29px;
+  }
+
+  .vp-doc div[class*='language-'] {
+    border-radius: 14px !important;
+  }
+
+  .vp-doc .ownership-diagram .arch-arrow {
+    min-height: 30px;
+    transform: none;
+  }
+
+  .vp-doc .ownership-diagram .arch-arrow::before {
+    color: var(--accent);
+    content: '↓';
+    font-family: var(--display);
+    font-size: 25px;
+  }
+
+  .vp-doc .responsive-fact-table,
+  .vp-doc .responsive-fact-table tbody,
+  .vp-doc .responsive-fact-table tr,
+  .vp-doc .responsive-fact-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .vp-doc .responsive-fact-table {
+    overflow: visible;
+  }
+
+  .vp-doc .responsive-fact-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+
+  .vp-doc .responsive-fact-table tbody {
+    display: grid;
+    gap: 10px;
+  }
+
+  .vp-doc .responsive-fact-table tr {
+    padding: 7px 15px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: var(--surface-soft);
+  }
+
+  .vp-doc .responsive-fact-table td,
+  .vp-doc .responsive-fact-table td:first-child {
+    display: grid;
+    grid-template-columns: 105px minmax(0, 1fr);
+    padding: 9px 0;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    gap: 12px;
+    color: var(--ink-soft);
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.55;
+  }
+
+  .vp-doc .responsive-fact-table td:last-child {
+    border-bottom: 0;
+  }
+
+  .vp-doc .responsive-fact-table td::before {
+    color: var(--muted);
+    content: attr(data-label);
+    font-size: 9px;
+    font-weight: 850;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
   }
 
   .preview-screen {
-    transform: scale(0.645);
+    transform: scale(0.6);
+  }
+}
+
+@media (max-width: 360px) {
+  .VPNavBarTitle .title {
+    font-size: 17px;
+  }
+
+  .VPNavBarTitle .logo {
+    width: 36px;
+    height: 36px;
+    margin-right: 8px;
+  }
+
+  .VPNavBarSearchButton,
+  .VPNavBarHamburger {
+    width: 40px !important;
+    height: 40px !important;
+  }
+
+  .vp-doc .responsive-fact-table td,
+  .vp-doc .responsive-fact-table td:first-child {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .preview-screen {
+    transform: scale(0.55);
+  }
+}
+
+@media (max-height: 600px) and (min-width: 641px) and (max-width: 900px) and (orientation: landscape) {
+  .bb-home .hero {
+    padding: 38px 0 28px;
+  }
+
+  .preview-screen {
+    transform: scale(0.6);
   }
 }

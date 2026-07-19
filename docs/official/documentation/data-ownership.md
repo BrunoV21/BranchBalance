@@ -67,12 +67,17 @@ Your GitHub access token, refresh token, and their expiries stay together in And
 
 The app may also cache non-secret account and group snapshots locally. Those snapshots help keep the latest successful data visible during refreshes or temporary network failures, but they are never authoritative. GitHub remains the source of truth.
 
-| Information | Stored in | Purpose |
-|---|---|---|
-| Group and expenses | Private GitHub repository | Shared source of truth for accepted members |
-| Access and refresh tokens | Secure storage on the device | Authenticate direct GitHub API requests |
-| Cached snapshots | Local app storage | Show the latest successful non-secret data while refreshing |
-| Group membership | GitHub collaborator list | Determine accepted and pending members without duplicating the list |
+<table class="responsive-fact-table">
+  <thead>
+    <tr><th>Information</th><th>Stored in</th><th>Purpose</th></tr>
+  </thead>
+  <tbody>
+    <tr><td data-label="Information">Group and expenses</td><td data-label="Stored in">Private GitHub repository</td><td data-label="Purpose">Shared source of truth for accepted members</td></tr>
+    <tr><td data-label="Information">Access and refresh tokens</td><td data-label="Stored in">Secure storage on the device</td><td data-label="Purpose">Authenticate direct GitHub API requests</td></tr>
+    <tr><td data-label="Information">Cached snapshots</td><td data-label="Stored in">Local app storage</td><td data-label="Purpose">Show the latest successful non-secret data while refreshing</td></tr>
+    <tr><td data-label="Information">Group membership</td><td data-label="Stored in">GitHub collaborator list</td><td data-label="Purpose">Determine accepted and pending members without duplicating the list</td></tr>
+  </tbody>
+</table>
 
 ## Who can see group data
 
