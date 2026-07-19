@@ -1,80 +1,141 @@
-# BranchBalance
+<p align="center">
+  <img src="assets/brand/branch-balance-icon.svg" width="104" alt="BranchBalance app icon">
+</p>
 
-BranchBalance is a peer-distributed expense splitter backed by private GitHub repositories. GitHub provides authentication, storage, and group membership, so Phase 1 does not require an application server.
+<h1 align="center">BranchBalance</h1>
 
-The Expo application implements Android Phase 1 through CR-004, including spending intelligence, settlement payments, received group invitations, and the foreground-only local activity inbox described by [`docs/PRD.md`](docs/PRD.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+<p align="center"><strong>Split expenses. See the whole picture. Keep control of your data.</strong></p>
 
-## Phase 1
+<p align="center">
+  A privacy-first Android expense-sharing app backed by private GitHub repositories.<br>
+  No BranchBalance server, no opaque database, and no mystery export process.
+</p>
 
-The Android-first Phase 1 is intended to support this complete flow:
+<p align="center">
+  <a href="https://github.com/BrunoV21/BranchBalance/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/BrunoV21/BranchBalance?style=flat-square&color=d97757"></a>
+  <a href="https://github.com/BrunoV21/BranchBalance/actions/workflows/ci.yml"><img alt="CI status" src="https://img.shields.io/github/actions/workflow/status/BrunoV21/BranchBalance/ci.yml?branch=main&style=flat-square&label=CI"></a>
+  <a href="https://github.com/BrunoV21/BranchBalance/actions/workflows/docs.yml"><img alt="Documentation status" src="https://img.shields.io/github/actions/workflow/status/BrunoV21/BranchBalance/docs.yml?branch=main&style=flat-square&label=docs"></a>
+  <a href="https://github.com/BrunoV21/BranchBalance/releases/latest"><img alt="Android" src="https://img.shields.io/badge/platform-Android-3DDC84?style=flat-square&logo=android&logoColor=white"></a>
+  <a href="https://docs.expo.dev/"><img alt="Expo SDK 57" src="https://img.shields.io/badge/Expo_SDK-57-000020?style=flat-square&logo=expo&logoColor=white"></a>
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/github/license/BrunoV21/BranchBalance?style=flat-square&color=447a63"></a>
+</p>
 
-1. Sign in through a GitHub App using device flow.
-2. Create a group as a private `branch-balance-<slug>` repository.
-3. Invite GitHub collaborators as group members.
-4. Add, edit, and delete expense JSON files in `expenses/` using GitHub blob SHAs for conflict detection.
-5. Compute balances and simplified settlements on the device.
-6. Refresh on screen focus, app foreground, and pull-to-refresh while preserving cached data on transient failure.
+<p align="center">
+  <a href="https://github.com/BrunoV21/BranchBalance/releases/latest"><strong>Download the Android APK</strong></a>
+  ·
+  <a href="https://brunov21.github.io/BranchBalance/">Product &amp; docs</a>
+  ·
+  <a href="mockups/">Interactive mockups</a>
+</p>
 
-CR-001 adds required category and payment-method metadata for new expenses, a Just me split shortcut, optional group and category budgets, optional trip dates, and a Spending tab with summaries, daily guidance, and combined filters. Existing expenses without the new metadata continue to load as Uncategorized and Unspecified, and spending metadata never changes balances or settlements.
+## ✨ Why BranchBalance?
 
-CR-002 adds a SHA-protected `settlements.json` ledger. Members can record full or partial payments against current suggestions, recipients must confirm receipt before balances change, and the Balances tab shows pending reservations, confirmed settlement totals, and payment history. Optional notes can hold plain-text receipt or attachment references, external transaction IDs, or financial-account identifiers; those notes remain remote-only and are redacted from device caches.
+- **Your group owns the data.** Every group is a private GitHub repository containing readable JSON and its Git history.
+- **There is no app backend.** The Android app talks directly to GitHub for identity, membership, storage, and sharing.
+- **The maths is exact.** Amounts use integer minor units, shares are deterministic, and settlement suggestions are calculated on-device.
+- **It goes beyond “who owes whom.”** Track budgets, category limits, spending pace, payment methods, funding fairness, and confirmed settlements.
+- **Concurrent changes are explicit.** Expense and settlement writes use GitHub blob SHAs so a stale device cannot silently overwrite newer data.
 
-BranchBalance records transfers completed elsewhere—it does not move money or connect to financial accounts. Offline Git sync, arbitrary transfers, binary receipt uploads, percentage splits, currency conversion, push/background notifications, and iOS release builds remain outside the implemented scope.
+## 📱 Product tour
 
-## Stack
+<table>
+  <tr>
+    <th align="center">Group overview</th>
+    <th align="center">Spending intelligence</th>
+    <th align="center">Balances &amp; fairness</th>
+  </tr>
+  <tr>
+    <td><img src="docs/images/group-overview.png" width="300" alt="BranchBalance group overview showing the current balance, trip budget, and recent expenses"></td>
+    <td><img src="docs/images/spending-analytics.png" width="300" alt="BranchBalance spending screen showing budget progress and an even-budget pace chart"></td>
+    <td><img src="docs/images/balances.png" width="300" alt="BranchBalance balances screen showing paid-versus-share funding and simplified debts"></td>
+  </tr>
+</table>
 
-- Expo SDK 57 and React Native 0.86
-- TypeScript and Expo Router
-- `@octokit/rest` with a directly controlled GitHub device-flow transport
-- `expo-secure-store` for one atomic rotating access/refresh credential record
-- AsyncStorage for versioned non-secret account and group snapshots
-- Zod for GitHub-backed document and cache validation
-- React Context and hooks for application state as features are added
+> These screens are rendered from the repository's [interactive HTML mockups](mockups/), which cover all 12 primary product flows in light and dark themes.
 
-## Prerequisites
+## 🧭 How it works
+
+1. **Connect GitHub** through the GitHub App device flow. Rotating credentials stay in secure storage on the phone.
+2. **Create a group.** BranchBalance creates a private `branch-balance-<slug>` repository under your personal account.
+3. **Invite collaborators.** GitHub's collaborator list remains the source of truth for group membership.
+4. **Track and settle.** Members add expenses, understand spending, and record payments completed outside the app.
+
+BranchBalance records transfers; it does **not** move money or connect to financial accounts.
+
+## 🧰 Feature set
+
+| Area | Included in v1.1 |
+|---|---|
+| 🔑 Authentication | GitHub App device flow, expiring tokens, atomic refresh-token rotation, secure sign-out |
+| 👥 Groups | Private repository creation, discovery, collaborator invitations, accepted and pending members |
+| 🧾 Expenses | Add, edit, and delete; equal, full-to-one, and Just me splits; categories and payment methods |
+| 📊 Spending | Group and category budgets, optional trip dates, daily guidance, pace and mix analytics, combined filters |
+| ⚖️ Balances | Exact per-member balances, simplified debts, paid-versus-share analysis, pending and confirmed settlements |
+| 🔔 Activity | Foreground-only, on-device inbox for newly observed group changes |
+| 🔄 Sync | Refresh on focus, foreground, and pull-to-refresh; cached snapshots remain visible on transient failures |
+| 🌓 Experience | System, light, and dark themes; accessible labels, text summaries, and touch targets |
+
+## 🏗 Architecture
+
+```mermaid
+flowchart LR
+    App[Android app] <-->|GitHub REST API + OAuth| Repo[(Private GitHub repository)]
+    App --> Secure[SecureStore<br>access + refresh tokens]
+    App --> Cache[AsyncStorage<br>disposable snapshots]
+    Repo --> Files[group.json<br>expenses/*.json<br>settlements.json]
+```
+
+GitHub is authoritative. Local storage is limited to credentials and a stale-while-revalidate cache; BranchBalance never presents a cached write as remotely committed.
+
+The app is built with Expo SDK 57, React Native, TypeScript, Expo Router, Octokit, Zod, SecureStore, and AsyncStorage. See the [architecture guide](docs/ARCHITECTURE.md) for dependency boundaries, schemas, and concurrency decisions.
+
+## 🚀 Getting started
+
+### Install the Android release
+
+Download the signed APK and its SHA-256 checksum from the [latest GitHub release](https://github.com/BrunoV21/BranchBalance/releases/latest). Android is the supported runtime; iOS is not currently a release target.
+
+### Run from source
+
+Requirements:
 
 - Node.js 20 or newer
 - npm 10 or newer
 - Expo Go on an Android device, or an Android emulator
 - A GitHub App configured for BranchBalance
 
-## GitHub App setup
-
-Create a GitHub App in **GitHub Settings > Developer settings > GitHub Apps**.
-
-1. Enable **Device Flow**.
-2. Grant repository **Administration** and **Contents** read/write permissions.
-3. Configure the app installation to cover repositories created for BranchBalance.
-4. Keep expiring user authorization tokens enabled. GitHub App device-flow refresh does not require shipping a client secret.
-5. Copy the app's client ID and app slug. Do not copy or expose its client secret.
-
-Create the local environment file:
-
 ```sh
+git clone https://github.com/BrunoV21/BranchBalance.git
+cd BranchBalance
+npm ci
 cp .env.example .env
 ```
 
-Set `EXPO_PUBLIC_GITHUB_CLIENT_ID` and `EXPO_PUBLIC_GITHUB_APP_SLUG` in `.env`. Expo public variables are embedded in the application bundle, which is appropriate for this public metadata but never for a client secret.
+Create a GitHub App under **GitHub Settings → Developer settings → GitHub Apps**, then:
 
-## Install and run
+1. Enable **Device Flow**.
+2. Grant repository **Contents** and **Administration** read/write permissions.
+3. Keep expiring user authorization tokens enabled.
+4. Allow the installation to cover all repositories so newly created groups are accessible.
+5. Set `EXPO_PUBLIC_GITHUB_CLIENT_ID` and `EXPO_PUBLIC_GITHUB_APP_SLUG` in `.env`.
+
+The client ID and slug are public metadata. Never add a GitHub client secret to the app. The [GitHub App setup guide](docs/official/getting-started/github-app.md) explains the installation and authorization flow.
+
+Start Expo:
 
 ```sh
-npm install
 npm start
 ```
 
-Scan the QR code with Expo Go, or use one of the platform scripts:
+For an Android device or emulator on the same network:
 
 ```sh
 npm run android
-npm run web
 ```
 
 ### Android device over USB
 
-The default Expo connection uses the local network. If the Android device is using mobile data, has Wi-Fi disabled, or cannot reach the Mac on the same network, Expo Go may report `Failed to download remote update`.
-
-With USB debugging enabled and the device connected, route Metro through USB and start Expo in localhost mode:
+If Expo Go reports `java.io.IOException: Failed to download remote update`, treat it as a device-to-Metro connection problem first. With USB debugging enabled:
 
 ```sh
 adb devices
@@ -82,9 +143,15 @@ adb reverse tcp:8081 tcp:8081
 npx expo start --localhost --android
 ```
 
-Run `adb reverse` again after reconnecting or restarting the device. If the device and Mac are on the same Wi-Fi network, `npm run android` is sufficient.
+Recreate the reverse mapping after reconnecting the cable or device. API errors that appear after the JavaScript bundle loads are separate application-level failures.
 
-## Validation
+## 🧪 Development and validation
+
+```sh
+npm run validate
+```
+
+The full validation command runs TypeScript, ESLint, the Jest suite, and Expo Doctor. Individual commands are also available:
 
 ```sh
 npm run typecheck
@@ -93,21 +160,9 @@ npm test -- --runInBand
 npm run doctor
 ```
 
-## Product site and documentation
+Tests cover domain money rules, schemas, GitHub/OAuth transport, storage, providers, reconciliation, and screen behaviour. See the [testing guide](docs/TESTING.md) for automated and physical-device acceptance.
 
-The product website, user guides, source-document reference, and release history are implemented as an isolated VitePress site in [`docs/official`](docs/official). Run it locally with:
-
-```sh
-cd docs/official
-npm ci
-npm run docs:dev
-```
-
-Build the exact GitHub Pages output with `npm run docs:build`. Releases use Markdown notes from `docs/official/releases`; see the [release process](docs/official/releases/releasing.md) before creating a version tag.
-
-## Android APK
-
-Generate the native Android project, configure its release signing key, and build a sideloadable APK locally:
+## 📦 Build a release APK locally
 
 ```sh
 npm ci
@@ -116,28 +171,49 @@ node scripts/configure-android-release-signing.mjs
 (cd android && NODE_ENV=production ./gradlew :app:assembleRelease)
 ```
 
-The signing configurator reads `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD` from the environment. The APK is written to `android/app/build/outputs/apk/release/app-release.apk`. Local Android builds require the Android SDK, NDK, and Java 17. The app identifier is `com.branchbalance.app`.
+The signing configurator reads `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD`. The APK is written to `android/app/build/outputs/apk/release/app-release.apk`. Local release builds require the Android SDK, NDK, and Java 17.
 
-Tagged releases run the same Expo prebuild and Gradle flow on the GitHub-hosted runner and attach the signed APK to a draft GitHub release. Complete the one-time keystore and GitHub Actions secret setup described in the [release process](docs/official/releases/releasing.md) before pushing a stable release tag.
+Tagged versions are validated, signed, checksummed, and staged through GitHub Actions. Read the [release process](docs/official/releases/releasing.md) before creating a version tag.
 
-## Repository data
+## 🔐 Data ownership and security
 
-Each group is a private repository named `branch-balance-<group-slug>`. It contains:
+Each group repository has a deliberately small structure:
 
 ```text
-group.json
-expenses/
-  <uuid>.json
+branch-balance-road-trip/
+├── group.json
+├── settlements.json       # created with the first recorded payment
+└── expenses/
+    ├── <uuid>.json
+    └── <uuid>.json
 ```
 
-`group.json` holds the display name, currency, creator, creation time, and optional shared spending plan. Every expense is a separate JSON document containing its amount, date, payer, deterministic shares, category, payment method, and audit fields. GitHub's live collaborator list is the source of truth for membership. No empty expenses directory is created; the first expense creates it.
+- Group, expense, plan, and settlement data lives in the private repository.
+- GitHub collaborators with repository access can read that shared data.
+- Access and refresh tokens live in `expo-secure-store`.
+- Non-secret local snapshots are disposable; GitHub remains the source of truth.
+- Settlement notes are redacted from persistent device caches, but remain visible to repository members and may remain in Git history.
+- Private GitHub repositories are access-controlled by GitHub; BranchBalance does not add end-to-end encryption.
 
-See the [Phase 1 PRD](docs/PRD.md) for product requirements, the [architecture guide](docs/ARCHITECTURE.md) for implementation decisions, the [roadmap](ROADMAP.md) for known limitations and planned work, and the [testing guide](docs/TESTING.md) for automated and physical-device acceptance.
+Read [how data ownership works](docs/official/documentation/data-ownership.md), the [permissions model](docs/official/documentation/permissions.md), and the [credential security guide](docs/official/documentation/security.md).
 
-## Security
+## 🗺 Project docs
 
-Access and refresh tokens are stored together with their expiries in `expo-secure-store`. Environment files and signing artifacts are ignored by Git. Never add a GitHub client secret, token, keystore, or service credential to the application source or repository.
+| Resource | What it covers |
+|---|---|
+| [Product website & documentation](https://brunov21.github.io/BranchBalance/) | Published guides, data ownership, releases, and product overview |
+| [Product requirements](docs/PRD.md) | Implemented scope, product decisions, and acceptance criteria |
+| [Architecture](docs/ARCHITECTURE.md) | System boundaries, models, sync, security, and UI decisions |
+| [Testing](docs/TESTING.md) | Automated validation and physical-device scenarios |
+| [Roadmap](ROADMAP.md) | Known limitations and possible future work |
+| [Interactive mockups](mockups/) | Twelve responsive screens plus the original website prototype |
+
+Current boundaries include Android-only releases, always-online writes, foreground refresh rather than push notifications, and a GitHub App limitation that can hide pending private-repository invitations before acceptance. Receipt images, percentage splits, currency conversion, and organization-owned groups are not yet included.
+
+## 🤝 Contributing
+
+Issues and pull requests are welcome. Please run `npm run validate` before submitting code and keep product behaviour aligned with the PRD and architecture guide.
 
 ## License
 
-[MIT](LICENSE)
+BranchBalance is open-source software available under the [MIT License](LICENSE).
