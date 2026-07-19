@@ -1,4 +1,4 @@
-import type { AccountProfile, DiscoveredGroup, ExpenseFile, Group, GroupFile, PendingGroupCreation, RemoteGroupSnapshot, RepositoryRef, SpendingPlan, WritableExpense } from '@/domain/types';
+import type { AccountProfile, CurrencyCode, DiscoveredGroup, ExpenseFile, Group, GroupFile, IsoInstant, PendingGroupCreation, RemoteGroupSnapshot, RepositoryRef, SettlementLedgerFile, SettlementLedgerState, SettlementPayment, SettlementValidationBasis, SpendingPlan, WritableExpense } from '@/domain/types';
 
 export interface DiscoveryResult {
   groups: DiscoveredGroup[];
@@ -20,5 +20,9 @@ export interface GitHubGateway {
   updateExpense(repository: RepositoryRef, current: ExpenseFile, expense: WritableExpense, signal?: AbortSignal): Promise<ExpenseFile>;
   deleteExpense(repository: RepositoryRef, current: ExpenseFile, signal?: AbortSignal): Promise<void>;
   updateSpendingPlan(repository: RepositoryRef, current: GroupFile, next: SpendingPlan | null, signal?: AbortSignal): Promise<GroupFile>;
+  readSettlementLedger(repository: RepositoryRef, currency: CurrencyCode, signal?: AbortSignal): Promise<SettlementLedgerState>;
+  recordSettlementPayment(repository: RepositoryRef, current: SettlementLedgerState, intended: SettlementPayment, basis: SettlementValidationBasis, signal?: AbortSignal): Promise<SettlementLedgerFile>;
+  confirmSettlementPayment(repository: RepositoryRef, current: SettlementLedgerFile, paymentId: string, recipient: string, confirmedAt: IsoInstant, signal?: AbortSignal): Promise<SettlementLedgerFile>;
+  deleteSettlementPayment(repository: RepositoryRef, current: SettlementLedgerFile, paymentId: string, signal?: AbortSignal): Promise<SettlementLedgerState>;
   recoverPendingGroup?(pending: PendingGroupCreation, signal?: AbortSignal): Promise<void>;
 }

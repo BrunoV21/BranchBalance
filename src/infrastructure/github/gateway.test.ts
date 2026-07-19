@@ -39,6 +39,7 @@ describe('GitHubGateway group refresh', () => {
     };
     const client = clientWith((route, parameters) => {
       if (route === 'GET /repos/{owner}/{repo}') return { data: { id: 1, name: 'branch-balance-trip', private: true, default_branch: 'main', owner: { login: 'owner' }, permissions: { admin: true, push: true } }, headers: {}, status: 200 };
+      if (route === 'GET /repos/{owner}/{repo}/contents/{path}' && parameters.path === 'settlements.json') throw new AppFailure({ kind: 'not_found', resource: 'Settlement ledger' });
       if (route === 'GET /repos/{owner}/{repo}/contents/{path}') return { data: { type: 'file', sha: 'g', content: encoded({ ...group, spending_plan: { budget_minor: 0, updated_by: 'owner', updated_at: '2026-07-16T00:00:00.000Z' } }) }, headers: {}, status: 200 };
       if (route === 'GET /repos/{owner}/{repo}/collaborators') return { data: [{ login: 'owner', avatar_url: null, permissions: { admin: true } }, { login: 'friend', avatar_url: null, permissions: { push: true } }], headers: {}, status: 200 };
       if (route === 'GET /repos/{owner}/{repo}/invitations') return { data: [], headers: {}, status: 200 };

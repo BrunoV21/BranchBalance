@@ -1,9 +1,10 @@
 import { createContext, type PropsWithChildren, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { AppFailure, DomainValidationError, messageForError } from '@/domain/errors';
-import { normalizeLogin, type ExpenseFile, type GroupFile, type GroupKey, type RemoteGroupSnapshot, type SpendingPlan, type WritableExpense } from '@/domain/types';
+import { normalizeLogin, type ExpenseFile, type GroupFile, type GroupKey, type RemoteGroupSnapshot, type SettlementLedgerState, type SettlementPayment, type SpendingPlan, type WritableExpense } from '@/domain/types';
 import { hydrateCachedSnapshot, type ConfirmedExpenseMutation, withExpenses, withGroupFile } from '@/features/expenses/snapshot-reconciliation';
 import { githubGateway, snapshotStore, systemClock, systemLocalCalendar } from '@/infrastructure/runtime';
+import { withSettlementLedger } from '@/features/settlements/snapshot-reconciliation';
 
 import { useGroups } from './groups-provider';
 import type { ResourceState } from './resource';
@@ -20,12 +21,15 @@ type GroupContextValue = {
   updateSpendingPlan(plan: SpendingPlan, current?: GroupFile): Promise<void>;
   removeSpendingPlan(current?: GroupFile): Promise<void>;
   acceptSpendingPlanFile(file: GroupFile): Promise<void>;
+  recordSettlementPayment(payment: SettlementPayment): Promise<void>;
+  confirmSettlementPayment(paymentId: string): Promise<void>;
+  deleteSettlementPayment(paymentId: string): Promise<void>;
 };
 const GroupContext = createContext<GroupContextValue | null>(null);
 
 export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ owner: string; repo: string }>) {
   const { session, expire } = useSession();
-  const { state: groupsState, applyGroupSnapshot, recordConfirmedExpenseMutation, recordConfirmedSpendingPlanMutation, reconcileRemoteGroupSnapshot, removeGroup } = useGroups();
+  const { state: groupsState, applyGroupSnapshot, recordConfirmedExpenseMutation, recordConfirmedSpendingPlanMutation, recordConfirmedSettlementMutation, reconcileRemoteGroupSnapshot, removeGroup } = useGroups();
   const account = session.account;
   const key = `${owner.toLowerCase()}/${repo.toLowerCase()}` as GroupKey;
   const descriptor = groupsState.data.find((group) => group.key === key);
@@ -68,7 +72,10 @@ export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ own
     patchState((value) => ({ ...value, status: value.data ? 'ready' : 'loading', isRefreshing: true, error: null }));
     const operation = (async () => {
       try {
-        const snapshot = reconcileRemoteGroupSnapshot(await githubGateway.refreshGroup(currentDescriptor.repository, account.login));
+        const startedAtRevision = snapshotRevision.current;
+        const remote = await githubGateway.refreshGroup(currentDescriptor.repository, account.login);
+        if (snapshotRevision.current !== startedAtRevision && stateRef.current.data) return stateRef.current.data;
+        const snapshot = reconcileRemoteGroupSnapshot(remote);
         snapshotRevision.current += 1;
         setAccessLost(false);
         replaceState({ data: snapshot, status: 'ready', isRefreshing: false, lastSuccessfulAt: snapshot.syncedAt, error: null });
@@ -187,7 +194,64 @@ export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ own
     await applyGroupSnapshot(snapshot);
   }, [account, applyGroupSnapshot, replaceState]);
 
-  const value = useMemo(() => ({ state, accessLost, refresh, invite, createExpense, updateExpense, deleteExpense, updateSpendingPlan, removeSpendingPlan, acceptSpendingPlanFile }), [acceptSpendingPlanFile, accessLost, createExpense, deleteExpense, invite, refresh, removeSpendingPlan, state, updateExpense, updateSpendingPlan]);
+  const commitSettlementMutation = useCallback(async (ledger: SettlementLedgerState) => {
+    const current = stateRef.current.data;
+    if (!current) throw new DomainValidationError('Refresh the group before changing settlement payments.');
+    recordConfirmedSettlementMutation(key, ledger);
+    const snapshot = withSettlementLedger(current, ledger, systemClock.now().toISOString());
+    snapshotRevision.current += 1;
+    replaceState({ data: snapshot, status: 'ready', isRefreshing: false, lastSuccessfulAt: snapshot.syncedAt, error: null });
+    try { await applyGroupSnapshot(snapshot); }
+    catch { patchState((value) => ({ ...value, error: 'Payment saved, but the offline cache could not be updated.' })); }
+  }, [applyGroupSnapshot, key, patchState, recordConfirmedSettlementMutation, replaceState]);
+
+  const recordSettlementPayment = useCallback(async (payment: SettlementPayment) => {
+    if (!account) throw new DomainValidationError('Sign in to record a payment.');
+    const current = await refresh();
+    if (!current.repository.canWrite || !current.members.some((member) => normalizeLogin(member.login) === normalizeLogin(account.login))) {
+      throw new DomainValidationError('Only an accepted group member with write access can record settlement payments.');
+    }
+    const ledger = current.settlementLedger ?? { kind: 'unverified' as const };
+    let file;
+    try {
+      file = await githubGateway.recordSettlementPayment(current.repository, ledger, payment, {
+        currency: current.group.currency,
+        expenses: current.expenses.map((item) => item.expense),
+        members: current.members,
+      });
+    } catch (error) {
+      if (error instanceof AppFailure && error.detail.kind === 'settlement_stale') await refresh().catch(() => undefined);
+      throw error;
+    }
+    await commitSettlementMutation({ kind: 'ready', file });
+  }, [account, commitSettlementMutation, refresh]);
+
+  const confirmSettlementPayment = useCallback(async (paymentId: string) => {
+    if (!account) throw new DomainValidationError('Sign in to confirm a payment.');
+    const current = await refresh();
+    if (!current.repository.canWrite || !current.members.some((member) => normalizeLogin(member.login) === normalizeLogin(account.login))) {
+      throw new AppFailure({ kind: 'settlement_confirmation_unauthorized' });
+    }
+    const ledger = current.settlementLedger;
+    if (ledger?.kind !== 'ready') throw new AppFailure({ kind: 'settlement_ledger_invalid' });
+    const payment = ledger.file.payments.find((item) => item.id === paymentId);
+    if (!payment || normalizeLogin(payment.to) !== normalizeLogin(account.login)) throw new AppFailure({ kind: 'settlement_confirmation_unauthorized' });
+    const file = await githubGateway.confirmSettlementPayment(current.repository, ledger.file, paymentId, account.login, systemClock.now().toISOString());
+    await commitSettlementMutation({ kind: 'ready', file });
+  }, [account, commitSettlementMutation, refresh]);
+
+  const deleteSettlementPayment = useCallback(async (paymentId: string) => {
+    if (!account) throw new DomainValidationError('Sign in to delete a payment.');
+    const current = await refresh();
+    if (!current.repository.canWrite || !current.members.some((member) => normalizeLogin(member.login) === normalizeLogin(account.login))) {
+      throw new DomainValidationError('Only an accepted group member with write access can delete settlement payments.');
+    }
+    const ledger = current.settlementLedger;
+    if (ledger?.kind !== 'ready') throw new AppFailure({ kind: 'settlement_ledger_invalid' });
+    await commitSettlementMutation(await githubGateway.deleteSettlementPayment(current.repository, ledger.file, paymentId));
+  }, [account, commitSettlementMutation, refresh]);
+
+  const value = useMemo(() => ({ state, accessLost, refresh, invite, createExpense, updateExpense, deleteExpense, updateSpendingPlan, removeSpendingPlan, acceptSpendingPlanFile, recordSettlementPayment, confirmSettlementPayment, deleteSettlementPayment }), [acceptSpendingPlanFile, accessLost, confirmSettlementPayment, createExpense, deleteExpense, deleteSettlementPayment, invite, recordSettlementPayment, refresh, removeSpendingPlan, state, updateExpense, updateSpendingPlan]);
   return <GroupContext.Provider value={value}>{children}</GroupContext.Provider>;
 }
 

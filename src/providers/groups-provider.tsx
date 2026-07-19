@@ -1,11 +1,12 @@
 import { createContext, type PropsWithChildren, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { AppFailure, DomainValidationError, messageForError } from '@/domain/errors';
-import { groupKey, type CurrencyCode, type DiscoveredGroup, type GroupFile, type PendingGroupCreation, type RemoteGroupSnapshot } from '@/domain/types';
+import { groupKey, type CurrencyCode, type DiscoveredGroup, type GroupFile, type PendingGroupCreation, type RemoteGroupSnapshot, type SettlementLedgerState } from '@/domain/types';
 import { githubGateway, snapshotStore, systemClock, systemLocalCalendar } from '@/infrastructure/runtime';
 import { type ConfirmedExpenseMutation, reconcileConfirmedExpenseMutations, withGroupFile } from '@/features/expenses/snapshot-reconciliation';
 import { calculateGroupAggregates, type GroupAggregate } from '@/features/groups/summaries';
 import { createGroupRepository } from '@/features/groups/create-group';
+import { withSettlementLedger } from '@/features/settlements/snapshot-reconciliation';
 
 import { isTerminalAuthError, useSession } from './session-provider';
 import type { ResourceState } from './resource';
@@ -22,6 +23,7 @@ type GroupsContextValue = {
   applyGroupSnapshot(snapshot: RemoteGroupSnapshot): Promise<void>;
   recordConfirmedExpenseMutation(key: string, mutation: ConfirmedExpenseMutation): void;
   recordConfirmedSpendingPlanMutation(key: string, file: GroupFile): void;
+  recordConfirmedSettlementMutation(key: string, ledger: SettlementLedgerState): void;
   reconcileRemoteGroupSnapshot(snapshot: RemoteGroupSnapshot): RemoteGroupSnapshot;
   removeGroup(key: string): Promise<void>;
 };
@@ -40,6 +42,7 @@ export function GroupsProvider({ children }: PropsWithChildren) {
   const inFlight = useRef<Promise<DiscoveredGroup[]> | null>(null);
   const confirmedMutations = useRef(new Map<string, Map<string, ConfirmedExpenseMutation>>());
   const confirmedSpendingPlans = useRef(new Map<string, GroupFile>());
+  const confirmedSettlementLedgers = useRef(new Map<string, SettlementLedgerState>());
 
   const replaceState = useCallback((next: ResourceState<DiscoveredGroup[]>) => {
     stateRef.current = next;
@@ -52,7 +55,7 @@ export function GroupsProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     if (!account) {
-      queueMicrotask(() => { confirmedMutations.current.clear(); confirmedSpendingPlans.current.clear(); replaceState(initial); setPendingCreation(null); });
+      queueMicrotask(() => { confirmedMutations.current.clear(); confirmedSpendingPlans.current.clear(); confirmedSettlementLedgers.current.clear(); replaceState(initial); setPendingCreation(null); });
       return;
     }
     let active = true;
@@ -113,6 +116,10 @@ export function GroupsProvider({ children }: PropsWithChildren) {
     confirmedSpendingPlans.current.set(key, file);
   }, []);
 
+  const recordConfirmedSettlementMutation = useCallback((key: string, ledger: SettlementLedgerState) => {
+    confirmedSettlementLedgers.current.set(key, ledger);
+  }, []);
+
   const reconcileRemoteGroupSnapshot = useCallback((snapshot: RemoteGroupSnapshot) => {
     const mutations = confirmedMutations.current.get(snapshot.key);
     let reconciled = mutations && account ? reconcileConfirmedExpenseMutations(snapshot, mutations, account.login, systemLocalCalendar.today()) : snapshot;
@@ -121,6 +128,13 @@ export function GroupsProvider({ children }: PropsWithChildren) {
     if (confirmedPlan && account) {
       if (snapshot.groupFile?.blobSha === confirmedPlan.blobSha) confirmedSpendingPlans.current.delete(snapshot.key);
       else reconciled = withGroupFile(reconciled, confirmedPlan, account.login, systemLocalCalendar.today(), reconciled.syncedAt);
+    }
+    const confirmedLedger = confirmedSettlementLedgers.current.get(snapshot.key);
+    if (confirmedLedger && account) {
+      const remoteSha = snapshot.settlementLedger?.kind === 'ready' ? snapshot.settlementLedger.file.blobSha : null;
+      const confirmedSha = confirmedLedger.kind === 'ready' ? confirmedLedger.file.blobSha : null;
+      if (remoteSha === confirmedSha && snapshot.settlementLedger?.kind === confirmedLedger.kind) confirmedSettlementLedgers.current.delete(snapshot.key);
+      else reconciled = withSettlementLedger(reconciled, confirmedLedger, reconciled.syncedAt);
     }
     return reconciled;
   }, [account]);
@@ -156,6 +170,7 @@ export function GroupsProvider({ children }: PropsWithChildren) {
     if (!account) return;
     confirmedMutations.current.delete(key);
     confirmedSpendingPlans.current.delete(key);
+    confirmedSettlementLedgers.current.delete(key);
     const groups = stateRef.current.data.filter((group) => group.key !== key);
     patchState((value) => ({ ...value, data: groups }));
     await Promise.all([
@@ -166,7 +181,7 @@ export function GroupsProvider({ children }: PropsWithChildren) {
 
   const aggregates = useMemo(() => calculateGroupAggregates(state.data), [state.data]);
 
-  const value = useMemo<GroupsContextValue>(() => ({ state, aggregates, hasInstallation, canCreateGroups, pendingCreation, refresh, createGroup, retryPendingCreation, applyGroupSnapshot, recordConfirmedExpenseMutation, recordConfirmedSpendingPlanMutation, reconcileRemoteGroupSnapshot, removeGroup }), [aggregates, applyGroupSnapshot, canCreateGroups, createGroup, hasInstallation, pendingCreation, reconcileRemoteGroupSnapshot, recordConfirmedExpenseMutation, recordConfirmedSpendingPlanMutation, refresh, removeGroup, retryPendingCreation, state]);
+  const value = useMemo<GroupsContextValue>(() => ({ state, aggregates, hasInstallation, canCreateGroups, pendingCreation, refresh, createGroup, retryPendingCreation, applyGroupSnapshot, recordConfirmedExpenseMutation, recordConfirmedSpendingPlanMutation, recordConfirmedSettlementMutation, reconcileRemoteGroupSnapshot, removeGroup }), [aggregates, applyGroupSnapshot, canCreateGroups, createGroup, hasInstallation, pendingCreation, reconcileRemoteGroupSnapshot, recordConfirmedExpenseMutation, recordConfirmedSettlementMutation, recordConfirmedSpendingPlanMutation, refresh, removeGroup, retryPendingCreation, state]);
   return <GroupsContext.Provider value={value}>{children}</GroupsContext.Provider>;
 }
 

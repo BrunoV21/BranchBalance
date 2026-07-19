@@ -64,6 +64,12 @@ Use at least two physical app sessions signed in as different GitHub accounts.
 21. Combine category, payment-method, payer, and shared/Just me filters; verify logical-AND results and the explicit empty state without changing stored expenses.
 22. Edit the spending plan from both sessions. The stale session must preserve its draft, show the latest remote plan, and require an explicit reapply or discard choice.
 23. Refresh both sessions and confirm identical spending totals and budget states. Inspect the UI and persisted JSON to confirm no card number, suffix, bank, account, or wallet identifier is requested or stored.
+24. From a current suggested settlement, record a partial payment with a note containing an invented receipt reference and external transaction ID. Confirm the form warns that repository members and Git history can retain the note and advises against authentication secrets.
+25. On both sessions, confirm the payment is Pending, the matching amount is shown as Awaiting confirmation, the unreserved amount is reduced, and every net balance and spending total remains unchanged.
+26. Verify the sender, recorder, repository owner, and an unrelated member cannot confirm the pending payment. Sign in as the named recipient, review the complete note, confirm receipt, and verify settlement-sent/received totals, net balances, and suggestions update identically on both sessions.
+27. Record and confirm the remainder, verify All settled retains payment history, then delete one confirmed payment and confirm balances and suggestions are restored without changing expense or spending totals.
+28. Race two sessions against the same unreserved suggestion. Confirm only payments within the remaining availability commit, the stale draft retains its amount/date/note for correction, and no duplicate UUID appears in `settlements.json`.
+29. Inspect AsyncStorage or a test-device cache export and confirm settlement notes and passthrough ledger content are absent. Confirm the note exists only in `settlements.json`/Git history and is rendered as selectable plain text without an automatic link action.
 
 ## Local APK
 

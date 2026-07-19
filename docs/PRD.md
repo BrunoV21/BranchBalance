@@ -1,14 +1,14 @@
 # BranchBalance — Phase 1 Product Requirements Document
 
-**Status:** Phase 1 and CR-001 implemented; physical-device acceptance pending
+**Status:** Phase 1, CR-001, and CR-002 implemented; physical-device acceptance pending
 
-**Last updated:** 2026-07-18
+**Last updated:** 2026-07-19
 
 **Platform:** Android
 
 **Repository prefix:** `branch-balance`
 
-**Active change requests:** CR-001 — Trip and group spending intelligence
+**Active change requests:** None; CR-001 and CR-002 are implemented
 
 ## 1. Product summary
 
@@ -442,7 +442,6 @@ Run the complete Phase 1 goal with two real GitHub accounts and at least two phy
 
 - Offline-first local Git clone and `isomorphic-git` synchronization
 - Immutable revision/tombstone events for offline-safe edits and deletes
-- Settlement recording
 - Exact-amount and percentage splits
 - Multi-currency groups and FX conversion
 - Member removal and group deletion
@@ -801,7 +800,329 @@ The manual two-account Android test must add a budget and trip dates, record car
 
 These remain candidates for later product changes and require separate requirements before implementation.
 
-## 17. Technical references
+## 17. Change request CR-002 — Settlement payment recording
+
+**Status:** Implemented; physical two-account acceptance pending
+
+**Requested:** 2026-07-19
+
+**Target:** Next post-v1.0.0 product increment; release name to be decided
+
+### 17.1 Context and motivation
+
+Phase 1 and CR-001 derive deterministic suggested settlements from expenses, but they cannot record that money has actually moved. A group that follows a suggestion therefore continues to show the same debt, has no shared payment history, and must adjust balances outside BranchBalance.
+
+CR-002 closes that loop. It lets a member record all or part of a current suggested settlement as pending, requires the named recipient to confirm that the money was received before balances change, and retains a clear history that every member can review.
+
+This change is additive. It does not initiate a bank, card, cash, or wallet transfer. It records a transfer that happened elsewhere and does not alter expense documents, expense shares, spending totals, budgets, categories, or payment-method analytics.
+
+### 17.2 Product outcome
+
+The Balances experience must move from advice-only settlement text to an actionable and auditable workflow:
+
+1. BranchBalance derives the current suggested transfers from expenses and previously recorded settlement payments.
+2. A member opens one suggestion and records its full amount or a smaller positive partial amount.
+3. The app reviews the sender, recipient, amount, payment date, and optional note before creating a pending payment.
+4. The recipient reviews the pending payment and explicitly confirms that the money was received.
+5. Only that confirmation changes balances and the remaining suggestions.
+6. Every member can review pending and confirmed payment history and remove an incorrect record.
+
+### 17.3 Confirmed decisions
+
+| Area | Decision |
+|---|---|
+| Creation entry point | A payment is recorded from a current suggested settlement; CR-002 does not provide an arbitrary member-to-member transfer form |
+| Amount | Prefill the full unreserved suggestion amount and allow a smaller positive partial amount |
+| Overpayment | Reject an amount above the current suggested amount after pending reservations for that sender and recipient are subtracted |
+| Confirmation | Every new payment is pending and affects balances only after the named recipient confirms receipt |
+| Permissions | Any accepted member with repository write access may record or delete a payment; only the current accepted recipient may confirm it |
+| Sender and recipient | Fixed by the selected suggestion and cannot be changed in the form |
+| Payment date | Default to the device-local current date; allow an earlier valid calendar date but not a future date |
+| Correction | Payments are not edited; delete the incorrect record and create a replacement from a current suggestion |
+| Balance impact | Only confirmed payments change net balances and future suggestions; pending and confirmed payments never change expense-paid totals, shares, group spending, or budgets |
+| Pending reservation | Pending amounts reserve the matching suggestion so multiple drafts cannot collectively exceed it |
+| Note | A payment may include optional free text for context or references to receipts, attachments, external transaction IDs, or financial-account identifiers |
+| History | All valid payments remain visible with status, sender, recipient, amount, payment date, note, recorder, recorded timestamp, and confirmation audit when applicable |
+| External money movement | BranchBalance records a transfer only; it never sends money or connects to a financial account |
+| Storage | One SHA-protected `settlements.json` ledger per group serializes concurrent payment writes |
+
+### 17.4 Record a settlement payment
+
+Each non-zero suggested settlement on the Balances screen exposes a **Record payment** action. Opening it creates a draft with:
+
+- Sender and recipient copied from the suggestion and displayed read-only
+- Amount prefilled with the suggestion's complete unreserved amount
+- Payment date defaulted from the device's local calendar date
+- Optional note for payment context or references
+
+The member may reduce the amount to record a partial payment. The amount uses the group's currency and the existing minor-unit parser. It must be positive, fit within `Number.MAX_SAFE_INTEGER`, and be no greater than the latest suggested amount after pending reservations for the same normalized sender and recipient are subtracted.
+
+The payment date must be a real `YYYY-MM-DD` calendar date and cannot be later than the device-local date at submission. A non-empty note is trimmed, may contain line breaks, and is limited to 2,000 Unicode characters. The review confirmation names the sender, recipient, formatted amount, payment date, and whether a note will be shared. Submission is disabled while the request is in flight.
+
+The note may contain plain-text details or references for a receipt or attachment, an external transaction ID, or a financial-account identifier. CR-002 does not upload binary files or add structured financial-account fields. Before saving a non-empty note, the UI warns that every repository member can read it and Git history may retain prior content after deletion. It must advise members not to enter passwords, PINs, CVVs, access tokens, recovery codes, or other authentication secrets. Note text renders as plain selectable text; URLs are not opened automatically.
+
+The authenticated GitHub login supplies `recorded_by`; the injected UTC clock supplies `recorded_at`; and the ID generator supplies one lowercase UUID v4. New records always use `status: pending` with no confirmation audit values. Form state cannot override status or audit values.
+
+After GitHub confirms the write, BranchBalance publishes the pending record without changing net balances. The matching amount becomes reserved, so the UI distinguishes the total amount still owed, the amount awaiting recipient confirmation, and any amount still available to record.
+
+#### 17.4.1 Pending and recipient confirmation
+
+The named recipient sees **Confirm received** on each pending payment whose normalized `to` login matches the authenticated account. No other member may confirm it, including the sender, recorder, or repository owner. The recipient must remain an accepted collaborator with write access.
+
+Confirmation shows the sender, amount, payment date, recorder, and complete optional note, then requires the recipient to affirm that the money was received outside BranchBalance. A successful confirmation changes the record to `confirmed`, sets `confirmed_by` from the authenticated recipient and `confirmed_at` from the injected UTC clock, and immediately recalculates balances and suggestions.
+
+Pending payments do not expire automatically. Any accepted member with write access may delete a pending payment after a deletion-confirmation dialog; the recipient may use the same action to reject an unreceived or incorrect payment. Deletion is the only rejection/cancellation representation in CR-002, with Git history retaining the audit trail.
+
+Confirmation does not reapply the original suggestion cap. The cap was enforced when the pending record was created, and confirmation records the recipient's statement that the transfer actually occurred. If later expenses or other confirmed payments changed the debt in the meantime, the confirmed historical payment still applies and may reverse the resulting balance direction.
+
+A repeated confirmation of an already-confirmed record by the same recipient is idempotent success. If the pending record was deleted, changed, or confirmed with different audit content, refresh and show a stale or conflict state; there is no force-confirm action.
+
+### 17.5 Balance and suggestion behavior
+
+Expense balances are calculated exactly as before. Each valid `confirmed` payment is then applied as a transfer from the debtor to the creditor; `pending` payments do not enter this calculation:
+
+```text
+balance[payment.from] += payment.amount_minor
+balance[payment.to] -= payment.amount_minor
+settlement_sent[payment.from] += payment.amount_minor
+settlement_received[payment.to] += payment.amount_minor
+```
+
+After every confirmed payment is applied, run the existing deterministic settlement simplification over the adjusted net balances. Separately sum pending amounts by normalized sender-recipient pair. For a matching suggestion:
+
+```text
+available_to_record = max(suggested_amount - pending_amount, 0)
+```
+
+Pending reservations do not change the displayed net debt. They appear alongside it as **Awaiting confirmation**, and Record payment is disabled when `available_to_record` is zero.
+
+The following invariants apply:
+
+- A pending or confirmed payment never changes `totalSpentMinor`, expense-paid totals, expense-share totals, spending summaries, category totals, payment-method totals, or budget progress.
+- Applying valid confirmed payments preserves the zero-sum balance invariant.
+- Historical logins referenced by a valid payment remain visible in balance and history data even if they are no longer accepted collaborators.
+- A new pending record is allowed only for a sender-recipient pair in the latest suggestion set and cannot exceed that suggestion after existing pending reservations are subtracted.
+- A later expense add, edit, or delete does not erase or invalidate a historical payment. It may change or reverse who owes whom, and the next deterministic suggestions reflect the new combined state.
+- Deleted and invalid ledger entries do not affect balances.
+
+Member rows continue to show expense-paid and expense-share totals and additionally expose confirmed settlement sent and settlement received totals. Pending amounts are labelled separately and never enter those totals. Labels must keep these concepts distinct so a pending claim or confirmed transfer is never presented as group spending.
+
+### 17.6 Settlement history and correction
+
+The Balances screen includes a **Payment history** section below current suggestions. It is sorted by `paid_on` descending, then `recorded_at` descending, then `id` ascending. Every row shows:
+
+- Pending or Confirmed status
+- Sender and recipient
+- Amount and group currency
+- Payment date
+- Optional note in full, with an explicit shared-sensitive-data label when present
+- The GitHub login that recorded it
+- Recorded timestamp
+- Confirming recipient and confirmation timestamp for a confirmed payment
+
+Pending payments are also grouped in an **Awaiting confirmation** section. A recipient-facing item exposes Confirm received; other members see who must confirm it. An empty ledger shows an explicit no-payments state without hiding current suggestions.
+
+Any accepted member with write access may delete a payment after a confirmation that names its status, sender, recipient, amount, and date. Deleting a pending payment releases its reservation without changing net balances. Deleting a confirmed payment immediately recomputes balances and suggestions. Both leave Git history as the repository audit trail. There is no edit action and no in-app restore action in CR-002.
+
+If the payment is already absent after an ambiguous or concurrent delete, treat the requested deletion as successful after confirming the latest ledger from GitHub.
+
+### 17.7 Persistence changes
+
+The group repository gains one optional root-level ledger:
+
+```text
+branch-balance-<group-slug>/
+├── group.json
+├── settlements.json
+└── expenses/
+    └── <uuid>.json
+```
+
+A group without `settlements.json` has no recorded payments and remains fully valid. The file is created when the first payment is recorded and uses this shape:
+
+```json
+{
+  "schema_version": 1,
+  "payments": [
+    {
+      "id": "8f6cdb85-4677-44af-8d16-e6f70ea54b8a",
+      "from": "monalisa",
+      "to": "octocat",
+      "amount_minor": 2350,
+      "currency": "EUR",
+      "paid_on": "2026-07-19",
+      "note": "Bank transfer. Receipt reference: trip-folder/receipt-42. External transaction ID: TX-48391.",
+      "status": "pending",
+      "recorded_by": "monalisa",
+      "recorded_at": "2026-07-19T15:24:00Z",
+      "confirmed_by": null,
+      "confirmed_at": null
+    }
+  ]
+}
+```
+
+Ledger rules:
+
+- `schema_version` equals `1` and `payments` is an array.
+- Each `id` is a unique lowercase UUID v4 within the ledger.
+- `from`, `to`, and `recorded_by` are non-empty GitHub logins; sender and recipient differ after case-insensitive normalization.
+- `amount_minor` is a positive safe integer.
+- `currency` equals the group's currency.
+- `paid_on` is a valid calendar date and `recorded_at` is a valid UTC ISO 8601 instant.
+- `note` is optional. When present it is trimmed, non-empty, at most 2,000 Unicode characters, and stored as plain text without automatic URL or markup interpretation.
+- `status` is exactly `pending` or `confirmed`.
+- A pending payment has `confirmed_by: null` and `confirmed_at: null`.
+- A confirmed payment has `confirmed_by` equal to `to` after case-insensitive normalization and a valid UTC `confirmed_at` instant that is not earlier than `recorded_at`.
+- New writers reject a future `paid_on`; readers do not make persisted validity depend on the device's current date.
+- Array order is not meaningful. Presentation and balance derivation use the deterministic ordering defined in this change request.
+- Unknown fields are ignored by calculations and preserved by writers for forward compatibility.
+- Invalid individual entries are excluded from balances and history and produce safe warnings identifying their array position or ID. One bad entry does not hide other valid payments.
+- A malformed top-level ledger produces a data warning, contributes no payments, and blocks ledger mutation until the file is repaired or removed outside the app.
+
+### 17.8 Synchronization and concurrency
+
+`settlements.json` is one ledger rather than one file per payment so concurrent clients cannot create overlapping pending reservations or confirm the same payment without a shared optimistic-concurrency boundary.
+
+A payment submission follows this sequence:
+
+1. Refresh or read the latest expense set and settlement ledger.
+2. Apply confirmed payments, recalculate current suggestions, and sum pending reservations by pair.
+3. Verify that the selected normalized sender-recipient pair still exists and that the requested amount does not exceed its unreserved remainder.
+4. Append the intended pending record, including its optional note, while preserving unknown fields and include the ledger's current blob SHA in the Contents API write.
+5. If the ledger does not exist, create it without a SHA.
+6. On a stale-SHA or concurrent-create response, fetch the latest ledger, rederive suggestions, and retry only if the requested payment is still valid.
+
+If the pair disappeared or its unreserved amount fell below the draft, reject the write with a stale-settlement state, preserve the entered date, amount, and note, show the refreshed maximum, and let the member adjust or cancel. There is no force-write action.
+
+A concurrent expense mutation may change balances after a pending payment was validated. If the recipient later confirms it, the payment becomes a historical fact and the next refresh derives the resulting balance direction as described in section 17.5.
+
+For a timeout or otherwise ambiguous append, read the ledger. An entry with the intended UUID and exact semantic content confirms success. An unchanged ledger is safe to retry. The same UUID with different content is a data conflict.
+
+Recipient confirmation uses the same ledger SHA and updates only the targeted payment's status and confirmation audit fields. Before writing, refresh the ledger, require the authenticated normalized login to match `to`, and require the record to remain pending. A stale SHA reloads and retries when the same record is still pending. The exact already-confirmed state is idempotent success only when `confirmed_by` matches the recipient; deletion or different confirmation content returns a stale or conflict state. Confirmation never changes the payment note.
+
+Deletes use the same ledger SHA. On conflict, fetch the latest ledger and retry removal if the ID still exists; absence is success. Generic retries must never append a second payment with a new UUID.
+
+Refresh, foreground, focus, and pull-to-refresh continue to use one coalesced group refresh. Expenses, pending reservations, confirmed payments, balances, suggestions, history, warnings, and spending summaries publish as one snapshot so tabs cannot display mixed generations.
+
+### 17.9 Balances experience
+
+The existing Balances tab remains the owner of member totals, adjusted net balances, current suggestions, and payment history.
+
+- Suggested-settlement cards show sender, recipient, amount still owed, amount awaiting confirmation, amount available to record, and **Record payment** when availability is positive.
+- The record form distinguishes full and partial payments, accepts the optional shared note, and never implies that BranchBalance will transfer money.
+- A stale suggestion preserves the member's amount, date, and note and shows the new available maximum.
+- Pending items show **Confirm received** only to the recipient and identify that recipient to everyone else.
+- After a successful create, confirmation, or deletion, an accessible status announces the new state and any adjusted remaining balance.
+- **Awaiting confirmation** replaces **All settled** when the entire current debt is reserved by pending payments. **All settled** requires no adjusted debt and no pending reservations; payment history remains available.
+- Warnings and money meaning use text and do not rely on colour alone.
+
+Overview may continue to show a compact quick-settlement card derived from the adjusted balances. Spending screens remain unchanged because settlement payments are not expenses.
+
+### 17.10 User stories
+
+#### US-CR002-01 — Record a full payment
+
+As a group member, I want to record the full suggested transfer so that the recipient can confirm it was received.
+
+#### US-CR002-02 — Record a partial payment
+
+As a group member, I want to record less than the suggested amount so that the pending amount is reserved and the unreserved debt stays visible.
+
+#### US-CR002-03 — Confirm receipt
+
+As the named recipient, I want to confirm that a pending payment was received so that it affects the group's balances only after my acknowledgement.
+
+#### US-CR002-04 — Add payment context
+
+As a group member, I want to add an optional shared note containing payment context or references such as a receipt, attachment, external transaction ID, or account identifier so that the recipient can identify the transfer.
+
+#### US-CR002-05 — Review payment history
+
+As a group member, I want to see pending and confirmed status, who paid whom, how much, when, the optional note, and both audit identities so that the shared balance is explainable.
+
+#### US-CR002-06 — Correct a mistaken payment
+
+As a group member, I want to delete an incorrect pending or confirmed payment so that reservations or balances can be recalculated from accurate history.
+
+#### US-CR002-07 — Avoid duplicate or excessive payment
+
+As a group member, I want the app to recheck pending reservations when another device changes the ledger so that we do not accidentally record more than the unreserved debt.
+
+#### US-CR002-08 — Continue using an existing group
+
+As a member of a group created before CR-002, I want it to load normally with no payment history until someone records the first settlement.
+
+### 17.11 Acceptance criteria
+
+- [x] CR-001 and CR-002 are explicitly identified as implemented.
+- [x] Every current suggested settlement exposes a Record payment action to accepted write-enabled members.
+- [x] The form fixes sender and recipient, prefills the full unreserved suggestion, permits a smaller positive amount, and accepts an optional note up to 2,000 characters.
+- [x] Zero, negative, unsafe, malformed, future-dated, and above-unreserved-availability submissions are rejected.
+- [x] Every new payment is pending, reserves its amount, and leaves net balances unchanged.
+- [x] Only the current accepted recipient can confirm receipt; sender, recorder, owner, and unrelated members cannot confirm it.
+- [x] Recipient confirmation records confirmation audit fields and immediately applies the payment.
+- [x] A confirmed full payment removes or reshapes the affected suggestion and a confirmed partial payment leaves the correct adjusted remainder.
+- [x] Confirmed payments update net balances, settlement-sent/received totals, and future suggestions without changing any expense or spending total.
+- [x] Pending reservations prevent concurrent drafts from collectively exceeding the current suggestion.
+- [x] Missing `settlements.json` loads as an empty history and the first payment creates it.
+- [x] Valid historical payments remain effective after later expense changes.
+- [x] Payment history uses deterministic ordering and shows status, sender, recipient, amount, payment date, optional note, recording audit, and confirmation audit when applicable.
+- [x] Any accepted member with write access can delete a pending or confirmed payment; reservations or balances update immediately as appropriate.
+- [x] Concurrent payment appends cannot both consume the same stale suggested amount.
+- [x] A stale payment draft preserves amount, date, and note and shows the refreshed maximum without a force-write option.
+- [x] Concurrent and ambiguous confirmation is idempotent for the recipient and never confirms a deleted or changed record.
+- [x] Ambiguous writes do not create duplicate payment records.
+- [x] Invalid ledger entries are warned about and excluded without hiding other valid entries.
+- [x] Existing groups, expenses, spending plans, caches, and balance behavior remain compatible when no ledger exists.
+- [x] Notes can contain plain-text receipt/attachment references, external transaction IDs, or financial-account identifiers and are visibly identified as shared repository data.
+- [x] Notes never enter logs, analytics, commit messages, user-visible errors, or persistent local snapshot caches.
+- [x] The UI warns against authentication secrets and CR-002 never initiates money movement or connects to a financial account.
+- [ ] Two Android sessions reading the same repository derive identical payment history, balances, and suggestions after refresh.
+
+### 17.12 Test requirements
+
+Unit coverage must include:
+
+- Ledger and payment schema validation, pending/confirmed cross-field rules, duplicate IDs, normalized logins, safe integers, currency matching, note length, and invalid-entry isolation
+- Applying only confirmed payments while pending payments reserve suggestion capacity and preserve expense and spending totals
+- Deterministic balance, reservation, suggestion, and history ordering
+- Historical-member seeding and zero-sum integrity
+- Unreserved-amount validation, recipient-only confirmation, idempotent confirmation, and a later expense edit that reverses the debt direction
+- Payment-date parsing and writer rejection of future dates
+
+Integration coverage with mocked GitHub responses must include:
+
+- Refresh with a missing, empty, valid, partially invalid, and malformed ledger
+- First-file creation as pending and immediate reservation reconciliation without a balance change
+- Full and partial pending append writes with notes, SHA replacement, and passthrough preservation
+- Recipient confirmation, unauthorized confirmation, SHA retry, idempotent recovery, and confirmation conflicts
+- Concurrent append retry when the pending reservation remains valid and stale rejection when it does not
+- Ambiguous append recovery by stable UUID without duplication
+- Successful, concurrent, ambiguous, and already-absent deletion for pending and confirmed records
+- Expense and payment mutations racing while the final snapshot remains internally consistent
+- Legacy cache hydration, note redaction from persistent cache, and refresh of an existing remote ledger
+
+Component and navigation coverage must include current suggestions, pending reservations, the full/partial form, read-only sender and recipient, sensitive-note warning, plain-text note rendering, recipient-only confirmation, accessible status, stale-draft recovery, history ordering, delete confirmation, empty history, Awaiting confirmation, All settled with retained history, and safe warnings.
+
+The manual two-account Android test must record a partial pending payment with a note on one device, verify that balances remain unchanged and the amount is reserved on the other, confirm receipt as the recipient, and observe the adjusted suggestion on both. It must then record and confirm the remainder, delete one payment, verify identical balances and history, and race two submissions against one suggestion so the stale device cannot over-reserve or create a duplicate.
+
+### 17.13 Explicitly deferred from CR-002
+
+- Initiating bank, card, wallet, cash, or payment-provider transfers
+- Arbitrary transfers that are not based on a current suggestion
+- Overpayments that intentionally reverse a current debt
+- Editing payment records in place
+- Binary receipt or attachment uploads; CR-002 stores only plain-text details or references in `note`
+- Structured external-transaction or financial-account fields separate from the optional note
+- Per-expense settlement allocation
+- Recurring or scheduled payments
+- Push notifications or payment reminders
+- Offline settlement writes and offline conflict resolution
+
+These require separate product and security requirements before implementation.
+
+## 18. Technical references
 
 - [Generating a user access token for a GitHub App](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)
 - [Refreshing GitHub App user access tokens](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/refreshing-user-access-tokens)

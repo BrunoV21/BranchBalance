@@ -96,6 +96,8 @@ export interface MemberBalance {
   login: string;
   totalPaidMinor: number;
   totalShareMinor: number;
+  settlementSentMinor: number;
+  settlementReceivedMinor: number;
   netMinor: number;
   currentMember: boolean;
 }
@@ -106,11 +108,56 @@ export interface BalanceResult {
   zeroSum: boolean;
 }
 
-export interface Settlement {
+export interface SuggestedSettlement {
   from: string;
   to: string;
   amountMinor: number;
 }
+
+export interface SettlementPayment {
+  id: string;
+  from: string;
+  to: string;
+  amount_minor: number;
+  currency: CurrencyCode;
+  paid_on: CalendarDate;
+  note?: string;
+  status: 'pending' | 'confirmed';
+  recorded_by: string;
+  recorded_at: IsoInstant;
+  confirmed_by: string | null;
+  confirmed_at: IsoInstant | null;
+}
+
+export interface SettlementReservation {
+  from: string;
+  to: string;
+  pendingMinor: number;
+  availableToRecordMinor: number;
+}
+
+export interface SettlementLedgerFile {
+  payments: SettlementPayment[];
+  blobSha: string;
+  path: 'settlements.json';
+  sourceDocument: Record<string, unknown>;
+  warnings: DataWarning[];
+}
+
+export type SettlementLedgerState =
+  | { kind: 'unverified' }
+  | { kind: 'missing'; payments: [] }
+  | { kind: 'ready'; file: SettlementLedgerFile }
+  | { kind: 'invalid'; warning: DataWarning };
+
+export interface SettlementValidationBasis {
+  currency: CurrencyCode;
+  expenses: Expense[];
+  members: Member[];
+}
+
+/** @deprecated Recorded transfers use SettlementPayment; calculated advice uses SuggestedSettlement. */
+export type Settlement = SuggestedSettlement;
 
 export interface DataWarning {
   path: string;
@@ -169,7 +216,10 @@ export interface RemoteGroupSnapshot {
   pendingMembers: PendingMember[] | null;
   expenses: ExpenseFile[];
   balances: BalanceResult;
-  settlements: Settlement[];
+  settlements: SuggestedSettlement[];
+  settlementLedger?: SettlementLedgerState;
+  payments?: SettlementPayment[];
+  reservations?: SettlementReservation[];
   spending: SpendingSummary | null;
   warnings: DataWarning[];
   syncedAt: IsoInstant;
