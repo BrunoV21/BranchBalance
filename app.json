@@ -2,7 +2,7 @@
   "expo": {
     "name": "BranchBalance",
     "slug": "branchbalance",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "branchbalance",
@@ -12,7 +12,7 @@
     },
     "android": {
       "package": "com.branchbalance.app",
-      "versionCode": 2,
+      "versionCode": 3,
       "adaptiveIcon": {
         "backgroundColor": "#A9433B",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

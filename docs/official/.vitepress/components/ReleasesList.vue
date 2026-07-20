@@ -162,8 +162,8 @@ function readableDate(value: string) {
           <h2>What is in this release</h2>
           <div class="highlight-grid">
             <section class="highlight"><div class="point-icon">▣</div><h3>GitHub-backed groups</h3><p>Private repositories, collaborator invitations, and no BranchBalance application backend.</p></section>
-            <section class="highlight"><div class="point-icon">▤</div><h3>Payments and balances</h3><p>Record, confirm, and review settlement payments alongside deterministic balances.</p></section>
-            <section class="highlight"><div class="point-icon">▥</div><h3>Recent activity</h3><p>Catch up on changes observed while the app is active through a private on-device inbox.</p></section>
+            <section class="highlight"><div class="point-icon">▤</div><h3>Private receipt scanning</h3><p>Read receipt photos on the device and review detected expense details before saving.</p></section>
+            <section class="highlight"><div class="point-icon">▥</div><h3>Payments and balances</h3><p>Record, confirm, and review settlement payments alongside deterministic balances.</p></section>
             <section class="highlight"><div class="point-icon">◷</div><h3>Spending analytics</h3><p>Understand pace, daily and category mix, personal scope, and expense funding fairness.</p></section>
           </div>
           <div class="release-notes" v-html="latest.html" />
