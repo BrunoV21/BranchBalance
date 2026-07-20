@@ -200,6 +200,33 @@
     if (empty) empty.classList.toggle('hidden', visible !== 0);
   }
 
+  function applyReceiptPrefillMockup() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('source') !== 'receipt') return;
+    const form = document.querySelector('form.form');
+    if (!form) return;
+
+    const description = document.querySelector('#add-description');
+    const amount = document.querySelector('#add-amount');
+    const date = document.querySelector('#add-date');
+    if (!description || !amount || !date) return;
+
+    description.value = 'SUPERMARKET LISBOA';
+    amount.value = '43.27';
+    date.value = '2026-07-20';
+    [description, amount, date].forEach((input) => input.closest('.field')?.classList.add('detected-field'));
+    description.closest('.field')?.querySelector('label')?.insertAdjacentHTML('beforeend', '<span class="detected-badge">Detected · 97%</span>');
+    amount.closest('.field')?.querySelector('label')?.insertAdjacentHTML('beforeend', '<span class="detected-badge">Detected · 98%</span>');
+    date.closest('.field')?.querySelector('label')?.insertAdjacentHTML('beforeend', '<span class="detected-badge">Detected · 94%</span>');
+
+    form.querySelectorAll('input[name="category"], input[name="payment"]').forEach((input) => { input.checked = false; });
+    const equalShares = ['€10.82 share', '€10.82 share', '€10.82 share', '€10.81 share'];
+    form.querySelectorAll('[data-split-panel="equal"] .check-row small').forEach((value, index) => { value.textContent = equalShares[index] || 'Included'; });
+    form.querySelectorAll('[data-split-panel="full"] .check-row small').forEach((value) => { value.textContent = 'Owes €43.27'; });
+
+    form.insertAdjacentHTML('afterbegin', '<div class="callout scan-result-notice"><svg class="icon" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path><path d="m9 12 2 2 4-4"></path></svg><span class="scan-result-copy"><strong>Receipt read on this device.</strong><br>Description, amount and date were detected. Review every value before saving.<span class="scan-result-meta">EUR matches this group · receipt photo will not be attached</span></span><a class="scan-result-retake" href="13-scan-receipt.html">Retake</a></div><div class="callout scan-manual-note"><svg class="icon" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01"></path><circle cx="12" cy="12" r="9"></circle></svg><span><strong>Finish the manual choices.</strong><br>Category and payment method are never guessed from a receipt.</span></div>');
+  }
+
   document.addEventListener('change', (event) => {
     if (event.target.matches('[data-expense-filter]')) applyExpenseFilters();
   });
@@ -218,6 +245,7 @@
     }
   });
 
+  applyReceiptPrefillMockup();
   syncThemeIcons();
   applyExpenseFilters();
   syncActivityMockup();

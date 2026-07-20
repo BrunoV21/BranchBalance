@@ -1,14 +1,14 @@
 # BranchBalance — Phase 1 Product Requirements Document
 
-**Status:** Phase 1 and CR-001 through CR-005 implemented; CR-003 physical-device acceptance blocked by a known GitHub App token limitation and CR-004/CR-005 physical-device acceptance pending
+**Status:** Phase 1 and CR-001 through CR-005 implemented; CR-006 proposed for product and technical review; CR-003 physical-device acceptance blocked by a known GitHub App token limitation and CR-004/CR-005 physical-device acceptance pending
 
-**Last updated:** 2026-07-19
+**Last updated:** 2026-07-20
 
 **Platform:** Android
 
 **Repository prefix:** `branch-balance`
 
-**Active change requests:** None; CR-004 and CR-005 await physical-device acceptance
+**Active change requests:** CR-006 proposed; CR-004 and CR-005 await physical-device acceptance
 
 ## 1. Product summary
 
@@ -1843,7 +1843,259 @@ The manual physical-device test must use two Android app sessions reading the sa
 
 These require separate product and privacy decisions before implementation.
 
-## 21. Technical references
+## 21. Change request CR-006 — Private on-device receipt scanning
+
+**Status:** Proposed; product and technical review required before implementation
+
+**Requested:** 2026-07-20
+
+**Target:** Future product increment; Android-first delivery and release name to be decided
+
+### 21.1 Context and motivation
+
+Adding an expense currently requires members to transcribe the merchant, total, and date from a receipt. That is deliberate and reliable, but it adds friction at the moment a group is most likely to forget an expense or enter the wrong amount.
+
+CR-006 proposes an optional receipt-assisted path. A member photographs a paper receipt or selects an existing receipt image, BranchBalance reads it on the phone, and the normal **Add expense** form opens with trustworthy fields prefilled. The member remains responsible for reviewing, correcting, completing, and explicitly saving the expense.
+
+Receipts may contain names, addresses, tax identifiers, payment references, and itemized purchasing history. BranchBalance's privacy promise therefore applies to the entire scanning pipeline: receipt pixels and recognized text must not be sent to OpenAI, Paddle-hosted services, another OCR API, telemetry, the BranchBalance website, GitHub, or any other remote processor. PaddleOCR and any later fallback model run locally from open-source model artifacts shipped with or explicitly installed for the app.
+
+### 21.2 Product outcome
+
+Receipt scanning adds a faster entry path without creating a second expense workflow:
+
+1. The existing **Add expense** control becomes a split action with a compact camera segment on its right.
+2. The member can photograph a receipt or choose an image already on the device.
+3. BranchBalance prepares and reads the image locally and reports progress honestly.
+4. The existing **Add expense** form opens with eligible high-confidence values prefilled.
+5. Missing, ambiguous, inconsistent, or low-confidence values remain blank or are clearly marked for review.
+6. The member chooses the normal category, payment method, payer, and split, then explicitly saves.
+
+Scanning never creates or writes an expense automatically. The existing expense validation, integer minor-unit conversion, participant rules, GitHub write, and conflict/error behavior remain authoritative.
+
+### 21.3 Confirmed product decisions
+
+| Area | Decision |
+|---|---|
+| Privacy boundary | Receipt pixels, OCR blocks, parsed values, confidence values, and corrections remain on the device; no cloud OCR, cloud model, remote fallback, or receipt telemetry is permitted |
+| Entry point | Keep one primary **Add expense** control and add receipt scanning as a compact camera segment on its right, separated by a visible divider |
+| Image sources | Support a new photo and an existing image from the device photo library |
+| Primary engine | PaddleOCR mobile text detection and recognition models exported to ONNX and executed with ONNX Runtime Mobile |
+| Expense workflow | Reuse the existing Add expense form; there is no scan-only save path or separate scanned-expense type |
+| Eligible prefill | Merchant to Description, validated total to Amount, receipt date to Date, and detected currency only as a check against the group's fixed currency |
+| Manual fields | Category, payment method, payer, split type, and participants remain intentional member choices in the first increment |
+| Confidence | Low-confidence or conflicting fields are never silently accepted; they stay blank or receive an explicit review treatment |
+| Currency mismatch | A detected currency never changes the group currency and an amount in a different currency is not silently prefilled or converted |
+| Arithmetic | Subtotal, tax, tip, and total may be extracted to check consistency, but only the final validated total is eligible for the expense Amount field |
+| Confirmation | The member always sees an editable confirmation form and must tap **Save expense** before any GitHub write occurs |
+| Receipt persistence | Receipt images, crops, OCR output, and parser diagnostics are temporary local working data and are not stored in the group repository or attached to the expense |
+| Initial platform | CR-006 acceptance is Android-first, matching the current product scope; the native contract must remain portable to a later Swift/iOS implementation |
+| Offline behavior | Capture, OCR, parsing, and review work without network access; saving still follows BranchBalance's current online-only GitHub requirement |
+
+### 21.4 Capture and scan experience
+
+The Overview presents one split **Add expense** control. Its larger left segment opens manual entry; its compact right segment shows the camera icon and opens receipt scanning. A visible divider makes the two tap targets clear. The camera segment has the accessible name **Scan receipt** and a minimum touch target even though its visible treatment is icon-only.
+
+The receipt scanner:
+
+- Requests camera permission only after the member chooses the camera path.
+- Explains why access is needed and keeps **Choose from photos** available when camera access is denied.
+- Shows a portrait receipt guide, capture control, cancel/back action, and photo-library action.
+- Advises the member to place the full receipt on a contrasting surface with readable lighting.
+- Provides a retake action after capture and before leaving the scan surface when practical.
+- Uses progress copy such as **Preparing image**, **Reading text on this device**, and **Checking total** rather than implying a network upload.
+- Does not block the member from returning to manual entry after a scan error.
+
+Only one receipt is processed at a time. Leaving the flow cancels outstanding work where the native runtime supports cancellation and makes the temporary image eligible for immediate cleanup.
+
+### 21.5 OCR, parsing, and validation behavior
+
+The native OCR boundary returns image dimensions plus text blocks containing recognized text, confidence, and quadrilateral coordinates. The expense-specific parser remains deterministic application logic rather than model-generated free text.
+
+The first parser increment should support common English and Portuguese receipt labels and formats, including:
+
+- Total labels such as `TOTAL`, `AMOUNT DUE`, `A PAGAR`, and `VALOR TOTAL`
+- Tax labels such as `VAT`, `IVA`, `GST`, and `TAX`
+- Currency symbols/codes for the app's supported EUR, USD, and GBP group currencies
+- ISO dates and unambiguous common day/month/year or month/day/year receipt dates
+- Comma and period decimal conventions, including thousands separators
+
+Field selection uses recognized text, confidence, and position:
+
+- **Merchant:** prominent high-confidence text near the top, excluding dates, totals, tax identifiers, and generic receipt labels.
+- **Date:** a valid calendar date; an ambiguous numeric date is marked for review instead of guessed without sufficient locale evidence.
+- **Total:** a positive amount associated with a supported total label, weighted toward lower receipt positions and higher confidence. `SUBTOTAL` must not be mistaken for `TOTAL`.
+- **Currency:** explicit code or symbol when present; absence means unknown rather than automatically assigning the group currency to the OCR result.
+
+When subtotal is available, the scanner checks:
+
+```text
+subtotal + optional tax + optional tip ≈ total
+```
+
+The permitted difference is at most two minor units for the current supported currencies. A failed consistency check marks Amount for review. Parser output must pass a strict runtime schema before it can prefill the form; malformed native output fails safely and leaves the normal manual flow available.
+
+### 21.6 Prefilled expense review
+
+The scan result opens the normal Add expense screen with a local-scan notice at the top. Prefilled fields identify that they were detected and remain ordinary editable controls.
+
+- Description, Amount, and Date may be prefilled only when their individual checks pass.
+- The group currency remains fixed and visible.
+- A low-confidence field is blank or visibly flagged; warning copy names the field and the reason in plain language.
+- A currency mismatch leaves Amount blank and names both currencies without offering implicit foreign-exchange conversion.
+- Category and payment method start unselected, even if receipt words appear to suggest them.
+- Existing payer and split defaults continue to apply independently of OCR.
+- The temporary image is not required after the review form has been prepared. The UI does not imply that the receipt will be saved with the expense.
+
+The member can edit any prefilled value, abandon the draft, or save through the existing expense submission. BranchBalance does not learn from corrections or transmit them for model training.
+
+### 21.7 Privacy, security, and data lifecycle
+
+- No receipt pixel, recognized text, extracted value, confidence, or correction is included in GitHub requests except the final expense fields the member explicitly confirms under the existing expense schema.
+- No scan content is logged to JavaScript/native console output in release builds, crash breadcrumbs, analytics, or error-reporting payloads.
+- Source and prepared images use application cache storage, are excluded from backups, and are deleted on successful handoff, cancellation, failure, and a bounded stale-cache cleanup on later launch.
+- Screenshots and OS-level photo-library copies remain under operating-system/user control; BranchBalance does not claim to delete the member's original photo.
+- Model artifacts must have documented upstream source, version, license, checksum, supported languages, ONNX opset, and expected app-size/memory impact before they enter the repository or build pipeline.
+- The scanner does not extract, retain, or display full card numbers, bank-account identifiers, authentication secrets, or payment credentials. If OCR recognizes such text incidentally, it is discarded with the temporary OCR result.
+
+### 21.8 Technical direction and feasibility gate
+
+The proposed application stack is:
+
+```text
+React Native + TypeScript + Expo Development Build
+        ↓
+expo-camera / expo-image-picker / expo-image-manipulator
+        ↓
+local Expo native module
+        ↓
+Kotlin on Android; equivalent Swift boundary for a later iOS product target
+        ↓
+ONNX Runtime Mobile
+        ↓
+PaddleOCR mobile detection / recognition / optional orientation models
+        ↓
+deterministic TypeScript receipt parser + Zod validation
+        ↓
+existing editable Add expense form
+```
+
+Expo Go is not a supported scanner runtime because it cannot include the custom OCR module and model runtime. Development and acceptance therefore require an Expo Development Build. Adding or changing native inference code, model artifacts, or native dependencies requires rebuilding that client.
+
+Before implementation is approved, a representative physical-device spike must answer:
+
+- Model provenance, license compatibility, checksum, and reproducible Paddle-to-ONNX export path
+- Detection/recognition correctness for the chosen model pair and character dictionary
+- Cold and warm latency, peak memory, crash behavior, thermal impact, and APK-size increase on the oldest supported Android device
+- Quality on a privacy-safe fixture set containing English and Portuguese receipts, skew, shadows, long receipts, comma/period decimals, and low-contrast printing
+- Whether text-line orientation classification materially improves the benchmark enough to justify its size and latency
+- Whether the proposed ONNX operators work in the standard mobile runtime or justify a reduced custom runtime
+
+The spike may use synthetic or explicitly consented/redacted receipt fixtures. Real personal receipts must not be committed to the repository.
+
+### 21.9 Local VLM fallback decision
+
+A small local vision-language model is a possible second-stage fallback, not a cloud escape hatch and not a requirement for the first PaddleOCR increment.
+
+It may advance only if the PaddleOCR benchmark shows a material, documented failure class that deterministic parsing cannot address, and a separate review confirms:
+
+- Fully offline inference with network access disabled
+- Open-source code and model weights with redistribution terms compatible with BranchBalance
+- Acceptable APK/model size, memory, latency, battery, and minimum-device behavior
+- Structured schema-constrained output that still passes the same deterministic validation
+- Invocation only for unresolved fields, with no automatic save and no reduction in review safeguards
+
+If those conditions are not met, the fallback is manual entry. CR-006 forbids routing a failed local scan to a hosted VLM or OCR service.
+
+### 21.10 Error, empty, and accessibility states
+
+At minimum, provide explicit UI for:
+
+- Camera permission not determined, denied, or permanently denied
+- No camera available, with photo-library and manual-entry alternatives
+- Photo-library selection cancelled or inaccessible
+- Native OCR module unavailable because the app is running in Expo Go or an outdated development build
+- Required model artifacts missing or incompatible
+- Unsupported/corrupt image, image preparation failure, out-of-memory failure, and scan cancellation
+- No text detected, no reliable total, currency mismatch, ambiguous date, arithmetic inconsistency, and generally low confidence
+- Offline scan success followed by an online save failure, preserving the editable expense draft under the existing failure behavior
+
+TalkBack receives the scanner purpose, privacy statement, camera readiness, capture action, progress stage, and field-specific review warnings. Controls meet minimum touch targets, do not rely on icon or colour alone, and respect large text and reduced motion. The camera preview itself is decorative once the controls and framing guidance are announced.
+
+### 21.11 User stories
+
+#### US-CR006-01 — Start from a receipt
+
+As a group member, I want receipt scanning integrated into the Add expense control so that I can choose the faster entry path without competing primary buttons.
+
+#### US-CR006-02 — Keep my receipt private
+
+As a privacy-conscious member, I want receipt recognition to run entirely on my device so that purchase details are never exposed to a cloud OCR or model provider.
+
+#### US-CR006-03 — Review extracted values
+
+As a member, I want reliable receipt values prefilled in the normal form and uncertain values clearly identified so that I can correct mistakes before saving.
+
+#### US-CR006-04 — Recover from scan failure
+
+As a member with a damaged or unsupported receipt, I want to retake, choose another image, or continue manually so that OCR never blocks expense creation.
+
+#### US-CR006-05 — Use assistive technology
+
+As a TalkBack or large-text user, I want labelled scanner controls and text-based review warnings so that receipt entry does not depend on seeing the camera frame or confidence colour.
+
+### 21.12 Acceptance criteria
+
+- [ ] The group Overview exposes one split Add expense control with a larger labelled manual-entry segment and a divider-separated camera segment on its right whose accessible name is Scan receipt.
+- [ ] A member can take a photo or select an existing image and can return to manual entry at every recoverable failure state.
+- [ ] Image preparation constrains the maximum dimension, normalizes orientation, and avoids retaining unnecessary duplicate files.
+- [ ] OCR detection and recognition execute on the Android device through the approved open-source PaddleOCR/ONNX Runtime artifacts with network access disabled.
+- [ ] No receipt image, OCR text, parsed field, confidence, correction, or diagnostic is sent to GitHub, telemetry, logs, a cloud model, or another remote service.
+- [ ] Native OCR output is shape-validated before parsing and malformed output fails safely.
+- [ ] Merchant, date, currency, subtotal, tax, tip, and total parsing follows section 21.5 with deterministic ordering and locale-aware amount handling.
+- [ ] `SUBTOTAL` is never selected as `TOTAL`, invalid dates are rejected, and arithmetic inconsistency is surfaced for review.
+- [ ] Only eligible high-confidence Description, Amount, and Date values prefill the normal Add expense form.
+- [ ] A detected currency mismatch never changes the group currency, converts the amount, or silently prefills Amount.
+- [ ] Category, payment method, payer, split, and participants remain normal explicit form decisions/defaults.
+- [ ] No expense is written until the member reviews the editable form and explicitly taps Save expense.
+- [ ] Saving uses the existing expense schema and GitHub mutation; no receipt attachment, OCR field, confidence, or scan marker enters the repository.
+- [ ] Temporary scan artifacts are cleaned after success, cancellation, and failure, with bounded cleanup for stale cache files.
+- [ ] Permission, runtime/model, image, no-text, low-confidence, ambiguity, mismatch, memory, and save-failure states provide actionable alternatives.
+- [ ] TalkBack, large text, light/dark themes, and reduced motion preserve the full capture/review meaning without relying on icon or colour alone.
+- [ ] The physical-device feasibility report documents model license/provenance, app-size delta, peak memory, cold/warm latency, and accuracy on the agreed fixture matrix before implementation is approved.
+- [ ] No local VLM fallback ships unless it passes the separate section 21.9 gate; no cloud fallback exists under any condition.
+
+### 21.13 Test requirements
+
+Pure parser and validation coverage must include:
+
+- English and Portuguese total/tax labels
+- EUR, USD, and GBP symbols/codes
+- Comma and period decimals, thousands separators, and trailing amounts
+- ISO, day/month/year, month/day/year, invalid, and ambiguous dates
+- Multiple total-like lines, subtotal exclusion, refunds/negative values, duplicated blocks, and coordinate ordering
+- Missing merchant/currency/date/total, confidence thresholds, arithmetic tolerance, and currency mismatch
+- Strict rejection of malformed native payloads and safe handling of empty OCR results
+
+Component and navigation coverage must verify camera/manual entry points, permission states, capture/retake/photo-library actions, progress and cancellation, review warnings, selective prefilling, unchanged manual fields, explicit save, and return to manual entry.
+
+The manual Android test matrix must include the oldest supported device and a current representative device, airplane mode, denied permissions, cold and warm scans, repeated scans, rotation, background/foreground transitions, low-memory recovery, long and skewed receipts, glare/shadow/low contrast, English and Portuguese fixtures, and TalkBack/large-text/light/dark verification. Record latency, peak memory, APK-size delta, field-level accuracy, total exact-match rate, and cleanup behavior without logging receipt contents.
+
+### 21.14 Explicitly deferred from CR-006
+
+- Receipt images or attachments in GitHub, expense history, exports, or shared group storage
+- Item-level extraction, product categorization, inventory, warranties, or nutrition analysis
+- Automatic category, payment-method, payer, or participant decisions
+- Multiple-receipt batching, duplicate-receipt detection, and expense reconciliation
+- Foreign-exchange conversion and multi-currency expenses
+- Automatic expense creation or save without member confirmation
+- Cloud OCR, hosted VLMs, remote human review, and any failure path that uploads receipt data
+- Training, fine-tuning, or personalization from member receipts or corrections
+- A production local VLM fallback until the section 21.9 decision gate is satisfied
+- iOS product delivery until iOS enters BranchBalance product scope; the native contract should avoid preventing a later Swift implementation
+
+These require separate product, privacy, performance, and licensing decisions before implementation.
+
+## 22. Technical references
 
 - [Generating a user access token for a GitHub App](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)
 - [Refreshing GitHub App user access tokens](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/refreshing-user-access-tokens)
@@ -1852,3 +2104,7 @@ These require separate product and privacy decisions before implementation.
 - [Repository collaborator endpoints](https://docs.github.com/en/rest/collaborators/collaborators)
 - [Repository invitation endpoints](https://docs.github.com/en/rest/collaborators/invitations)
 - [Repository commit endpoints](https://docs.github.com/en/rest/commits/commits)
+- [Expo development builds](https://docs.expo.dev/develop/development-builds/introduction/)
+- [Expo local modules and autolinking](https://docs.expo.dev/modules/get-started/)
+- [ONNX Runtime Mobile](https://onnxruntime.ai/docs/get-started/with-mobile.html)
+- [PaddleOCR on-device deployment](https://paddlepaddle.github.io/PaddleOCR/main/en/version3.x/deployment/on_device_deployment.html)

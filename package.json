@@ -7,9 +7,14 @@
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/datetimepicker": "9.1.0",
     "expo": "~57.0.7",
+    "expo-camera": "~57.0.3",
     "expo-clipboard": "~57.0.1",
     "expo-constants": "~57.0.5",
     "expo-crypto": "~57.0.1",
+    "expo-dev-client": "~57.0.7",
+    "expo-file-system": "~57.0.1",
+    "expo-image-manipulator": "~57.0.5",
+    "expo-image-picker": "~57.0.5",
     "expo-linking": "~57.0.3",
     "expo-router": "~57.0.7",
     "expo-secure-store": "~57.0.1",
@@ -41,18 +46,24 @@
   "overrides": {
     "uuid": "11.1.1"
   },
+  "expo": {
+    "autolinking": {
+      "nativeModulesDir": "./modules"
+    }
+  },
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "web": "expo start --web",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage --runInBand",
+    "verify:ocr-models": "node scripts/verify-ocr-models.mjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "doctor": "expo-doctor",
-    "validate": "npm run typecheck && npm run lint && npm test -- --runInBand && npm run doctor"
+    "validate": "npm run verify:ocr-models && npm run typecheck && npm run lint && npm test -- --runInBand && npm run doctor"
   },
   "private": true
 }

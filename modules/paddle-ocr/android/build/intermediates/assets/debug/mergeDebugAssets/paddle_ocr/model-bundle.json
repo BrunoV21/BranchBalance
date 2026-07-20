@@ -1,0 +1,26 @@
+{
+  "bundleVersion": "ppocr-v5-mobile-latin-2026-07-20",
+  "onnxOpset": 11,
+  "models": {
+    "detection": {
+      "name": "PP-OCRv5_mobile_det",
+      "file": "text_detection.onnx",
+      "sha256": "a431985659dc921974177a95adcfbb90fd9e51989a5e04d70d0b75f597b6e61d"
+    },
+    "recognition": {
+      "name": "latin_PP-OCRv5_mobile_rec",
+      "file": "text_recognition.onnx",
+      "sha256": "3d660629a5f53d9886400f9c4791e0a34972cceed63ad717d1977ba94b102891"
+    },
+    "orientation": {
+      "name": "PP-LCNet_x1_0_textline_ori",
+      "file": "text_orientation.onnx",
+      "sha256": "0c69bacd2ccda224bc78ef3518a5c2dbf8e1014eb19ea42b95cbd1debeb9cc06"
+    }
+  },
+  "dictionary": {
+    "file": "characters.txt",
+    "entries": 836,
+    "sha256": "ccbcc45730b3fbbd9050c5bc74db6a99067141ef1035e3d14889a84a6b9b1aff"
+  }
+}

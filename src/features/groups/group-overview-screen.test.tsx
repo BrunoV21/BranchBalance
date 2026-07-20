@@ -41,8 +41,19 @@ describe('Group overview expense metadata', () => {
     expect(view.getByLabelText('Paid by @owner; Just me expense')).toBeTruthy();
     expect(view.queryByLabelText('Created by @owner')).toBeNull();
     expect(view.queryByLabelText('Updated by @owner')).toBeNull();
-    expect(view.getAllByTestId('lucide-icon').length).toBe(3);
+    expect(view.getAllByTestId('lucide-icon').length).toBe(5);
     expect(view.queryByText(/Activities · Cash · paid by/)).toBeNull();
+  });
+
+  it('opens receipt scanning from the camera segment of the add-expense control', async () => {
+    const push = jest.fn();
+    jest.mocked(useRouter).mockReturnValue({ push } as never);
+    jest.mocked(useGroup).mockReturnValue({ state: { data: snapshot, status: 'ready', isRefreshing: false, lastSuccessfulAt: snapshot.syncedAt, error: null } } as never);
+    const view = await render(<ThemeProvider><GroupOverviewScreen /></ThemeProvider>);
+
+    await fireEvent.press(view.getByRole('button', { name: 'Scan receipt on this device' }));
+
+    expect(push).toHaveBeenCalledWith({ pathname: '/groups/[owner]/[repo]/expenses/scan', params: { owner: 'owner', repo: 'branch-balance-trip' } });
   });
 
   it('summarizes active pace and opens the Spending analytics screen', async () => {

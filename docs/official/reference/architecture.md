@@ -1,6 +1,6 @@
 ---
 title: Architecture
-description: BranchBalance implementation boundaries, data flow, GitHub operations, and compatibility decisions.
+description: BranchBalance implementation boundaries, data flow, local processing, GitHub operations, and compatibility decisions.
 outline: deep
 ---
 

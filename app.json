@@ -41,6 +41,21 @@
           "configureAndroidBackup": true
         }
       ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow BranchBalance to photograph receipts for on-device reading.",
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow BranchBalance to select a receipt photo for on-device reading.",
+          "microphonePermission": false
+        }
+      ],
       "@react-native-community/datetimepicker"
     ],
     "experiments": {

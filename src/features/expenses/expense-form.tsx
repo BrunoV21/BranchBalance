@@ -10,8 +10,9 @@ import { useTheme } from '@/providers/theme-provider';
 import { DatePickerDialog } from './date-picker-dialog';
 import { CategoryIcon, PaymentMethodIcon } from './metadata-icons';
 import { applyJustMe, localCalendarDate, type ExpenseDraft, type ExpenseSplitMode } from './model';
+import type { ReceiptExpensePrefill } from '@/features/receipt-scanning/receipt-types';
 
-export function ExpenseForm({ currency, members, initial, submitLabel, onSubmit }: { currency: CurrencyCode; members: Member[]; initial?: ExpenseDraft; submitLabel: string; onSubmit(draft: ExpenseDraft): Promise<void> }) {
+export function ExpenseForm({ currency, members, initial, receiptPrefill, onRetakeReceipt, submitLabel, onSubmit }: { currency: CurrencyCode; members: Member[]; initial?: ExpenseDraft; receiptPrefill?: ReceiptExpensePrefill | null; onRetakeReceipt?(): void; submitLabel: string; onSubmit(draft: ExpenseDraft): Promise<void> }) {
   const { colors } = useTheme();
   const [draft, setDraft] = useState<ExpenseDraft>(initial ?? { description: '', amount: '', category: null, paymentMethod: null, paidBy: members[0]?.login ?? '', splitType: 'equal', participants: members.map((member) => member.login), expenseDate: localCalendarDate() });
   const [showDate, setShowDate] = useState(false);
@@ -42,6 +43,7 @@ export function ExpenseForm({ currency, members, initial, submitLabel, onSubmit 
     finally { submitting.current = false; setLoading(false); }
   };
   return <View style={styles.form}>
+    {receiptPrefill ? <Banner tone={receiptPrefill.warnings.length ? 'warning' : 'info'} action={onRetakeReceipt ? <Button variant="ghost" onPress={onRetakeReceipt}>Retake</Button> : undefined}>Receipt read on this device. Review every field before saving.{receiptPrefill.warnings.length ? ` ${receiptPrefill.warnings.join(' ')}` : ''}</Banner> : null}
     <Field label="Description" value={draft.description} onChangeText={(description) => patch({ description })} placeholder="What was it for?" maxLength={120} />
     <Field label={`Amount (${currency})`} value={draft.amount} onChangeText={(amount) => patch({ amount })} keyboardType="decimal-pad" placeholder="0.00" />
     <Body>Category</Body>

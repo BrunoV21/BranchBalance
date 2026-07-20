@@ -24,6 +24,7 @@ jest.mock('@/features/expenses/expense-form', () => {
 });
 jest.mock('@/providers/group-provider', () => ({ useGroup: jest.fn() }));
 jest.mock('@/providers/session-provider', () => ({ useSession: jest.fn() }));
+jest.mock('@/features/receipt-scanning/receipt-draft-provider', () => ({ useReceiptDraft: () => ({ consumeReceiptDraft: () => null }) }));
 jest.mock('@/providers/theme-provider', () => ({
   useTheme: () => ({ colors: {
     background: '#fff', surface: '#fff', surfaceStrong: '#eee', text: '#111', muted: '#666', border: '#ccc',
