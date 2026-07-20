@@ -43,6 +43,34 @@ Current user workaround: accept the repository invitation through GitHub's websi
 - [GitHub repository invitation endpoints](https://docs.github.com/en/rest/collaborators/invitations)
 - [GitHub App user access-token resource intersection](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)
 
+## Curated invoice corpus for OCR and VLM quality
+
+**Priority:** P1
+
+**Status:** Privacy, consent, data-governance, and model-evaluation design required
+
+Build a separately governed invoice dataset with reviewed ground-truth annotations, then use it to improve the on-device OCR pipeline and, if the existing local-VLM decision gate passes, fine-tune or evaluate a schema-constrained VLM. This is a future research and quality initiative; the current product must not retain production receipts or learn from member corrections unless a new PRD change request explicitly replaces that privacy contract.
+
+### Proposed direction
+
+1. Define an explicit, revocable opt-in contribution flow. Do not silently collect production invoices, OCR output, or user corrections, and do not make contribution a condition of receipt scanning.
+2. Store contributed source invoices and annotations in a dedicated, access-controlled database and object store, isolated from group repositories and operational application data. Define encryption, retention, deletion, audit, regional-processing, and incident-response requirements before collecting data.
+3. Define a versioned annotation schema covering the expected expense fields—merchant or description, total amount in minor units, transaction date, and currency—plus relevant text, bounding boxes, locale, document type, reviewer status, ambiguity markers, and redaction metadata. Exclude or irreversibly redact payment credentials and unrelated sensitive identifiers.
+4. Establish reviewer guidance and dual-review or adjudication for ambiguous labels. Version every dataset split and annotation revision so each model artifact is reproducible and traceable to approved training data.
+5. Keep fixed train, validation, and held-out test partitions separated by source document and contributor. Use the training partition to fine-tune or adapt OCR models and, only after the separate local-VLM approval, candidate VLMs; never tune against the held-out regression partition.
+6. Add a dedicated, reproducible quality suite that compares every OCR/model change with the pinned released baseline. Measure character and word error rates, per-field precision/recall or exact match, full-document extraction success, confidence calibration, unsupported-locale behavior, latency, peak memory, and app-size impact across the supported device matrix.
+7. Define release-blocking degradation budgets for the overall corpus and critical slices such as locale, currency, image quality, layout, and device tier. CI or the release workflow must fail when a candidate exceeds a budget, loses coverage, changes the test corpus unexpectedly, or cannot reproduce its model and dataset provenance.
+8. Promote the approved consent, storage, training, model-distribution, and regression policy into the PRD and architecture before implementation or data collection.
+
+### Completion criteria
+
+- Every stored invoice has auditable consent, retention, deletion, access, annotation, and provenance records in systems separate from group and production application data.
+- The annotation schema represents the expected expense fields consistently, and reviewer agreement and adjudication meet documented quality thresholds.
+- Training, validation, and held-out regression splits are versioned, reproducible, and protected against source-document or contributor leakage.
+- Each candidate OCR or approved local-VLM artifact records its dataset version, training configuration, model hashes, licenses, and benchmark results.
+- A dedicated automated comparison against the pinned production baseline blocks releases when OCR quality degrades beyond an approved overall or critical-slice budget.
+- The shipped scanner remains local-first, and no member receipt is retained or used for training without the separately approved, explicit opt-in flow.
+
 ## LLM agent integration via a sanitized register
 
 **Priority:** P2
