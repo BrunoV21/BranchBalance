@@ -185,7 +185,7 @@ jobs:
           CI=1 npx expo prebuild --platform android --no-install
           node scripts/configure-android-release-signing.mjs
 
-      - name: Build signed release APK with Gradle
+      - name: Build signed per-ABI release APKs with Gradle
         working-directory: android
         env:
           NODE_ENV: production
@@ -195,26 +195,34 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: ./gradlew :app:assembleRelease --no-daemon
+        run: |
+          set -euo pipefail
+          tag_name="${GITHUB_REF_NAME}"
+          for abi in arm64-v8a armeabi-v7a; do
+            ./gradlew :app:assembleRelease -PreactNativeArchitectures="$abi" --no-daemon
+            source_apk="app/build/outputs/apk/release/app-release.apk"
+            if [ ! -f "$source_apk" ]; then
+              echo "Gradle did not produce $source_apk for $abi." >&2
+              exit 1
+            fi
+            cp "$source_apk" "../BranchBalance-${tag_name}-${abi}.apk"
+          done
 
-      - name: Package and verify signed APK
+      - name: Verify signed APKs
         env:
           TAG_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          source_apk="android/app/build/outputs/apk/release/app-release.apk"
-          asset="BranchBalance-${TAG_NAME}.apk"
-
-          if [ ! -f "$source_apk" ]; then
-            echo "Gradle did not produce $source_apk." >&2
-            exit 1
-          fi
-
-          cp "$source_apk" "$asset"
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$asset"
-          unzip -t "$asset" >/dev/null
-          sha256sum "$asset" > SHA256SUMS
-          ls -lh "$asset" SHA256SUMS
+          assets=(
+            "BranchBalance-${TAG_NAME}-arm64-v8a.apk"
+            "BranchBalance-${TAG_NAME}-armeabi-v7a.apk"
+          )
+          for asset in "${assets[@]}"; do
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$asset"
+            unzip -t "$asset" >/dev/null
+          done
+          sha256sum "${assets[@]}" > SHA256SUMS
+          ls -lh "${assets[@]}" SHA256SUMS
 
       - name: Extract release notes
         env:
@@ -234,7 +242,10 @@ jobs:
           TAG_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          asset="BranchBalance-${TAG_NAME}.apk"
+          assets=(
+            "BranchBalance-${TAG_NAME}-arm64-v8a.apk"
+            "BranchBalance-${TAG_NAME}-armeabi-v7a.apk"
+          )
 
           if gh release view "$TAG_NAME" >/dev/null 2>&1; then
             if [ "$(gh release view "$TAG_NAME" --json isDraft --jq .isDraft)" != "true" ]; then
@@ -246,14 +257,15 @@ jobs:
             gh release create "$TAG_NAME" --verify-tag --draft --title "BranchBalance $TAG_NAME" --notes-file /tmp/github-release-notes.md
           fi
 
-          gh release upload "$TAG_NAME" "$asset" SHA256SUMS --clobber
+          gh release upload "$TAG_NAME" "${assets[@]}" SHA256SUMS --clobber
 
       - name: Preserve packaged release artifact
         uses: actions/upload-artifact@v7
         with:
           name: branchbalance-${{ github.ref_name }}-android
           path: |
-            BranchBalance-${{ github.ref_name }}.apk
+            BranchBalance-${{ github.ref_name }}-arm64-v8a.apk
+            BranchBalance-${{ github.ref_name }}-armeabi-v7a.apk
             SHA256SUMS
           if-no-files-found: error
           retention-days: 14
@@ -286,13 +298,16 @@ jobs:
             emit { print }
           ' "$notes_file" > /tmp/github-release-notes.md
 
-      - name: Verify attached APK and publish GitHub release
+      - name: Verify attached APKs and publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          asset="BranchBalance-${TAG_NAME}.apk"
+          assets=(
+            "BranchBalance-${TAG_NAME}-arm64-v8a.apk"
+            "BranchBalance-${TAG_NAME}-armeabi-v7a.apk"
+          )
 
           if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
             echo "Draft release $TAG_NAME does not exist. Push the tag and wait for its APK build first." >&2
@@ -305,19 +320,23 @@ jobs:
           fi
 
           asset_names="$(gh release view "$TAG_NAME" --json assets --jq '.assets[].name')"
-          grep -Fxq "$asset" <<< "$asset_names" || {
-            echo "Draft release $TAG_NAME is missing $asset." >&2
-            exit 1
-          }
+          for asset in "${assets[@]}"; do
+            grep -Fxq "$asset" <<< "$asset_names" || {
+              echo "Draft release $TAG_NAME is missing $asset." >&2
+              exit 1
+            }
+          done
           grep -Fxq "SHA256SUMS" <<< "$asset_names" || {
             echo "Draft release $TAG_NAME is missing SHA256SUMS." >&2
             exit 1
           }
 
           mkdir release-assets
-          gh release download "$TAG_NAME" --dir release-assets --pattern "$asset" --pattern SHA256SUMS
+          gh release download "$TAG_NAME" --dir release-assets --pattern "BranchBalance-${TAG_NAME}-*.apk" --pattern SHA256SUMS
           (cd release-assets && sha256sum --check SHA256SUMS)
-          unzip -t "release-assets/$asset" >/dev/null
+          for asset in "${assets[@]}"; do
+            unzip -t "release-assets/$asset" >/dev/null
+          done
 
           gh release edit "$TAG_NAME" \
             --title "BranchBalance $TAG_NAME" \

@@ -1,0 +1,3 @@
+modules/paddle-ocr/android/src/main/assets/paddle_ocr/*.onnx binary
+modules/paddle-ocr/android/src/main/assets/paddle_ocr/characters.txt text eol=lf
+modules/paddle-ocr/android/src/main/assets/paddle_ocr/model-bundle.json text eol=lf

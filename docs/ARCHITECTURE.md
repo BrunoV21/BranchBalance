@@ -1,13 +1,13 @@
-# BranchBalance — Phase 1 Architecture and CR-001/CR-002/CR-003/CR-004/CR-005 Increments
+# BranchBalance — Phase 1 Architecture and CR-001/CR-002/CR-003/CR-004/CR-005 Increments + CR-006 Proposal
 
-**Status:** Phase 1 implementation guide; CR-001 through CR-005 implemented; CR-003 physical-device acceptance blocked by a known GitHub App token limitation and CR-004/CR-005 physical-device acceptance pending
-**Applies to:** Phase 1 Android application, CR-001 trip and group spending intelligence, CR-002 settlement payment recording, CR-003 in-app group invitation decisions, CR-004 on-device activity inbox, and CR-005 pace, mix, and fairness analytics
+**Status:** Phase 1 implementation guide; CR-001 through CR-005 implemented; CR-006 proposed and not authorized for implementation; CR-003 physical-device acceptance blocked by a known GitHub App token limitation and CR-004/CR-005 physical-device acceptance pending
+**Applies to:** Phase 1 Android application, CR-001 trip and group spending intelligence, CR-002 settlement payment recording, CR-003 in-app group invitation decisions, CR-004 on-device activity inbox, CR-005 pace, mix, and fairness analytics, and the proposed CR-006 private on-device receipt-scanning architecture
 **Companion specification:** [`PRD.md`](PRD.md)
-**Last updated:** 2026-07-19
+**Last updated:** 2026-07-20
 
 ## 1. Purpose and decision precedence
 
-This document turns the Phase 1 product requirements and the screens in `mockups/` into an implementation blueprint. Together with the PRD, it is intended to be sufficient to implement, test, and package the application without making additional architectural decisions.
+This document turns the Phase 1 product requirements and the screens in `mockups/` into an implementation blueprint. Together with the PRD, the implemented increments are intended to be sufficient to implement, test, and package the application without making additional architectural decisions. CR-006 is deliberately different: section 21 records the proposed boundaries and the decisions that must pass review before implementation is authorized.
 
 Use this precedence when sources disagree:
 
@@ -28,6 +28,7 @@ The following clarifications are intentional:
 | Mixed-currency summary | Never add currencies together. Show a separate cached total for each currency. |
 | Theme | Follow the Android system theme by default and persist an optional light or dark override. |
 | Member names | GitHub login is canonical. Profile name and avatar are best-effort presentation data with an `@login` fallback. |
+| Receipt scanning | CR-006 is a proposed local-only prefill path. It does not save expenses automatically, retain receipt content, or authorize implementation before the section 21.13 gates pass. |
 
 ## 2. System context and constraints
 
@@ -2111,3 +2112,427 @@ Implement in this order:
 5. Refresh/hydration/mutation coherence tests, accessibility hardening, full validation, and the PRD section 20.12 physical-device scenario.
 
 Forecasting, planned expenses, external benchmarks, cross-group/cross-currency aggregation, historical comparisons, exports, configurable dashboards, server analytics, telemetry, background work, and predictive alerts remain outside CR-005.
+
+## 21. CR-006 architecture delta — Private on-device receipt scanning
+
+**Increment status:** Proposed; feasibility and product review required before implementation
+
+CR-006 adds an optional local input pipeline in front of the existing Add expense form. It does not change the authoritative expense schema, GitHub gateway, balance calculations, spending derivation, settlement logic, group snapshot, or online save behavior. Manual entry remains the baseline and recovery path.
+
+The architectural privacy boundary is strict: capture, image preparation, OCR, receipt parsing, confidence evaluation, and prefill handoff run inside the application process on the device. There is no network edge between receipt capture and form review. Only the final ordinary expense fields explicitly confirmed by the member may reach the existing GitHub mutation.
+
+```text
+                         Android application boundary
+┌──────────────────────────────────────────────────────────────────────┐
+│ Overview split action                                                │
+│   ├── Add expense ────────────────────────────────┐                  │
+│   └── Camera segment → receipt scanner            │                  │
+│                           ↓                        │                  │
+│                temporary image preparation        │                  │
+│                           ↓                        │                  │
+│          local Expo module → ONNX Runtime Mobile  │                  │
+│                           ↓                        │                  │
+│        PaddleOCR blocks: text + confidence + box  │                  │
+│                           ↓                        │                  │
+│       strict schema → deterministic TS parser     │                  │
+│                           ↓                        │                  │
+│      validated, sanitized in-memory prefill ──────┤                  │
+│                                                    ↓                  │
+│                                  existing Add expense form           │
+│                                                    ↓ explicit save    │
+└────────────────────────────────────────────────────┼─────────────────┘
+                                                     ↓
+                                           existing GitHub gateway
+```
+
+No receipt image, raw OCR block, parser evidence, confidence score, or scan diagnostic crosses the bottom boundary.
+
+### 21.1 Ownership, source organization, and dependency direction
+
+Keep receipt scanning as a self-contained feature with one narrow native port. The proposed source delta is:
+
+```text
+src/
+├── app/(app)/groups/[owner]/[repo]/expenses/
+│   └── scan.tsx                         # capture/choose/progress surface
+├── features/receipt-scanning/
+│   ├── capture-receipt.ts               # camera/photo-library adapters
+│   ├── prepare-receipt-image.ts         # bounded resize/orientation render
+│   ├── receipt-ocr.ts                    # app-facing native port
+│   ├── receipt-ocr-schema.ts             # strict untrusted-boundary schema
+│   ├── parse-receipt.ts                  # platform-free deterministic parser
+│   ├── validate-receipt.ts               # confidence/arithmetic/currency policy
+│   ├── receipt-scan-machine.ts            # cancellation and state transitions
+│   ├── receipt-temp-files.ts              # ownership-aware cleanup
+│   ├── receipt-prefill.ts                 # sanitized form handoff
+│   └── receipt-draft-provider.tsx         # selected-group-scoped memory only
+└── features/expenses/
+    └── expense-form.tsx                  # existing form consumes prefill once
+
+modules/paddle-ocr/
+├── expo-module.config.json
+├── src/                                 # TypeScript native-module contract
+├── android/                             # Kotlin module and inference pipeline
+├── ios/                                 # later Swift parity; not CR-006 delivery scope
+└── models/                              # manifest; binaries only after approval
+```
+
+Dependency direction is one-way:
+
+```text
+scanner screen → scan orchestration → ReceiptOcrPort
+                                ├── pure parser/validator → money/date domain helpers
+                                └── native PaddleOCR adapter
+```
+
+The native module knows nothing about groups, expenses, currencies supported by the product, navigation, GitHub, form state, or persistence. It returns recognized text geometry only. The TypeScript parser knows nothing about React Native, Expo, ONNX Runtime, or native model tensors. The expense form receives only sanitized eligible values and review messages; it never imports the OCR module.
+
+Do not add receipt behavior to `GroupProvider`, `SnapshotStore`, the GitHub gateway, or the persisted expense domain. A narrow `ReceiptDraftProvider` may be mounted inside the selected-group layout solely to hand one in-memory prefill from the scanner route to the Add expense route. It must clear when consumed, cancelled, the selected group changes, access is lost, or the session ends.
+
+### 21.2 Proposed dependencies and development-build boundary
+
+CR-006 proposes these direct dependencies only after its feasibility gate is approved:
+
+| Dependency | Architectural purpose |
+|---|---|
+| `expo-camera` | In-app receipt camera preview and capture |
+| `expo-image-picker` | Select an existing receipt image without importing the library asset into app storage |
+| `expo-image-manipulator` | Decode, orientation-normalize, resize, and re-encode a bounded working image |
+| `expo-file-system` | Delete only app-owned temporary receipt files and perform stale-cache cleanup |
+| `expo-dev-client` | Run and debug the application with the custom native OCR code included |
+| ONNX Runtime Mobile native packages | Execute approved ONNX models locally on Android and, later, iOS |
+
+Use `npx expo install` for Expo packages at implementation time so versions match the then-current project SDK. Pin native ONNX Runtime versions in the local module manifests after the model compatibility spike; do not use floating `latest` native dependencies in repeatable builds.
+
+The project remains Expo-managed through Continuous Native Generation, but Expo Go is no longer a valid runtime for receipt scanning because it cannot contain the local PaddleOCR module or its model runtime. The camera route must detect a missing native module and explain that a current BranchBalance Development Build is required rather than crashing during import. Manual expense entry must continue to work in Expo Go and web previews.
+
+Configure camera and photo-library permission copy through app configuration. Receipt capture does not record video or audio, so the scanner must not request microphone permission. Adding or changing native code, models, native dependencies, or permission configuration requires rebuilding the development client.
+
+CR-006 does not add SQLite or another local database. Existing expenses remain GitHub-backed, existing non-secret snapshots remain in AsyncStorage, and scanner state is temporary memory/cache data only.
+
+### 21.3 Capture and image-preparation contracts
+
+Track source ownership explicitly so cleanup cannot delete a member's photo-library original:
+
+```ts
+type ReceiptImageOwnership = 'app_cache' | 'external_original';
+
+interface CapturedReceipt {
+  uri: string;
+  width: number;
+  height: number;
+  ownership: ReceiptImageOwnership;
+}
+
+interface PreparedReceipt {
+  uri: string;
+  width: number;
+  height: number;
+  ownership: 'app_cache';
+}
+```
+
+`expo-camera` output is app-owned cache data. A photo-library URI is externally owned and read-only from BranchBalance's perspective. `prepareReceiptImage()` always creates a new app-owned working file and never overwrites the input.
+
+Image preparation follows one deterministic policy:
+
+1. Validate a local file/content URI and positive sane dimensions before native inference.
+2. Decode through ImageManipulator so EXIF orientation is applied.
+3. Preserve aspect ratio and constrain the longest dimension to 1,800 pixels; do not upscale a smaller image.
+4. Render a JPEG working copy at 0.9 quality without Base64 crossing the JavaScript bridge.
+5. Pass the local working URI to the native OCR module.
+
+The 1,800-pixel bound controls JavaScript/native image memory but does not replace model-specific preprocessing. The native detector may further resize to its manifest-defined input policy while maintaining a transform back to prepared-image coordinates.
+
+Do not automatically save camera images to the photo library. Never place receipt content in filenames, route URLs, query parameters, AsyncStorage keys, accessibility identifiers, logs, crash breadcrumbs, or analytics. Temporary filenames use opaque random values.
+
+The temporary-file manager maintains an explicit set of app-owned paths for the active attempt. It deletes the prepared image plus the camera source, when applicable, after successful prefill handoff, cancellation, or terminal failure. It never deletes an `external_original`. A bounded startup cleanup removes only stale files inside the scanner's dedicated cache directory after verifying the resolved path is within that directory. Failure to delete is logged only as a content-free error code and retried by later bounded cleanup.
+
+### 21.4 Native OCR module contract
+
+The TypeScript side treats every native return as `unknown` until strict runtime validation succeeds:
+
+```ts
+type OcrPoint = { x: number; y: number };
+
+interface OcrBlock {
+  text: string;
+  confidence: number; // finite, inclusive 0...1
+  points: [OcrPoint, OcrPoint, OcrPoint, OcrPoint];
+}
+
+interface OcrResult {
+  width: number;
+  height: number;
+  blocks: OcrBlock[];
+}
+
+interface ReceiptOcrStatus {
+  state: 'ready' | 'module_unavailable' | 'models_missing' | 'models_incompatible';
+  engine: 'paddle_ocr';
+  modelBundleVersion: string | null;
+  safeMessage: string;
+}
+
+interface ReceiptOcrPort {
+  getStatus(): Promise<ReceiptOcrStatus>;
+  recognize(request: { requestId: string; imageUri: string }): Promise<unknown>;
+  cancel(requestId: string): Promise<void>;
+}
+```
+
+The native module name and exported method names are identical across platforms. Android implements the approved CR-006 runtime in Kotlin. A later iOS delivery must provide the same contract in Swift and pass the same fixtures; CR-006 does not require shipping or scaffolding iOS while iOS remains outside product scope.
+
+Validate native output with strict Zod schemas before parsing. Apply defensive limits to result dimensions, block count, text length, coordinate magnitude, and aggregate recognized-text size so a corrupt module response cannot allocate or render unbounded data. Reject non-finite coordinates/confidence, out-of-range confidence, blank text, invalid quadrilaterals, and coordinates materially outside the declared image bounds.
+
+Native errors use closed, content-free codes such as:
+
+```ts
+type ReceiptOcrErrorCode =
+  | 'module_unavailable'
+  | 'models_missing'
+  | 'models_incompatible'
+  | 'image_unreadable'
+  | 'out_of_memory'
+  | 'inference_failed'
+  | 'cancelled';
+```
+
+Error messages never contain the URI, recognized text, tensor values, merchant, amount, or model output. Unknown native errors map to `inference_failed` with a safe manual-entry alternative.
+
+### 21.5 PaddleOCR and ONNX Runtime boundary
+
+The Android native pipeline owns:
+
+1. Opening the local prepared image without network access.
+2. Applying manifest-defined color order, normalization, shape, and detector resizing.
+3. Running PaddleOCR mobile text detection through ONNX Runtime.
+4. Performing the matching DB detection postprocessing to produce ordered quadrilaterals.
+5. Perspective-correcting each detected text crop.
+6. Optionally applying the approved text-line orientation classifier.
+7. Running the matching mobile recognition model for each crop.
+8. Applying CTC decoding with the exact dictionary used during model export.
+9. Returning recognized text, confidence, and points mapped into prepared-image pixel coordinates.
+
+Model preprocessing and postprocessing constants belong in one model-bundle description, not as unrelated Kotlin/Swift magic numbers. Detection thresholds, unclip ratio, recognition input height, normalization, dictionary order, blank token, and orientation behavior must match the exported artifacts.
+
+Every candidate model bundle requires a checked-in, human-readable manifest before binary inclusion:
+
+```text
+engine and upstream model names
+upstream repository/tag/commit and download URLs
+code and weight licenses
+Paddle-to-ONNX conversion command/tool versions
+ONNX opset and required operators
+SHA-256 for each ONNX model and dictionary
+input/output tensor names, shapes, dtypes, and normalization
+supported scripts/languages
+expected disk size and benchmark record
+```
+
+The build must fail when packaged hashes do not match the approved manifest. There is no runtime model downloader in the first increment. Bundling model resources makes airplane-mode behavior deterministic and prevents a first scan from becoming a hidden network operation.
+
+Load ONNX sessions lazily on first scan, cache them for reuse while memory pressure permits, and run inference away from the UI thread on one serial worker. Only one receipt inference may be active per module instance. Cancellation marks the request abandoned immediately, prevents delivery of late results, and releases intermediate bitmaps/tensors as soon as the runtime permits. Native code closes tensors, results, sessions, streams, and bitmaps deterministically.
+
+Start with the CPU execution provider for the feasibility baseline. NNAPI or another accelerator may be enabled only after per-device correctness and performance comparison; hardware acceleration must not create different parsing semantics or become required for supported devices. A reduced ONNX Runtime build is an optimization after the operator set is proven, not a prerequisite for the first benchmark.
+
+### 21.6 Deterministic receipt parsing and validation
+
+OCR recognizes text; it does not decide expense semantics. Platform-free TypeScript code owns line grouping, field candidate selection, validation, and review policy.
+
+Group blocks into reading-order lines using prepared-image coordinates and a documented vertical tolerance. Stable sorting uses vertical center, then left coordinate, then original block index. Candidate scoring and ties are deterministic and use centralized benchmark-tuned thresholds rather than values embedded in UI components.
+
+Use closed field contracts based on integer minor units:
+
+```ts
+type ReviewReason =
+  | 'missing'
+  | 'low_confidence'
+  | 'ambiguous'
+  | 'currency_mismatch'
+  | 'arithmetic_inconsistent';
+
+interface ReceiptExtraction {
+  merchant?: { value: string; confidence: number };
+  date?: { value: CalendarDate; confidence: number };
+  currency?: { value: CurrencyCode; confidence: number };
+  subtotalMinor?: { value: number; confidence: number };
+  taxMinor?: { value: number; confidence: number };
+  tipMinor?: { value: number; confidence: number };
+  totalMinor?: { value: number; confidence: number };
+  review: Array<{ field: 'merchant' | 'date' | 'currency' | 'total'; reason: ReviewReason }>;
+}
+```
+
+Receipt amount parsing must not convert through binary floating-point decimal values. Select a currency/decimal convention from explicit receipt evidence, normalize separators, and convert digit strings directly to safe integer minor units. Reject signs for an expense total, unsupported precision, unsafe magnitude, and malformed grouping. Explicit EUR/USD/GBP codes outrank symbols when evidence conflicts.
+
+Parser policy follows the PRD:
+
+- Merchant candidates come from prominent high-confidence lines near the top after excluding dates, totals, generic receipt terms, and tax/payment identifiers.
+- Date candidates must produce valid calendar dates. An ambiguous all-numeric date without enough locale/currency evidence is review-only.
+- Total candidates require an approved label such as Total, Amount due, A pagar, or Valor total. `subtotal` is excluded before the total-label expression and cannot win through substring matching.
+- Candidate ranking favors label quality, confidence, and lower receipt position. Stable coordinates resolve exact ties.
+- Currency absence remains unknown. A detected currency that differs from the group produces a review reason and prevents Amount prefill.
+- When subtotal exists, `subtotalMinor + taxMinor + tipMinor` may differ from `totalMinor` by at most two minor units. A larger difference prevents silent Amount prefill.
+
+The final `ReceiptExtraction` passes its own strict Zod schema. Parser evidence and raw blocks are no longer needed after producing the sanitized review result and must be released before navigation.
+
+### 21.7 Scan state, cancellation, and lifecycle
+
+Model the scanner as a closed state machine rather than independent booleans:
+
+```ts
+type ReceiptScanState =
+  | { kind: 'checking_runtime' }
+  | { kind: 'permission_required' }
+  | { kind: 'camera_ready' }
+  | { kind: 'captured'; receipt: CapturedReceipt }
+  | { kind: 'preparing'; requestId: string }
+  | { kind: 'recognizing'; requestId: string }
+  | { kind: 'validating'; requestId: string }
+  | { kind: 'ready'; prefill: ReceiptPrefill }
+  | { kind: 'error'; code: ReceiptScanErrorCode; canRetry: boolean }
+  | { kind: 'cancelled' };
+```
+
+Generate a new opaque request ID for each attempt. Every async completion checks the current request ID and selected-group generation before publishing state. Retake/cancel invalidates the generation, calls native cancellation when inference started, and runs ownership-aware cleanup. Late native results are discarded without parsing or navigation.
+
+Mount the camera only while its route is focused and permission is granted. On app background, stop the preview and reject new captures; an in-flight prepared-image inference may finish only if the platform cannot cancel safely, but its result remains generation-guarded. On foreground, require the camera to report ready again before enabling capture.
+
+The feature allows one active preparation/inference at a time and disables duplicate capture controls. A timeout may expose Cancel and manual-entry choices, but it must not destroy a working draft, start a second inference, or route to a network service.
+
+### 21.8 Navigation and sanitized form handoff
+
+Mockup 05 uses one split Add expense control:
+
+- The larger labelled segment navigates directly to the unchanged manual Add expense route.
+- The compact right segment is separated by a visible divider, has a minimum 44-by-44 touch target and accessible name **Scan receipt**, and opens `/expenses/scan`.
+
+Do not put image URIs, OCR text, amounts, merchant names, dates, confidence, warnings, or serialized drafts in Expo Router parameters. Route parameters can appear in navigation history and developer diagnostics.
+
+After successful parsing, convert only eligible results into:
+
+```ts
+interface ReceiptPrefill {
+  description?: string;
+  amountInput?: string;
+  expenseDate?: CalendarDate;
+  notice: 'receipt_scanned_locally';
+  reviewMessages: string[]; // closed, content-free templates
+}
+```
+
+`ReceiptDraftProvider.publish()` stores one sanitized value in memory, associated with the current normalized group key and an opaque attempt ID. The scanner cleans its files and raw inference data, then replaces itself with the Add expense route. `consume()` atomically returns and clears the matching prefill during form initialization. A missing/stale/mismatched value produces an ordinary empty manual form, never a partially reconstructed scan.
+
+The expense form merges only `description`, `amount`, and `expenseDate` into its normal initial draft. Category and payment method remain null; payer, split type, and participants use existing defaults. The group currency remains authoritative. The form renders the local-scan notice and closed review messages, but saving calls the unchanged `buildNewExpense()` and `createExpense()` flow. A save/network failure preserves the ordinary editable form state without needing to retain the receipt image or OCR result.
+
+### 21.9 Error, permission, and accessibility architecture
+
+Map errors at the feature boundary into a closed `ReceiptScanErrorCode` union covering permission, camera availability, selection cancellation, image preparation, runtime/model status, malformed OCR output, no text, no reliable total, currency mismatch, date ambiguity, arithmetic inconsistency, memory pressure, inference failure, cancellation, and cleanup failure.
+
+Permission behavior is explicit:
+
+- `notDetermined`: explain the purpose and request only after member action.
+- `denied` but requestable: offer Request camera access, Choose from photos, and Manual entry.
+- permanently denied: offer operating-system settings guidance plus Photos and Manual alternatives.
+- no camera: omit capture and keep Photos/Manual available.
+
+The scanner announces runtime readiness, camera readiness, capture completion, each processing stage, cancellation, and the resulting review requirement without speaking recognized receipt content from a progress message. The preview is decorative once purpose/framing guidance is announced. Every control has a text accessibility label, and the split control exposes two independent actions rather than one ambiguous button.
+
+Large text must preserve the header, privacy statement, capture/manual/photo actions, and camera touch target even if the decorative preview shrinks. Reduced motion removes any progress/capture animation; it does not change state timing or feedback. Light and dark themes style the overlay while preserving sufficient framing-guide contrast.
+
+### 21.10 Security, privacy, and network isolation
+
+Receipt content is more sensitive than the existing non-secret snapshot cache even though it does not contain authentication credentials. Apply these non-negotiable boundaries:
+
+- Never write source/prepared images, raw OCR, extracted candidates, confidence, or corrections to SecureStore, AsyncStorage, SQLite, repository files, logs, analytics, crash reports, activity items, clipboard, notifications, or support payloads.
+- Never include receipt content in thrown error messages, React keys, test IDs, route names/parameters, commit messages, or accessibility progress announcements.
+- Never call `fetch`, Octokit, WebBrowser, or another network client from the receipt-scanning feature or native module.
+- Keep model files read-only inside application resources; the first increment has no downloader, remote configuration, or runtime model update.
+- Pass file URIs across the native bridge, not Base64 image data or pixel arrays in JavaScript.
+- Limit dimensions, counts, text lengths, inference concurrency, and parser work before allocating derived structures.
+- Clear the in-memory prefill on sign-out, terminal session expiry, group change, confirmed access loss, or process death.
+
+The existing GitHub save remains a separate, member-triggered operation after review. Network monitors will still observe normal GitHub traffic when Save expense is pressed; privacy tests must distinguish that expected final expense request from the prohibited capture/OCR stages.
+
+Release builds should disable receipt-content debug overlays. Development diagnostics may record request ID, phase, duration bucket, model-bundle version, safe error code, and aggregate block count only while actively debugging; they still must not record text, coordinates, amounts, dates, merchant, currency, URI, filesystem path, or image-derived thumbnails. Production telemetry remains absent under CR-006.
+
+### 21.11 Local VLM extension point
+
+Do not implement or bundle a vision-language model in the first PaddleOCR increment. Preserve a narrow future extension point only after the PRD section 21.9 decision gate passes:
+
+```ts
+interface LocalReceiptFallback {
+  resolve(request: {
+    requestId: string;
+    imageUri: string;
+    unresolvedFields: Array<'merchant' | 'date' | 'currency' | 'total'>;
+  }): Promise<unknown>;
+  cancel(requestId: string): Promise<void>;
+}
+```
+
+A future local VLM receives only the prepared local image and the closed unresolved-field list. It returns schema-constrained candidates treated as untrusted `unknown`, and those candidates pass the same currency, date, amount, arithmetic, confidence, and confirmation rules. It cannot override a validated PaddleOCR field silently, write an expense, produce user-visible free-form advice, learn from corrections, or access a network client.
+
+The fallback must not be resident concurrently with PaddleOCR if the approved memory budget cannot support both. A resource coordinator closes or releases the primary sessions/intermediates before loading the fallback and enforces one model pipeline at a time. Its model manifest, hashes, source, license, operators, device matrix, latency, memory, app-size impact, and airplane-mode proof require separate approval. If any gate fails, manual entry remains the only fallback.
+
+### 21.12 Test architecture and feasibility benchmark
+
+Keep all parser/validator tests platform-free and table-driven. Use synthetic OCR block fixtures rather than committed personal receipts. Cover English/Portuguese labels, reading order, coordinate ties, subtotal exclusion, multiple total lines, EUR/USD/GBP evidence, dot/comma/thousands conventions, safe-integer bounds, invalid/ambiguous dates, confidence thresholds, arithmetic tolerance, currency mismatch, malformed/oversized native output, and deterministic prefill.
+
+Service/component tests inject fake camera, picker, image preparer, file manager, clock, ID source, and `ReceiptOcrPort`. Verify every state transition, duplicate capture suppression, retake/cancel, stale completion rejection, group/session generation changes, ownership-safe cleanup, one-time prefill consumption, no route data leakage, manual form defaults, review copy, save failure retention, permission alternatives, module/model errors, TalkBack labels, large text, dark/light themes, and reduced motion.
+
+Native Android instrumentation tests use synthetic generated receipts and approved redacted/consented fixtures outside normal repository history when licensing/privacy requires it. Verify:
+
+- model-manifest hashes and tensor/dictionary compatibility;
+- exact preprocessing/postprocessing fixture outputs within documented numeric tolerance;
+- quadrilateral mapping after resize/rotation/perspective correction;
+- cancellation, repeated scans, session reuse, resource closure, and out-of-memory recovery;
+- no networking API, dependency, or network use inside the native OCR module, and no receipt content in Logcat or exception messages.
+
+The feasibility report records, per agreed device class and fixture condition:
+
+```text
+APK size delta
+cold model-load time
+warm scan time and percentile distribution
+peak Java/native memory
+crash and cancellation result
+text-block accuracy
+merchant/date/currency field accuracy
+total exact-match rate
+review/blank rate
+```
+
+Run the scanner in airplane mode and inspect Android network traffic from capture through form review. Exercise USB development through the documented `adb reverse tcp:8081 tcp:8081` and Expo localhost flow; a Metro download failure before JavaScript loads remains device-to-Metro connectivity, not an OCR inference failure.
+
+No metric report contains receipt pixels or recognized/personal text. Thresholds advance only from the agreed privacy-safe benchmark; do not tune production confidence policy from ad hoc personal receipts that are later discarded without a reproducible fixture record.
+
+### 21.13 Approval and implementation sequence
+
+CR-006 is not authorized for implementation by this architecture update. After product review, proceed only in these gates:
+
+1. **Feasibility spike:** outside production paths, prove model provenance/export, native runtime compatibility, fixture quality, airplane-mode execution, latency, memory, and APK-size impact on the device matrix.
+2. **Architecture approval:** choose the exact PaddleOCR bundle, optional orientation stage, ONNX Runtime package/build, thresholds, minimum device, and distribution strategy; record the accepted manifest and benchmark.
+3. **Pure contracts:** add strict OCR/result schemas, integer receipt parsing, validation/review policy, state machine, prefill contract, and exhaustive unit tests.
+4. **Capture and cleanup:** add Expo packages/configuration, Development Build workflow, capture/photo selection, image preparation, ownership-aware file lifecycle, and permission/accessibility states.
+5. **Android native module:** implement Kotlin detection/recognition, model resources, cancellation, resource closure, safe errors, and instrumentation tests.
+6. **Form integration:** add the split Overview control from mockup 05, scanner route from mockup 13, ephemeral sanitized handoff, selective form prefill, and unchanged explicit save.
+7. **Hardening and acceptance:** privacy/log/network inspection, corrupt/large inputs, low memory, backgrounding, repeated scans, TalkBack, themes, full validation, and the PRD section 21.13 manual matrix.
+8. **Fallback decision:** evaluate a local VLM only from documented residual failures and treat approval as a separate product/security/performance decision.
+
+Do not install dependencies, scaffold native modules, add model binaries, generate native projects, or change application routes before gates 1 and 2 are approved.
+
+### 21.14 Explicitly outside the CR-006 architecture
+
+- Receipt attachment/storage in GitHub, AsyncStorage, SQLite, activity history, or exports
+- Item-level extraction, item categorization, inventory, warranties, nutrition, or merchant analytics
+- Automatic category, payment-method, payer, participant, split, or save decisions
+- Foreign-exchange conversion and multi-currency expenses
+- Multiple-receipt queues, duplicate-receipt matching, or bookkeeping reconciliation
+- Cloud OCR, hosted VLMs, remote human review, telemetry, training, or correction upload
+- Runtime model downloads, remote model configuration, or silent model replacement
+- Production local VLM support before the separate gate passes
+- iOS delivery until the product supports iOS; later Swift behavior must match the same contract and fixtures
+
+These require new product and architecture decisions rather than expansion during implementation.

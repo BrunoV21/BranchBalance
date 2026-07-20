@@ -1,6 +1,6 @@
 ---
 title: Product requirements
-description: The complete BranchBalance Phase 1, spending-intelligence, and settlement-recording product requirements.
+description: The complete BranchBalance product requirements and proposed change requests.
 outline: deep
 ---
 

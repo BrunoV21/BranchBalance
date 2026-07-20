@@ -63,4 +63,12 @@ describe('ExpenseForm', () => {
     await fireEvent.press(view.getByRole('button', { name: 'Save expense' }));
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ paidBy: 'bob', splitType: 'just_me', participants: ['bob'] }));
   });
+
+  it('shows an editable review notice for receipt-prefilled fields', async () => {
+    const view = await render(<ThemeProvider><ExpenseForm currency="EUR" members={members} initial={{ description: 'Cafe', amount: '4.20', category: null, paymentMethod: null, paidBy: 'alice', splitType: 'equal', participants: ['alice', 'bob'], expenseDate: '2026-07-20' }} receiptPrefill={{ description: 'Cafe', amount: '4.20', expenseDate: '2026-07-20', confidence: { merchant: 0.98, total: 0.99, date: 0.97 }, warnings: ['Review the total.'], modelBundleVersion: 'test' }} submitLabel="Save expense" onSubmit={async () => undefined} /></ThemeProvider>);
+
+    expect(view.getByText(/Receipt read on this device.*Review every field.*Review the total/)).toBeTruthy();
+    await fireEvent.changeText(view.getByLabelText('Description'), 'Edited cafe');
+    expect(view.getByDisplayValue('Edited cafe')).toBeTruthy();
+  });
 });

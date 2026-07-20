@@ -18,6 +18,8 @@ The responsive product website and documentation prototype starts at `website/in
 10. Spending dashboard with even-budget pace, deterministic insights, category/scope mix, payment-method breakdowns, and combinable expense filters
 11. Spending-plan settings for total budget, an optional budget-period start and end, and independent category limits
 12. CR-004 recent activity inbox with unread treatment, foreground-refresh context, per-item dismissal, clear-all confirmation, and empty state
+13. CR-006 private on-device receipt capture with manual and photo-library alternatives
+14. CR-006 scanned-receipt review using the existing Add expense form with selective prefilling
 
 CR-001 is also represented in the updated group overview and add/edit expense flows. The expense form includes the fixed category taxonomy, Card/Cash/Other payment methods, and the Just me split shortcut. Legacy expenses remain visible as Uncategorized and Unspecified states in the Spending screen.
 
@@ -26,5 +28,7 @@ CR-003 is represented on the Group list: **Invited groups** appears directly bel
 CR-004 is represented by the inbox-style icon and unread dot in the **Your groups** header plus the standalone Recent activity screen. The inbox presents safe cross-group action summaries, distinguishes newly observed items without relying on colour, links to the relevant group area, and demonstrates individual dismissal and local clear-all behavior. Its copy explicitly describes foreground discovery rather than push or real-time delivery.
 
 CR-005 is represented across Overview, Spending, and Balances. Overview gives a compact non-interactive pace preview; Spending compares cumulative tracked spending with a clearly labelled even-budget reference, summarizes three deterministic insights, and links category and Shared/Just me analytics to the expense filters; Balances compares Paid and Share on one scale while keeping the expense funding gap distinct from settlement-adjusted net balances. Every graphical conclusion is repeated in accessible text, and no chart is described as a forecast.
+
+CR-006 is represented as a proposed flow, not a shipped feature. Overview keeps one **Add expense** control and adds receipt scanning as its compact camera segment, separated by a divider and exposed to assistive technology as **Scan receipt**. The capture screen states that recognition stays on the device and offers camera, photo-library, and manual alternatives. Its result reuses the Add expense form, marks only Description, Amount, and Date as detected, leaves Category and Payment method unselected, and still requires explicit review and save.
 
 Use the moon/sun button to switch between light and dark modes. The choice is stored in browser `localStorage`.
