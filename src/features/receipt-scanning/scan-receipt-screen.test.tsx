@@ -28,7 +28,14 @@ jest.mock('@/features/receipt-scanning/prepare-receipt-image', () => ({
   prepareReceiptImage: jest.fn(async () => ({ uri: 'file:///cache/prepared.jpg', width: 1000, height: 1600 })),
 }));
 jest.mock('@/features/receipt-scanning/receipt-ocr', () => ({
-  ReceiptOcrError: class ReceiptOcrError extends Error { constructor(readonly code: string, message: string) { super(message); } },
+  ReceiptOcrError: class ReceiptOcrError extends Error {
+    readonly code: string;
+
+    constructor(mockCode: string, message: string) {
+      super(message);
+      this.code = mockCode;
+    }
+  },
   receiptOcr: { getStatus: (...args: unknown[]) => mockGetStatus(...args), recognize: (...args: unknown[]) => mockRecognize(...args), cancel: jest.fn(async () => undefined) },
 }));
 
