@@ -1,6 +1,6 @@
 import { type ReactNode, useState } from 'react';
 import { useRouter } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { ArrowRight, CircleCheck, Clock3, HandCoins, History, ReceiptText, Scale, Send, Trash2, UserRound, UsersRound, WalletCards } from 'lucide-react-native';
 
 import { Banner, Body, Button, Card, ConfirmDialog, EmptyState, Screen, Title } from '@/components/ui';
@@ -14,7 +14,7 @@ import { useSession } from '@/providers/session-provider';
 import { useTheme } from '@/providers/theme-provider';
 
 export default function BalancesScreen() {
-  useGroupRefresh();
+  const refresh = useGroupRefresh();
   const router = useRouter();
   const { session } = useSession();
   const { state, confirmSettlementPayment, deleteSettlementPayment } = useGroup();
@@ -41,8 +41,14 @@ export default function BalancesScreen() {
     finally { setLoading(false); }
   };
 
-  if (!snapshot) return <Screen><Title eyebrow="BranchBalance">Balances</Title><EmptyState title="Loading balances…" body="Balances will appear after the group refreshes." /></Screen>;
+  if (!snapshot) return <Screen><Title eyebrow="BranchBalance">Balances</Title><BalancesSyncing /></Screen>;
   const ledger = snapshot.settlementLedger ?? { kind: 'unverified' as const };
+  if (ledger.kind === 'unverified') return <Screen>
+    <Title eyebrow={snapshot.group.name}>Balances</Title>
+    {state.error
+      ? <Banner tone="warning" action={<Button variant="ghost" onPress={refresh}>Retry</Button>}>{state.error}</Banner>
+      : <BalancesSyncing />}
+  </Screen>;
   const payments = snapshot.payments ?? [];
   const pending = payments.filter((payment) => payment.status === 'pending');
   const verified = ledger.kind === 'missing' || ledger.kind === 'ready';
@@ -57,12 +63,12 @@ export default function BalancesScreen() {
 
   return <Screen>
     <Title eyebrow={snapshot.group.name}>Balances</Title>
+    {state.isRefreshing ? <BalancesSyncing compact /> : null}
     {state.error ? <Banner tone="warning">{state.error}</Banner> : null}
     {snapshot.warnings.filter((warning) => warning.path.startsWith('settlements.json')).map((warning) => <Banner key={`${warning.path}:${warning.reason}`}>Skipped {warning.path}: {warning.reason}</Banner>)}
     {actionError ? <Banner tone="error">{actionError}</Banner> : null}
     {announcement ? <Banner tone="info">{announcement}</Banner> : null}
     {!snapshot.balances.zeroSum ? <Banner tone="error">Balances do not sum to zero, so settlements are hidden.</Banner> : null}
-    {ledger.kind === 'unverified' ? <Banner>Cached payment totals are provisional. Refresh GitHub before viewing notes or changing payments.</Banner> : null}
     {ledger.kind === 'invalid' ? <Banner tone="error">The settlement ledger is invalid. Payment-adjusted suggestions and payment actions are disabled until it is repaired on GitHub.</Banner> : null}
 
     <SectionHeading icon={<WalletCards color={colors.accent} size={20} />}>Expense funding</SectionHeading>
@@ -130,6 +136,17 @@ export default function BalancesScreen() {
   </Screen>;
 }
 
+function BalancesSyncing({ compact = false }: { compact?: boolean }) {
+  const { colors } = useTheme();
+  return <View accessibilityLiveRegion="polite" style={[styles.syncing, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+    <ActivityIndicator accessibilityLabel="Refreshing balances from GitHub" color={colors.accent} size={compact ? 'small' : 'large'} />
+    <View style={styles.syncingCopy}>
+      <Text style={[styles.syncingTitle, { color: colors.text }]}>{compact ? 'Updating balances…' : 'Loading latest balances…'}</Text>
+      <Body muted>Checking the latest expenses and payments from GitHub.</Body>
+    </View>
+  </View>;
+}
+
 function SectionHeading({ children, icon }: { children: string; icon: ReactNode }) {
   const { colors } = useTheme();
   return <View style={styles.sectionHeading}>{icon}<Text accessibilityRole="header" style={[styles.sectionTitle, { color: colors.text }]}>{children}</Text></View>;
@@ -149,6 +166,9 @@ function Detail({ children, icon }: { children: ReactNode; icon: ReactNode }) {
 }
 
 const styles = StyleSheet.create({
+  syncing: { minHeight: 88, borderWidth: 1, borderRadius: 18, padding: 18, flexDirection: 'row', alignItems: 'center', gap: 14 },
+  syncingCopy: { flex: 1, gap: 3 },
+  syncingTitle: { fontSize: 17, lineHeight: 23, fontWeight: '800' },
   sectionHeading: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 4 },
   sectionTitle: { flex: 1, fontSize: 18, lineHeight: 24, fontWeight: '800' },
   memberHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },

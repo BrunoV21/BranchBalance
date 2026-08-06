@@ -94,7 +94,7 @@ export default function NewSettlementPaymentScreen() {
     <ConfirmDialog
       visible={review !== null}
       title="Record pending payment?"
-      message={review ? `Record ${formatMoney(review.amountMinor, snapshot.group.currency)} from @${review.from} to @${review.to} on ${review.paidOn}? ${review.note ? 'The shared note will be stored in the repository and Git history.' : 'No note will be shared.'} The recipient must confirm receipt.` : ''}
+      message={review ? `Record ${formatMoney(review.amountMinor, snapshot.group.currency)} from @${review.from} to @${review.to} on ${review.paidOn}? The recipient must confirm receipt.` : ''}
       confirmLabel="Record payment"
       confirmVariant="primary"
       loading={loading}

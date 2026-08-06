@@ -36,9 +36,9 @@ export function Button({ children, icon, onPress, disabled, loading, variant = '
   </Pressable>;
 }
 
-export function Field({ label, labelIcon, error, ...props }: TextInputProps & { label: string; labelIcon?: ReactNode; error?: string }) {
+export function Field({ label, labelIcon, error, style, ...props }: TextInputProps & { label: string; labelIcon?: ReactNode; error?: string }) {
   const { colors } = useTheme();
-  return <View style={styles.field}><View style={styles.labelRow}>{labelIcon}<Text style={[styles.label, { color: colors.text }]}>{label}</Text></View><TextInput accessibilityLabel={label} placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceStrong, borderColor: error ? colors.negative : colors.border, color: colors.text }]} {...props} />{error ? <Text accessibilityLiveRegion="polite" style={[styles.help, { color: colors.negative }]}>{error}</Text> : null}</View>;
+  return <View style={styles.field}><View style={styles.labelRow}>{labelIcon}<Text style={[styles.label, { color: colors.text }]}>{label}</Text></View><TextInput accessibilityLabel={label} placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceStrong, borderColor: error ? colors.negative : colors.border, color: colors.text }, style]} {...props} />{error ? <Text accessibilityLiveRegion="polite" style={[styles.help, { color: colors.negative }]}>{error}</Text> : null}</View>;
 }
 
 export function Banner({ children, tone = 'warning', action, icon }: PropsWithChildren<{ tone?: 'warning' | 'error' | 'info'; action?: ReactNode; icon?: ReactNode }>) {
