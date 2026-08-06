@@ -15,10 +15,12 @@ jest.mock('@/features/expenses/expense-form', () => {
   const React = jest.requireActual('react');
   const { Pressable, Text } = jest.requireActual('react-native');
   return {
-    ExpenseForm: ({ onSubmit }: { onSubmit(draft: unknown): Promise<void> }) => React.createElement(
+    ExpenseForm: ({ members: formMembers, initial, onSubmit }: { members: typeof members; initial?: { paidBy: string }; onSubmit(draft: unknown): Promise<void> }) => React.createElement(
       Pressable,
       { accessibilityRole: 'button', accessibilityLabel: 'Add expense', onPress: () => { void onSubmit({ description: 'Train tickets', amount: '30.00', category: 'transport', paymentMethod: 'card', paidBy: 'owner', splitType: 'equal', participants: ['owner', 'friend'], expenseDate: '2026-07-17' }); } },
       React.createElement(Text, null, 'Add expense'),
+      React.createElement(Text, null, `First payer option: ${formMembers[0]?.login ?? 'none'}`),
+      React.createElement(Text, null, `Default payer: ${initial?.paidBy ?? formMembers[0]?.login ?? 'none'}`),
     ),
   };
 });
@@ -47,6 +49,19 @@ const snapshot = {
 } satisfies RemoteGroupSnapshot;
 
 describe('NewExpenseScreen', () => {
+  it('puts the signed-in member first and selects them as the default payer', async () => {
+    jest.mocked(useRouter).mockReturnValue({ back: jest.fn() } as never);
+    jest.mocked(useSession).mockReturnValue({ session: { status: 'authenticated', account: { id: 8, login: 'FRIEND', name: null, avatarUrl: null }, error: null } } as never);
+    jest.mocked(useGroup).mockReturnValue({
+      state: { data: snapshot, status: 'ready', isRefreshing: false, lastSuccessfulAt: snapshot.syncedAt, error: null }, createExpense: jest.fn(),
+    } as never);
+
+    const view = await render(<NewExpenseScreen />);
+
+    expect(view.getByText('First payer option: friend')).toBeTruthy();
+    expect(view.getByText('Default payer: friend')).toBeTruthy();
+  });
+
   it('navigates back only after the confirmed provider commit resolves', async () => {
     let finishSave!: () => void;
     const createExpense = jest.fn(() => new Promise<void>((resolve) => { finishSave = resolve; }));
