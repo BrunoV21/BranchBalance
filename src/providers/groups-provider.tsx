@@ -158,6 +158,25 @@ export function GroupsProvider({ children }: PropsWithChildren) {
     return operation;
   }, [account, patchActivityState, replaceActivityState]);
 
+  const reconcileRemoteGroupSnapshot = useCallback((snapshot: RemoteGroupSnapshot) => {
+    const mutations = confirmedMutations.current.get(snapshot.key);
+    let reconciled = mutations && account ? reconcileConfirmedExpenseMutations(snapshot, mutations, account.login, systemLocalCalendar.today()) : snapshot;
+    if (mutations && !mutations.size) confirmedMutations.current.delete(snapshot.key);
+    const confirmedPlan = confirmedSpendingPlans.current.get(snapshot.key);
+    if (confirmedPlan && account) {
+      if (snapshot.groupFile?.blobSha === confirmedPlan.blobSha) confirmedSpendingPlans.current.delete(snapshot.key);
+      else reconciled = withGroupFile(reconciled, confirmedPlan, account.login, systemLocalCalendar.today(), reconciled.syncedAt);
+    }
+    const confirmedLedger = confirmedSettlementLedgers.current.get(snapshot.key);
+    if (confirmedLedger && account) {
+      const remoteSha = snapshot.settlementLedger?.kind === 'ready' ? snapshot.settlementLedger.file.blobSha : null;
+      const confirmedSha = confirmedLedger.kind === 'ready' ? confirmedLedger.file.blobSha : null;
+      if (remoteSha === confirmedSha && snapshot.settlementLedger?.kind === confirmedLedger.kind) confirmedSettlementLedgers.current.delete(snapshot.key);
+      else reconciled = withSettlementLedger(reconciled, confirmedLedger, reconciled.syncedAt);
+    }
+    return reconciled;
+  }, [account]);
+
   useEffect(() => {
     activeAccountIdRef.current = account?.id ?? null;
     accountEpochRef.current += 1;
@@ -256,14 +275,51 @@ export function GroupsProvider({ children }: PropsWithChildren) {
           return { groups: null, invitations: null };
         }
 
+        const canReconcileActivity = groupResult.status === 'fulfilled' || (activityRecordRef.current !== null && invitationResult.status === 'fulfilled');
+        const activityNow = systemClock.now().toISOString();
+        const activityPreview = canReconcileActivity ? reconcileActivity({
+          current: activityRecordRef.current,
+          groups: groupResult.status === 'fulfilled' ? activityGroups : [],
+          commits: activityResult.commits,
+          invitations: invitationResult.status === 'fulfilled' ? invitationResult.value.invitations : null,
+          observedAt: activityNow,
+        }) : null;
+        const staleSummaryGroupKeys = activityPreview ? activityGroupKeysWithStaleSummaries(activityPreview, activityGroups) : new Set<GroupKey>();
+        const summaryResult = groupResult.status === 'fulfilled' && staleSummaryGroupKeys.size
+          ? await refreshActivityGroupSnapshots(githubGateway, activityGroups, staleSummaryGroupKeys, account.login)
+          : { snapshots: [] as RemoteGroupSnapshot[], failures: [] as unknown[] };
+        if (activeAccountIdRef.current !== accountId || accountEpochRef.current !== accountEpoch) return { groups: null, invitations: null };
+
+        const summaryTerminalError = summaryResult.failures.find(isTerminalAuthError);
+        if (summaryTerminalError && isTerminalAuthError(summaryTerminalError)) {
+          activeAccountIdRef.current = null;
+          accountEpochRef.current += 1;
+          replaceState(initial);
+          replaceInvitationState(initialInvitations);
+          replaceActivityState(initialActivity);
+          replaceAcceptedPendingDiscovery([]);
+          confirmedInvitationDecisions.current.clear();
+          setInvitationMutations(new Map());
+          await expire(summaryTerminalError.detail.reason === 'missing' ? 'revoked' : summaryTerminalError.detail.reason);
+          return { groups: null, invitations: null };
+        }
+
+        const refreshedSnapshots = summaryResult.snapshots.map(reconcileRemoteGroupSnapshot);
+        const refreshedDescriptors = new Map(refreshedSnapshots.map((snapshot) => [snapshot.key, descriptorFromSnapshot(snapshot, account.login)]));
+        const summaryGroups = activityGroups.map((group) => refreshedDescriptors.get(group.key) ?? group);
+        let snapshotCacheFailed = false;
+        await Promise.all(refreshedSnapshots.map((snapshot) => snapshotStore.writeGroup(accountId, snapshot.key, snapshot).catch(() => {
+          snapshotCacheFailed = true;
+        })));
+
         let groups: DiscoveredGroup[] | null = null;
         if (groupResult.status === 'fulfilled' && generation >= appliedGroupGeneration.current) {
           appliedGroupGeneration.current = generation;
           setHasInstallation(groupResult.value.installationCount > 0);
           setCanCreateGroups(groupResult.value.hasAllRepositoriesInstallation);
-          groups = activityGroups;
+          groups = summaryGroups;
           const now = systemClock.now().toISOString();
-          replaceState({ data: groups, status: 'ready', isRefreshing: false, lastSuccessfulAt: now, error: null });
+          replaceState({ data: groups, status: 'ready', isRefreshing: false, lastSuccessfulAt: now, error: dashboardSummaryWarning(summaryResult.failures) });
           setGroupWarningCount(groupResult.value.warnings.length);
           const repositoryIds = new Set(groups.map((group) => group.repository.id));
           replaceAcceptedPendingDiscovery(acceptedPendingDiscoveryRef.current.filter((item) => !repositoryIds.has(item.repositoryId)));
@@ -272,6 +328,7 @@ export function GroupsProvider({ children }: PropsWithChildren) {
           } catch {
             patchState((value) => ({ ...value, error: 'Groups loaded, but the offline cache could not be updated.' }));
           }
+          if (snapshotCacheFailed) patchState((value) => ({ ...value, error: 'Groups loaded, but refreshed group details could not be saved for offline use.' }));
         } else if (groupResult.status === 'rejected') {
           const message = groupResult.reason instanceof AppFailure ? messageForError(groupResult.reason.detail) : 'Unable to refresh groups.';
           patchState((value) => ({ ...value, status: value.data.length ? 'ready' : 'error', isRefreshing: false, error: message }));
@@ -295,14 +352,12 @@ export function GroupsProvider({ children }: PropsWithChildren) {
           patchInvitationState((value) => ({ ...value, status: value.data.length ? 'ready' : 'error', isRefreshing: false, error: message }));
         }
 
-        const canReconcileActivity = groupResult.status === 'fulfilled' || (activityRecordRef.current !== null && invitationResult.status === 'fulfilled');
         if (canReconcileActivity) {
-          const activityNow = systemClock.now().toISOString();
           const warning = activityWarningMessage(activityResult.failures);
           try {
             await persistActivityUpdate((current) => reconcileActivity({
               current,
-              groups: groupResult.status === 'fulfilled' ? activityGroups : [],
+              groups: groupResult.status === 'fulfilled' ? summaryGroups : [],
               commits: activityResult.commits,
               invitations: invitationResult.status === 'fulfilled' ? invitationResult.value.invitations : null,
               observedAt: activityNow,
@@ -320,7 +375,7 @@ export function GroupsProvider({ children }: PropsWithChildren) {
     })();
     dashboardInFlight.current = operation;
     return operation;
-  }, [account, expire, patchActivityState, patchInvitationState, patchState, persistActivityUpdate, replaceAcceptedPendingDiscovery, replaceActivityState, replaceInvitationState, replaceState]);
+  }, [account, expire, patchActivityState, patchInvitationState, patchState, persistActivityUpdate, reconcileRemoteGroupSnapshot, replaceAcceptedPendingDiscovery, replaceActivityState, replaceInvitationState, replaceState]);
 
   const startInvitationRefresh = useCallback((): Promise<DashboardRefreshResult> => {
     if (!account) return Promise.resolve({ groups: null, invitations: null });
@@ -531,11 +586,7 @@ export function GroupsProvider({ children }: PropsWithChildren) {
 
   const applyGroupSnapshot = useCallback(async (snapshot: RemoteGroupSnapshot) => {
     if (!account) return;
-    const currentBalance = snapshot.balances.members.find((member) => member.login.toLowerCase() === account.login.toLowerCase())?.netMinor ?? 0;
-    const descriptor: DiscoveredGroup = {
-      key: snapshot.key, repository: snapshot.repository, group: snapshot.group,
-      summary: { currency: snapshot.group.currency, currentUserBalanceMinor: currentBalance, memberCount: snapshot.members.length, expenseCount: snapshot.expenses.length, syncedAt: snapshot.syncedAt },
-    };
+    const descriptor = descriptorFromSnapshot(snapshot, account.login);
     const groups = [...stateRef.current.data.filter((group) => group.key !== snapshot.key), descriptor].sort((a, b) => a.group.name.localeCompare(b.group.name));
     patchState((value) => ({ ...value, data: groups, status: 'ready' }));
     await Promise.all([snapshotStore.writeGroup(account.id, snapshot.key, snapshot), snapshotStore.writeGroups(account.id, groups)]);
@@ -555,25 +606,6 @@ export function GroupsProvider({ children }: PropsWithChildren) {
   const recordConfirmedSettlementMutation = useCallback((key: string, ledger: SettlementLedgerState) => {
     confirmedSettlementLedgers.current.set(key, ledger);
   }, []);
-
-  const reconcileRemoteGroupSnapshot = useCallback((snapshot: RemoteGroupSnapshot) => {
-    const mutations = confirmedMutations.current.get(snapshot.key);
-    let reconciled = mutations && account ? reconcileConfirmedExpenseMutations(snapshot, mutations, account.login, systemLocalCalendar.today()) : snapshot;
-    if (mutations && !mutations.size) confirmedMutations.current.delete(snapshot.key);
-    const confirmedPlan = confirmedSpendingPlans.current.get(snapshot.key);
-    if (confirmedPlan && account) {
-      if (snapshot.groupFile?.blobSha === confirmedPlan.blobSha) confirmedSpendingPlans.current.delete(snapshot.key);
-      else reconciled = withGroupFile(reconciled, confirmedPlan, account.login, systemLocalCalendar.today(), reconciled.syncedAt);
-    }
-    const confirmedLedger = confirmedSettlementLedgers.current.get(snapshot.key);
-    if (confirmedLedger && account) {
-      const remoteSha = snapshot.settlementLedger?.kind === 'ready' ? snapshot.settlementLedger.file.blobSha : null;
-      const confirmedSha = confirmedLedger.kind === 'ready' ? confirmedLedger.file.blobSha : null;
-      if (remoteSha === confirmedSha && snapshot.settlementLedger?.kind === confirmedLedger.kind) confirmedSettlementLedgers.current.delete(snapshot.key);
-      else reconciled = withSettlementLedger(reconciled, confirmedLedger, reconciled.syncedAt);
-    }
-    return reconciled;
-  }, [account]);
 
   const createGroup = useCallback(async (name: string, currency: CurrencyCode) => {
     if (!account) throw new DomainValidationError('Sign in to create a group.');
@@ -780,6 +812,66 @@ async function loadGroupActivityCommits(
 
   await Promise.all(Array.from({ length: Math.min(3, groups.length) }, worker));
   return { commits, failures };
+}
+
+function activityGroupKeysWithStaleSummaries(inbox: ActivityInboxV1, groups: readonly DiscoveredGroup[]): Set<GroupKey> {
+  const summaryTimes = new Map(groups.map((group) => [group.key, group.summary ? Date.parse(group.summary.syncedAt) : Number.NEGATIVE_INFINITY]));
+  return new Set(inbox.items.flatMap((item) => {
+    if (item.groupKey === null) return [];
+    const summaryTime = summaryTimes.get(item.groupKey);
+    return summaryTime !== undefined && Date.parse(item.observedAt) > summaryTime ? [item.groupKey] : [];
+  }));
+}
+
+async function refreshActivityGroupSnapshots(
+  gateway: Pick<GitHubGateway, 'refreshGroup'>,
+  groups: readonly DiscoveredGroup[],
+  staleSummaryGroupKeys: ReadonlySet<GroupKey>,
+  currentLogin: string,
+): Promise<{ snapshots: RemoteGroupSnapshot[]; failures: unknown[] }> {
+  const targets = groups.filter((group) => staleSummaryGroupKeys.has(group.key));
+  const snapshots: RemoteGroupSnapshot[] = [];
+  const failures: unknown[] = [];
+  let nextIndex = 0;
+  let rateLimited = false;
+
+  async function worker() {
+    while (!rateLimited && nextIndex < targets.length) {
+      const group = targets[nextIndex++]!;
+      try {
+        snapshots.push(await gateway.refreshGroup(group.repository, currentLogin));
+      } catch (error) {
+        failures.push(error);
+        if (error instanceof AppFailure && error.detail.kind === 'rate_limit') rateLimited = true;
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(2, targets.length) }, worker));
+  return { snapshots, failures };
+}
+
+function descriptorFromSnapshot(snapshot: RemoteGroupSnapshot, currentLogin: string): DiscoveredGroup {
+  const currentBalance = snapshot.balances.members.find((member) => member.login.toLowerCase() === currentLogin.toLowerCase())?.netMinor ?? 0;
+  return {
+    key: snapshot.key,
+    repository: snapshot.repository,
+    group: snapshot.group,
+    summary: {
+      currency: snapshot.group.currency,
+      currentUserBalanceMinor: currentBalance,
+      memberCount: snapshot.members.length,
+      expenseCount: snapshot.expenses.length,
+      syncedAt: snapshot.syncedAt,
+    },
+  };
+}
+
+function dashboardSummaryWarning(failures: readonly unknown[]): string | null {
+  if (!failures.length) return null;
+  return failures.length === 1
+    ? 'New activity was found, but one group summary could not be updated. Pull to retry.'
+    : `New activity was found, but ${failures.length} group summaries could not be updated. Pull to retry.`;
 }
 
 function activityWarningMessage(failures: readonly unknown[]): string | null {

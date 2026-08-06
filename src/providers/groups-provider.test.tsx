@@ -12,7 +12,7 @@ import { useSession } from './session-provider';
 
 jest.mock('@/infrastructure/runtime', () => ({
   githubGateway: {
-    discoverGroups: jest.fn(), listGroupActivityCommits: jest.fn(), listGroupInvitations: jest.fn(), acceptGroupInvitation: jest.fn(), declineGroupInvitation: jest.fn(),
+    discoverGroups: jest.fn(), refreshGroup: jest.fn(), listGroupActivityCommits: jest.fn(), listGroupInvitations: jest.fn(), acceptGroupInvitation: jest.fn(), declineGroupInvitation: jest.fn(),
   },
   snapshotStore: {
     readGroups: jest.fn(), readPendingGroup: jest.fn(), writeGroup: jest.fn(), writeGroups: jest.fn(), removeGroup: jest.fn(), readActivity: jest.fn(), writeActivity: jest.fn(), removeActivity: jest.fn(),
@@ -64,6 +64,7 @@ describe('GroupsProvider snapshot summaries', () => {
     jest.mocked(snapshotStore.removeGroup).mockResolvedValue(undefined);
     jest.mocked(snapshotStore.writeActivity).mockResolvedValue(undefined);
     jest.mocked(githubGateway.discoverGroups).mockResolvedValue({ groups: [descriptor], warnings: [], installationCount: 1, hasAllRepositoriesInstallation: true });
+    jest.mocked(githubGateway.refreshGroup).mockResolvedValue(snapshot());
     jest.mocked(githubGateway.listGroupInvitations).mockResolvedValue({ invitations: [], warnings: [] });
     jest.mocked(githubGateway.listGroupActivityCommits).mockResolvedValue({ commits: [], checkpointFound: false, hasMore: false, warnings: [] });
     jest.mocked(githubGateway.acceptGroupInvitation).mockResolvedValue(undefined);
@@ -182,6 +183,13 @@ describe('GroupsProvider snapshot summaries', () => {
       seenInvitations: [],
     };
     jest.mocked(snapshotStore.readActivity).mockResolvedValueOnce(cached);
+    jest.mocked(snapshotStore.readGroups).mockResolvedValueOnce([{
+      ...descriptor,
+      summary: { currency: 'EUR', currentUserBalanceMinor: 250, memberCount: 2, expenseCount: 1, syncedAt: '2026-07-17T10:00:00.000Z' },
+    }]);
+    const updatedExpense = { ...expense, amount_minor: 2000, shares_minor: { owner: 1000, friend: 1000 } };
+    const refreshedSnapshot = snapshot(updatedExpense, 'updated-sha');
+    jest.mocked(githubGateway.refreshGroup).mockResolvedValueOnce(refreshedSnapshot);
     jest.mocked(githubGateway.listGroupActivityCommits).mockResolvedValueOnce({
       commits: [
         { sha: newSha, firstMessageLine: `Update expense ${expense.id}`, authorLogin: 'owner', committedAt: '2026-07-17T11:00:00.000Z' },
@@ -199,7 +207,59 @@ describe('GroupsProvider snapshot summaries', () => {
 
     expect(view.result.current.hasUnreadActivity).toBe(true);
     expect(view.result.current.activityState.data).toEqual([expect.objectContaining({ sourceId: newSha, kind: 'expense_updated', actorLogin: 'owner', readAt: null })]);
+    expect(githubGateway.refreshGroup).toHaveBeenCalledWith(repository, 'owner');
+    expect(view.result.current.state.data[0]?.summary).toEqual({
+      currency: 'EUR', currentUserBalanceMinor: 1000, memberCount: 2, expenseCount: 1, syncedAt: refreshedSnapshot.syncedAt,
+    });
+    expect(snapshotStore.writeGroup).toHaveBeenCalledWith(7, refreshedSnapshot.key, refreshedSnapshot);
     expect(snapshotStore.writeActivity).toHaveBeenLastCalledWith(7, expect.objectContaining({ checkpoints: [expect.objectContaining({ headCommitSha: newSha })] }));
+  });
+
+  it('refreshes a stale dashboard summary even after its activity was read', async () => {
+    const commitSha = '3'.repeat(40);
+    const cached: ActivityInboxV1 = {
+      version: 1,
+      initializedAt: '2026-07-17T09:00:00.000Z',
+      items: [{
+        id: `commit:${descriptor.key}:${commitSha}`,
+        source: 'commit',
+        sourceId: commitSha,
+        repositoryId: repository.id,
+        groupKey: descriptor.key,
+        groupName: group.name,
+        kind: 'expense_added',
+        destination: { kind: 'expense', expenseId: expense.id },
+        actorLogin: 'friend',
+        eventAt: '2026-07-17T10:30:00.000Z',
+        observedAt: '2026-07-17T11:00:00.000Z',
+        readAt: '2026-07-17T11:05:00.000Z',
+      }],
+      checkpoints: [{ repositoryId: repository.id, groupKey: descriptor.key, headCommitSha: commitSha, initializedAt: '2026-07-17T09:00:00.000Z', lastCheckedAt: '2026-07-17T11:00:00.000Z' }],
+      localCommitReceipts: [],
+      seenInvitations: [],
+    };
+    jest.mocked(snapshotStore.readActivity).mockResolvedValueOnce(cached);
+    jest.mocked(snapshotStore.readGroups).mockResolvedValueOnce([{
+      ...descriptor,
+      summary: { currency: 'EUR', currentUserBalanceMinor: 250, memberCount: 2, expenseCount: 1, syncedAt: '2026-07-17T10:00:00.000Z' },
+    }]);
+    jest.mocked(githubGateway.listGroupActivityCommits).mockResolvedValueOnce({
+      commits: [{ sha: commitSha, firstMessageLine: `Add expense ${expense.id}`, authorLogin: 'friend', committedAt: '2026-07-17T10:30:00.000Z' }],
+      checkpointFound: true,
+      hasMore: false,
+      warnings: [],
+    });
+    const updatedExpense = { ...expense, amount_minor: 2000, shares_minor: { owner: 1000, friend: 1000 } };
+    jest.mocked(githubGateway.refreshGroup).mockResolvedValueOnce(snapshot(updatedExpense, 'updated-sha'));
+    const wrapper = ({ children }: PropsWithChildren) => <GroupsProvider>{children}</GroupsProvider>;
+    const view = await renderHook(() => useGroups(), { wrapper });
+    await waitFor(() => expect(view.result.current.activityState.status).toBe('ready'));
+
+    await act(() => view.result.current.refresh());
+
+    expect(view.result.current.hasUnreadActivity).toBe(false);
+    expect(githubGateway.refreshGroup).toHaveBeenCalledWith(repository, 'owner');
+    expect(view.result.current.state.data[0]?.summary?.currentUserBalanceMinor).toBe(1000);
   });
 
   it('caps activity history concurrency and stops scheduling after a rate limit', async () => {
