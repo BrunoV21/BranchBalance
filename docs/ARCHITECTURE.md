@@ -1,13 +1,13 @@
-# BranchBalance — Phase 1 Architecture and CR-001/CR-002/CR-003/CR-004/CR-005 Increments + CR-006 Proposal
+# BranchBalance — Phase 1 Architecture and CR-001 through CR-007
 
-**Status:** Phase 1 implementation guide; CR-001 through CR-005 implemented; CR-006 proposed and not authorized for implementation; CR-003 physical-device acceptance blocked by a known GitHub App token limitation and CR-004/CR-005 physical-device acceptance pending
-**Applies to:** Phase 1 Android application, CR-001 trip and group spending intelligence, CR-002 settlement payment recording, CR-003 in-app group invitation decisions, CR-004 on-device activity inbox, CR-005 pace, mix, and fairness analytics, and the proposed CR-006 private on-device receipt-scanning architecture
+**Status:** Phase 1 implementation guide; CR-001 through CR-007 implemented; CR-003 physical-device acceptance remains blocked by a known GitHub App token limitation, CR-004/CR-005 physical-device acceptance is pending, and the CR-006/CR-007 OCR quality and complete physical-device acceptance matrix remains open
+**Applies to:** Phase 1 Android application, CR-001 trip and group spending intelligence, CR-002 settlement payment recording, CR-003 in-app group invitation decisions, CR-004 on-device activity inbox, CR-005 pace, mix, and fairness analytics, CR-006 private on-device receipt scanning, and CR-007 typed groups and Fuel tracking
 **Companion specification:** [`PRD.md`](PRD.md)
-**Last updated:** 2026-07-20
+**Last updated:** 2026-08-10
 
 ## 1. Purpose and decision precedence
 
-This document turns the Phase 1 product requirements and the screens in `mockups/` into an implementation blueprint. Together with the PRD, the implemented increments are intended to be sufficient to implement, test, and package the application without making additional architectural decisions. CR-006 is deliberately different: section 21 records the proposed boundaries and the decisions that must pass review before implementation is authorized.
+This document turns the Phase 1 product requirements and the screens in `mockups/` into an implementation blueprint. Together with the PRD, the implemented increments are intended to be sufficient to implement, test, and package the application without making additional architectural decisions. Sections 21 and 22 define the implemented CR-006/CR-007 boundaries and the remaining OCR quality and physical-device acceptance work.
 
 Use this precedence when sources disagree:
 
@@ -28,7 +28,9 @@ The following clarifications are intentional:
 | Mixed-currency summary | Never add currencies together. Show a separate cached total for each currency. |
 | Theme | Follow the Android system theme by default and persist an optional light or dark override. |
 | Member names | GitHub login is canonical. Profile name and avatar are best-effort presentation data with an `@login` fallback. |
-| Receipt scanning | CR-006 is a proposed local-only prefill path. It does not save expenses automatically, retain receipt content, or authorize implementation before the section 21.13 gates pass. |
+| Receipt scanning | CR-006 is a local-only review path. It may persist only member-confirmed ordinary expense fields, including optional normalized generic line items; it never saves automatically or retains receipt pixels/raw OCR. |
+| Typed groups | CR-007 adds immutable `trip` and `fuel` group types. Every schema-v1 group has effective type Trip, while new typed groups use schema-v2 `group.json`. |
+| Type-specific UI | One shared group shell owns membership, expenses, balances, settlements, activity, and synchronization. A validated group-type registry selects planning, OCR review, Overview, and Spending strategies. |
 
 ## 2. System context and constraints
 
@@ -2115,11 +2117,11 @@ Forecasting, planned expenses, external benchmarks, cross-group/cross-currency a
 
 ## 21. CR-006 architecture delta — Private on-device receipt scanning
 
-**Increment status:** Proposed; feasibility and product review required before implementation
+**Increment status:** Implemented; model-quality and complete physical-device acceptance remain pending
 
-CR-006 adds an optional local input pipeline in front of the existing Add expense form. It does not change the authoritative expense schema, GitHub gateway, balance calculations, spending derivation, settlement logic, group snapshot, or online save behavior. Manual entry remains the baseline and recovery path.
+CR-006 adds an optional local input pipeline in front of the existing Add expense form. It leaves the GitHub transport, balance calculations, spending derivation, settlement logic, and online save behavior unchanged, but extends the schema-version-1 expense read/write model with optional member-confirmed generic `line_items`. Manual entry remains the baseline and recovery path.
 
-The architectural privacy boundary is strict: capture, image preparation, OCR, receipt parsing, confidence evaluation, and prefill handoff run inside the application process on the device. There is no network edge between receipt capture and form review. Only the final ordinary expense fields explicitly confirmed by the member may reach the existing GitHub mutation.
+The architectural privacy boundary is strict: capture, image preparation, OCR, receipt parsing, confidence evaluation, and review-draft handoff run inside the application process on the device. There is no network edge between receipt capture and form review. Only final normalized expense fields explicitly confirmed by the member—including optional edited line items—may reach the existing GitHub mutation.
 
 ```text
                          Android application boundary
@@ -2136,20 +2138,21 @@ The architectural privacy boundary is strict: capture, image preparation, OCR, r
 │                           ↓                        │                  │
 │       strict schema → deterministic TS parser     │                  │
 │                           ↓                        │                  │
-│      validated, sanitized in-memory prefill ──────┤                  │
+│   validated, sanitized in-memory review draft ────┤                  │
 │                                                    ↓                  │
-│                                  existing Add expense form           │
+│                       editable extracted-data preview                │
+│                       → existing Add expense form                    │
 │                                                    ↓ explicit save    │
 └────────────────────────────────────────────────────┼─────────────────┘
                                                      ↓
                                            existing GitHub gateway
 ```
 
-No receipt image, raw OCR block, parser evidence, confidence score, or scan diagnostic crosses the bottom boundary.
+No receipt image, raw OCR block, parser evidence, confidence score, bounding box, or scan diagnostic crosses the bottom boundary. Confirmed `line_items` cross only as normalized expense metadata, never as OCR evidence.
 
 ### 21.1 Ownership, source organization, and dependency direction
 
-Keep receipt scanning as a self-contained feature with one narrow native port. The proposed source delta is:
+Keep receipt scanning as a self-contained feature with one narrow native port. The source organization is:
 
 ```text
 src/
@@ -2164,10 +2167,12 @@ src/
 │   ├── validate-receipt.ts               # confidence/arithmetic/currency policy
 │   ├── receipt-scan-machine.ts            # cancellation and state transitions
 │   ├── receipt-temp-files.ts              # ownership-aware cleanup
-│   ├── receipt-prefill.ts                 # sanitized form handoff
-│   └── receipt-draft-provider.tsx         # selected-group-scoped memory only
+│   ├── receipt-review-draft.ts             # sanitized editable handoff
+│   └── receipt-draft-provider.tsx          # selected-group-scoped memory only
 └── features/expenses/
-    └── expense-form.tsx                  # existing form consumes prefill once
+    ├── extracted-data-preview.tsx        # shared detected-value wrapper
+    ├── generic-line-item-editor.tsx      # editable/removable ordered rows
+    └── expense-form.tsx                  # existing form consumes draft once
 
 modules/paddle-ocr/
 ├── expo-module.config.json
@@ -2185,13 +2190,13 @@ scanner screen → scan orchestration → ReceiptOcrPort
                                 └── native PaddleOCR adapter
 ```
 
-The native module knows nothing about groups, expenses, currencies supported by the product, navigation, GitHub, form state, or persistence. It returns recognized text geometry only. The TypeScript parser knows nothing about React Native, Expo, ONNX Runtime, or native model tensors. The expense form receives only sanitized eligible values and review messages; it never imports the OCR module.
+The native module knows nothing about groups, expenses, currencies supported by the product, navigation, GitHub, form state, or persistence. It returns recognized text geometry only. The TypeScript parser knows nothing about React Native, Expo, ONNX Runtime, or native model tensors. The expense form receives only sanitized eligible values, normalized item candidates, and closed review messages; it never imports the OCR module.
 
-Do not add receipt behavior to `GroupProvider`, `SnapshotStore`, the GitHub gateway, or the persisted expense domain. A narrow `ReceiptDraftProvider` may be mounted inside the selected-group layout solely to hand one in-memory prefill from the scanner route to the Add expense route. It must clear when consumed, cancelled, the selected group changes, access is lost, or the session ends.
+Do not add transient scanner state to `GroupProvider`, `SnapshotStore`, or the GitHub gateway. The persisted expense domain does gain the optional `line_items` contract because confirmed rows are shared expense metadata. A narrow `ReceiptDraftProvider` may be mounted inside the selected-group layout solely to hand one in-memory review draft from the scanner route to the Add expense route. It must clear when consumed, cancelled, the selected group changes, access is lost, or the session ends.
 
-### 21.2 Proposed dependencies and development-build boundary
+### 21.2 Dependencies and development-build boundary
 
-CR-006 proposes these direct dependencies only after its feasibility gate is approved:
+CR-006 uses these direct dependencies within the approved local-only boundary:
 
 | Dependency | Architectural purpose |
 |---|---|
@@ -2246,7 +2251,7 @@ The 1,800-pixel bound controls JavaScript/native image memory but does not repla
 
 Do not automatically save camera images to the photo library. Never place receipt content in filenames, route URLs, query parameters, AsyncStorage keys, accessibility identifiers, logs, crash breadcrumbs, or analytics. Temporary filenames use opaque random values.
 
-The temporary-file manager maintains an explicit set of app-owned paths for the active attempt. It deletes the prepared image plus the camera source, when applicable, after successful prefill handoff, cancellation, or terminal failure. It never deletes an `external_original`. A bounded startup cleanup removes only stale files inside the scanner's dedicated cache directory after verifying the resolved path is within that directory. Failure to delete is logged only as a content-free error code and retried by later bounded cleanup.
+The temporary-file manager maintains an explicit set of app-owned paths for the active attempt. It deletes the prepared image plus the camera source, when applicable, after successful review-draft handoff, cancellation, or terminal failure. It never deletes an `external_original`. A bounded startup cleanup removes only stale files inside the scanner's dedicated cache directory after verifying the resolved path is within that directory. Failure to delete is logged only as a content-free error code and retried by later bounded cleanup.
 
 ### 21.4 Native OCR module contract
 
@@ -2360,7 +2365,16 @@ interface ReceiptExtraction {
   taxMinor?: { value: number; confidence: number };
   tipMinor?: { value: number; confidence: number };
   totalMinor?: { value: number; confidence: number };
-  review: Array<{ field: 'merchant' | 'date' | 'currency' | 'total'; reason: ReviewReason }>;
+  lineItems: ExtractedLineItem[];
+  review: Array<{ field: 'merchant' | 'date' | 'currency' | 'total' | 'line_items'; reason: ReviewReason }>;
+}
+
+interface ExtractedLineItem {
+  description: string;
+  quantity?: string; // normalized positive decimal string
+  unitPriceMinor?: number;
+  lineTotalMinor: number;
+  confidence: number; // ephemeral combined row confidence
 }
 ```
 
@@ -2374,8 +2388,12 @@ Parser policy follows the PRD:
 - Candidate ranking favors label quality, confidence, and lower receipt position. Stable coordinates resolve exact ties.
 - Currency absence remains unknown. A detected currency that differs from the group produces a review reason and prevents Amount prefill.
 - When subtotal exists, `subtotalMinor + taxMinor + tipMinor` may differ from `totalMinor` by at most two minor units. A larger difference prevents silent Amount prefill.
+- Generic item candidates come only from spatially associated body rows with a non-empty description and non-negative line total. Quantity and unit price are attached only when their row association is unambiguous.
+- Subtotal, tax, tip, discount, service charge, deposit, amount-paid, change, and total rows are excluded before constructing item candidates. Receipt order is retained and duplicate-looking rows are never merged automatically.
+- Item quantity is normalized as a positive decimal string; item money uses safe integer minor units. Keep at most 80 rows and reject descriptions outside the PRD length bound before review handoff.
+- Compute the item sum for review, but do not require equality with `totalMinor`: tax, tip, discounts, deposits, service charges, and rounding may sit outside item rows. A mismatch produces explanatory review state, not an Amount rewrite or an invalid expense.
 
-The final `ReceiptExtraction` passes its own strict Zod schema. Parser evidence and raw blocks are no longer needed after producing the sanitized review result and must be released before navigation.
+The final `ReceiptExtraction` passes its own strict Zod schema. Parser evidence and raw blocks are no longer needed after producing the sanitized review result and must be released before navigation. Ephemeral confidence may remain only long enough to label detected controls; it is excluded from the persisted expense builder.
 
 ### 21.7 Scan state, cancellation, and lifecycle
 
@@ -2390,7 +2408,7 @@ type ReceiptScanState =
   | { kind: 'preparing'; requestId: string }
   | { kind: 'recognizing'; requestId: string }
   | { kind: 'validating'; requestId: string }
-  | { kind: 'ready'; prefill: ReceiptPrefill }
+  | { kind: 'ready'; draft: ReceiptReviewDraft }
   | { kind: 'error'; code: ReceiptScanErrorCode; canRetry: boolean }
   | { kind: 'cancelled' };
 ```
@@ -2401,7 +2419,7 @@ Mount the camera only while its route is focused and permission is granted. On a
 
 The feature allows one active preparation/inference at a time and disables duplicate capture controls. A timeout may expose Cancel and manual-entry choices, but it must not destroy a working draft, start a second inference, or route to a network service.
 
-### 21.8 Navigation and sanitized form handoff
+### 21.8 Navigation and sanitized review-draft handoff
 
 Mockup 05 uses one split Add expense control:
 
@@ -2410,21 +2428,66 @@ Mockup 05 uses one split Add expense control:
 
 Do not put image URIs, OCR text, amounts, merchant names, dates, confidence, warnings, or serialized drafts in Expo Router parameters. Route parameters can appear in navigation history and developer diagnostics.
 
-After successful parsing, convert only eligible results into:
+After successful parsing, convert only eligible results into a generic review draft. Input-shaped strings are used because members can edit every extracted value before the ordinary expense builder parses it:
 
 ```ts
-interface ReceiptPrefill {
+interface DetectedDraftValue<T> {
+  value: T;
+  confidence: number; // ephemeral UI metadata; never serialized
+}
+
+interface EditableLineItemDraft {
+  rowId: string; // opaque in-memory key only
+  descriptionInput: string;
+  quantityInput?: string;
+  unitPriceInput?: string;
+  lineTotalInput: string;
+  confidence: number; // ephemeral; never serialized
+}
+
+interface ReceiptReviewDraft {
+  profile: 'generic';
   description?: string;
   amountInput?: string;
   expenseDate?: CalendarDate;
+  detected: {
+    description?: DetectedDraftValue<string>;
+    amount?: DetectedDraftValue<string>;
+    expenseDate?: DetectedDraftValue<CalendarDate>;
+  };
+  lineItems: EditableLineItemDraft[];
   notice: 'receipt_scanned_locally';
   reviewMessages: string[]; // closed, content-free templates
 }
 ```
 
-`ReceiptDraftProvider.publish()` stores one sanitized value in memory, associated with the current normalized group key and an opaque attempt ID. The scanner cleans its files and raw inference data, then replaces itself with the Add expense route. `consume()` atomically returns and clears the matching prefill during form initialization. A missing/stale/mismatched value produces an ordinary empty manual form, never a partially reconstructed scan.
+`ReceiptDraftProvider.publish()` stores one sanitized value in memory, associated with the current normalized group key and an opaque attempt ID. The scanner cleans its files and raw inference data, then replaces itself with the Add expense route. `consume()` atomically returns and clears the matching draft during form initialization. A missing/stale/mismatched value produces an ordinary empty manual form, never a partially reconstructed scan.
 
-The expense form merges only `description`, `amount`, and `expenseDate` into its normal initial draft. Category and payment method remain null; payer, split type, and participants use existing defaults. The group currency remains authoritative. The form renders the local-scan notice and closed review messages, but saving calls the unchanged `buildNewExpense()` and `createExpense()` flow. A save/network failure preserves the ordinary editable form state without needing to retain the receipt image or OCR result.
+The scanned route renders one **Editable OCR preview** before manual choices. It groups Description, Amount, Date, and the conditional line-item editor; the manual route renders no extraction panel. Category and payment method remain null, while payer, split type, and participants use existing defaults. The group currency remains authoritative.
+
+Line-item rows support editing and removal. The section disappears when the final row is removed. Recalculate and display the sum whenever Amount or a line total changes, but never mutate Amount, split shares, category, budget, or balance state from that reconciliation. After the preview, the same form renders Category, Payment method, payer, split, and participants.
+
+Saving validates the current item inputs into normalized expense metadata:
+
+```ts
+interface ExpenseLineItem {
+  description: string;
+  quantity?: string;
+  unit_price_minor?: number;
+  line_total_minor: number;
+}
+
+interface Expense {
+  // Existing schema-version-1 fields remain unchanged.
+  line_items?: ExpenseLineItem[];
+}
+```
+
+Omit `line_items` rather than writing an empty array. Validate 1–80 ordered rows, trimmed description length, positive normalized quantity strings, non-negative safe-integer item money, and the group currency's precision. The sum may differ from `amount_minor` and does not participate in common expense validity. Parse optional line-item enrichment independently from balance-critical common fields: malformed existing line-item metadata produces a safe warning and an omitted item list, not exclusion of an otherwise valid expense. Writers use the existing passthrough merge so unaware metadata is preserved on edits.
+
+The final save still calls the existing `buildNewExpense()`/`createExpense()` path after extending the builder with optional confirmed items. A save/network failure preserves the ordinary editable form plus its current item rows without retaining the receipt image, raw OCR, confidence, or parser evidence.
+
+After confirmed save or later refresh, `line_items` follows the same repository and account-scoped non-secret snapshot-cache lifecycle as the rest of that expense, including purge on confirmed access loss or sign-out. It is not copied into activity summaries, notifications, commit messages, diagnostics, or a separate receipt cache.
 
 ### 21.9 Error, permission, and accessibility architecture
 
@@ -2445,15 +2508,15 @@ Large text must preserve the header, privacy statement, capture/manual/photo act
 
 Receipt content is more sensitive than the existing non-secret snapshot cache even though it does not contain authentication credentials. Apply these non-negotiable boundaries:
 
-- Never write source/prepared images, raw OCR, extracted candidates, confidence, or corrections to SecureStore, AsyncStorage, SQLite, repository files, logs, analytics, crash reports, activity items, clipboard, notifications, or support payloads.
+- Never write source/prepared images, raw OCR, unconfirmed extracted candidates, confidence, bounding boxes, parser evidence, or correction history to SecureStore, AsyncStorage, SQLite, repository files, logs, analytics, crash reports, activity items, clipboard, notifications, or support payloads. The only exception is the final normalized expense fields explicitly confirmed at Save, including optional `line_items`.
 - Never include receipt content in thrown error messages, React keys, test IDs, route names/parameters, commit messages, or accessibility progress announcements.
 - Never call `fetch`, Octokit, WebBrowser, or another network client from the receipt-scanning feature or native module.
 - Keep model files read-only inside application resources; the first increment has no downloader, remote configuration, or runtime model update.
 - Pass file URIs across the native bridge, not Base64 image data or pixel arrays in JavaScript.
 - Limit dimensions, counts, text lengths, inference concurrency, and parser work before allocating derived structures.
-- Clear the in-memory prefill on sign-out, terminal session expiry, group change, confirmed access loss, or process death.
+- Clear the in-memory review draft on sign-out, terminal session expiry, group change, confirmed access loss, or process death.
 
-The existing GitHub save remains a separate, member-triggered operation after review. Network monitors will still observe normal GitHub traffic when Save expense is pressed; privacy tests must distinguish that expected final expense request from the prohibited capture/OCR stages.
+The existing GitHub save remains a separate, member-triggered operation after review. Network monitors will still observe normal GitHub traffic containing the confirmed expense and optional confirmed line items when Save expense is pressed; privacy tests must distinguish that expected final expense request from the prohibited capture/OCR stages.
 
 Release builds should disable receipt-content debug overlays. Development diagnostics may record request ID, phase, duration bucket, model-bundle version, safe error code, and aggregate block count only while actively debugging; they still must not record text, coordinates, amounts, dates, merchant, currency, URI, filesystem path, or image-derived thumbnails. Production telemetry remains absent under CR-006.
 
@@ -2466,7 +2529,7 @@ interface LocalReceiptFallback {
   resolve(request: {
     requestId: string;
     imageUri: string;
-    unresolvedFields: Array<'merchant' | 'date' | 'currency' | 'total'>;
+    unresolvedFields: Array<'merchant' | 'date' | 'currency' | 'total' | 'line_items'>;
   }): Promise<unknown>;
   cancel(requestId: string): Promise<void>;
 }
@@ -2478,9 +2541,9 @@ The fallback must not be resident concurrently with PaddleOCR if the approved me
 
 ### 21.12 Test architecture and feasibility benchmark
 
-Keep all parser/validator tests platform-free and table-driven. Use synthetic OCR block fixtures rather than committed personal receipts. Cover English/Portuguese labels, reading order, coordinate ties, subtotal exclusion, multiple total lines, EUR/USD/GBP evidence, dot/comma/thousands conventions, safe-integer bounds, invalid/ambiguous dates, confidence thresholds, arithmetic tolerance, currency mismatch, malformed/oversized native output, and deterministic prefill.
+Keep all parser/validator tests platform-free and table-driven. Use synthetic OCR block fixtures rather than committed personal receipts. Cover English/Portuguese labels, reading order, coordinate ties, subtotal exclusion, multiple total lines, EUR/USD/GBP evidence, dot/comma/thousands conventions, safe-integer bounds, invalid/ambiguous dates, confidence thresholds, arithmetic tolerance, currency mismatch, malformed/oversized native output, deterministic review drafts, and generic item descriptions/quantities/unit prices/line totals/order/exclusions/limits.
 
-Service/component tests inject fake camera, picker, image preparer, file manager, clock, ID source, and `ReceiptOcrPort`. Verify every state transition, duplicate capture suppression, retake/cancel, stale completion rejection, group/session generation changes, ownership-safe cleanup, one-time prefill consumption, no route data leakage, manual form defaults, review copy, save failure retention, permission alternatives, module/model errors, TalkBack labels, large text, dark/light themes, and reduced motion.
+Service/component tests inject fake camera, picker, image preparer, file manager, clock, ID source, and `ReceiptOcrPort`. Verify every state transition, duplicate capture suppression, retake/cancel, stale completion rejection, group/session generation changes, ownership-safe cleanup, one-time draft consumption, no route data leakage, manual form defaults, extracted-value grouping before manual choices, conditional line-item rendering, row editing/removal, empty-list omission, match/mismatch reconciliation, save failure retention, permission alternatives, module/model errors, TalkBack labels, large text, dark/light themes, and reduced motion.
 
 Native Android instrumentation tests use synthetic generated receipts and approved redacted/consented fixtures outside normal repository history when licensing/privacy requires it. Verify:
 
@@ -2501,6 +2564,7 @@ crash and cancellation result
 text-block accuracy
 merchant/date/currency field accuracy
 total exact-match rate
+generic line-item row/description/quantity/unit-price/line-total precision and recall
 review/blank rate
 ```
 
@@ -2510,23 +2574,23 @@ No metric report contains receipt pixels or recognized/personal text. Thresholds
 
 ### 21.13 Approval and implementation sequence
 
-CR-006 is not authorized for implementation by this architecture update. After product review, proceed only in these gates:
+CR-006 was implemented through the following gates. The current profiles are available in the app; any model/runtime replacement and final release acceptance must continue to satisfy them:
 
 1. **Feasibility spike:** outside production paths, prove model provenance/export, native runtime compatibility, fixture quality, airplane-mode execution, latency, memory, and APK-size impact on the device matrix.
 2. **Architecture approval:** choose the exact PaddleOCR bundle, optional orientation stage, ONNX Runtime package/build, thresholds, minimum device, and distribution strategy; record the accepted manifest and benchmark.
-3. **Pure contracts:** add strict OCR/result schemas, integer receipt parsing, validation/review policy, state machine, prefill contract, and exhaustive unit tests.
+3. **Pure contracts:** add strict OCR/result schemas, integer receipt/item parsing, validation/review policy, state machine, review-draft contract, optional expense `line_items`, and exhaustive unit tests.
 4. **Capture and cleanup:** add Expo packages/configuration, Development Build workflow, capture/photo selection, image preparation, ownership-aware file lifecycle, and permission/accessibility states.
 5. **Android native module:** implement Kotlin detection/recognition, model resources, cancellation, resource closure, safe errors, and instrumentation tests.
-6. **Form integration:** add the split Overview control from mockup 05, scanner route from mockup 13, ephemeral sanitized handoff, selective form prefill, and unchanged explicit save.
+6. **Form integration:** add the split Overview control from mockup 05, scanner route from mockup 13, exact extraction-scope preview, ephemeral sanitized handoff, editable extracted-data panel from mockup 14, conditional line-item editor, and explicit save through the extended ordinary expense builder.
 7. **Hardening and acceptance:** privacy/log/network inspection, corrupt/large inputs, low memory, backgrounding, repeated scans, TalkBack, themes, full validation, and the PRD section 21.13 manual matrix.
 8. **Fallback decision:** evaluate a local VLM only from documented residual failures and treat approval as a separate product/security/performance decision.
 
-Do not install dependencies, scaffold native modules, add model binaries, generate native projects, or change application routes before gates 1 and 2 are approved.
+Further dependency, native-runtime, model-binary, or capture-route changes must repeat the applicable feasibility, provenance, privacy, and benchmark checks before release acceptance.
 
 ### 21.14 Explicitly outside the CR-006 architecture
 
 - Receipt attachment/storage in GitHub, AsyncStorage, SQLite, activity history, or exports
-- Item-level extraction, item categorization, inventory, warranties, nutrition, or merchant analytics
+- Automatic item categorization, item matching across receipts, inventory, warranties, nutrition, or merchant analytics
 - Automatic category, payment-method, payer, participant, split, or save decisions
 - Foreign-exchange conversion and multi-currency expenses
 - Multiple-receipt queues, duplicate-receipt matching, or bookkeeping reconciliation
@@ -2536,3 +2600,560 @@ Do not install dependencies, scaffold native modules, add model binaries, genera
 - iOS delivery until the product supports iOS; later Swift behavior must match the same contract and fixtures
 
 These require new product and architecture decisions rather than expansion during implementation.
+
+## 22. CR-007 architecture delta — Typed groups and Fuel expense tracking
+
+**Increment status:** Implemented; profile-specific quality and complete physical-device acceptance remain pending
+
+CR-007 introduces immutable group types without forking BranchBalance into separate applications. The shared core continues to own repository access, membership, common expense fields, payer/share validation, balances, settlements, activity, optimistic concurrency, refresh, and caching. A validated type definition supplies only the behavior that legitimately varies: spending-plan shape, receipt profile/parser, optional expense enrichment, Overview presentation, and Spending analytics.
+
+```text
+                               shared selected-group shell
+┌───────────────────────────────────────────────────────────────────────┐
+│ group repository · members · common expenses · balances · activity   │
+│                                 │                                     │
+│                   validated effective group type                     │
+│                       ┌─────────┴─────────┐                           │
+│                       │                   │                           │
+│                 Trip definition      Fuel definition                 │
+│                 ───────────────      ───────────────                  │
+│                 dated plan           monthly limits                  │
+│                 generic OCR          Fuel OCR                         │
+│                 optional items       Fuel type_data                   │
+│                 trip pace/mix        fuel metrics                     │
+└───────────────────────────────────────────────────────────────────────┘
+```
+
+`amount_minor`, `paid_by`, `participants`, and `shares_minor` remain the only expense inputs to balance and settlement derivation. Type-specific data is enrichment and must be incapable of changing those results.
+
+### 22.1 Ownership, source organization, and dependency direction
+
+Add typed-group code around the existing feature boundaries rather than cloning selected-group screens:
+
+```text
+src/
+├── domain/
+│   ├── groups/
+│   │   ├── group-envelope.ts             # v1/v2 parsing and effective type
+│   │   ├── group-type.ts                 # closed known-type union
+│   │   ├── group-type-registry.ts        # platform-free domain definitions
+│   │   └── plans/
+│   │       ├── trip-plan.ts
+│   │       └── fuel-monthly-plan.ts
+│   ├── expenses/
+│   │   ├── expense-line-items.ts         # CR-006 optional enrichment
+│   │   └── fuel-expense-data.ts           # CR-007 optional enrichment
+│   └── analytics/
+│       ├── trip-analytics.ts
+│       └── fuel-analytics.ts
+├── features/
+│   ├── groups/
+│   │   ├── group-type-ui-registry.tsx    # icons, copy, leaf components
+│   │   └── unsupported-group-type.tsx
+│   ├── spending-plans/
+│   │   ├── trip-plan-form.tsx
+│   │   └── fuel-monthly-plan-form.tsx
+│   ├── expenses/
+│   │   ├── trip-expense-form.tsx
+│   │   ├── fuel-expense-form.tsx
+│   │   └── extracted-data-preview.tsx
+│   └── receipt-scanning/
+│       ├── receipt-profile-registry.ts
+│       ├── parse-generic-receipt.ts
+│       └── parse-fuel-receipt.ts
+└── app/(app)/groups/[owner]/[repo]/
+    ├── (tabs)/
+    │   ├── index.tsx                     # shared route, type-selected body
+    │   └── spending.tsx                  # shared route, type-selected body
+    ├── spending-plan.tsx                 # shared route, type-selected form
+    └── expenses/
+        ├── new.tsx                       # shared route, type-selected form
+        └── scan.tsx                      # shared route, type-selected profile
+```
+
+The domain registry contains no React components, icons, routes, native modules, or storage dependencies. It maps a known type to pure schemas and selectors. A separate UI registry in feature composition maps the same exhaustive union to labels, icons, and leaf components. This split keeps domain tests platform-free and prevents React presentation imports from entering persistence or arithmetic code.
+
+Do not scatter `if (group.group_type === 'fuel')` across screens. One selected-group boundary resolves the effective type, obtains its domain/UI definitions, and passes a discriminated view model to shared shells. Exhaustive records must fail TypeScript compilation when a future known type is added without all required strategies.
+
+### 22.2 Group envelope, schema versions, and legacy compatibility
+
+Keep persisted schema versions explicit and expose one normalized runtime envelope:
+
+```ts
+type KnownGroupType = 'trip' | 'fuel';
+
+interface GroupDocumentV1 {
+  schema_version: 1;
+  name: string;
+  currency: CurrencyCode;
+  spending_plan?: LegacyTripPlan;
+  created_by: string;
+  created_at: IsoInstant;
+}
+
+interface GroupDocumentV2Envelope {
+  schema_version: 2;
+  group_type: string;
+  name: string;
+  currency: CurrencyCode;
+  spending_plan?: unknown;
+  created_by: string;
+  created_at: IsoInstant;
+}
+
+interface GroupDocumentV2 extends Omit<
+  GroupDocumentV2Envelope,
+  'group_type' | 'spending_plan'
+> {
+  group_type: KnownGroupType;
+  spending_plan?: TripPlanV2 | FuelMonthlyPlanV2;
+}
+
+type ParsedGroupEnvelope =
+  | {
+      kind: 'known';
+      sourceVersion: 1 | 2;
+      effectiveType: KnownGroupType;
+      group: EffectiveGroup;
+      file: GroupFile;
+    }
+  | {
+      kind: 'unsupported_type';
+      sourceVersion: 2;
+      groupType: string;
+      safeSummary: Pick<GroupDocumentV2Envelope, 'name' | 'currency'>;
+      file: GroupFile;
+    };
+```
+
+Parsing order is security-significant:
+
+1. Strictly validate the schema envelope and safe base fields from untrusted JSON.
+2. Treat every valid schema-v1 document as effective `trip`; do not write during discovery, refresh, hydration, or mere viewing.
+3. Require `group_type` for schema v2. Resolve known types through the registry.
+4. Preserve a syntactically safe but unknown schema-v2 type as `unsupported_type`; show **Update required** and disable type-specific reads and every repository mutation.
+5. Reject unknown schema versions, malformed base fields, and mismatched known type/plan combinations as data errors.
+
+New repositories write schema v2 and an explicit immutable type. The Create group use case receives the selected known type, with Trip supplied by the UI as the default, and includes it in the initial `group.json` commit. Group type has no edit action.
+
+For a schema-v1 Trip, the first intentional `group.json` mutation may merge `schema_version: 2` and `group_type: 'trip'` into the latest passthrough source document. The same mutation normalizes a changed spending plan to `TripPlanV2`. It preserves all unrelated known and unknown fields. A no-op refresh never becomes a migration. A cached schema-v1 group followed by a schema-v2 Trip refresh is the expected migration result; any Trip-to-Fuel or Fuel-to-Trip change for an existing repository is a `group_type_changed` integrity error and makes writes unavailable.
+
+### 22.3 Type-definition registries
+
+Use an exhaustive domain record for type-varying contracts:
+
+```ts
+type ReceiptProfileId = 'generic_v1' | 'fuel_v1';
+
+interface GroupTypeDomainDefinition<
+  TPlan,
+  TExpenseData,
+  TAnalytics,
+> {
+  readonly type: KnownGroupType;
+  readonly receiptProfile: ReceiptProfileId;
+  parsePlan(value: unknown, context: PlanParseContext): TPlan | undefined;
+  parseExpenseData(value: unknown, context: ExpenseParseContext): TExpenseData | undefined;
+  validateWritableExpense(draft: WritableExpenseDraft): DomainResult<void>;
+  deriveAnalytics(input: GroupAnalyticsInput): DomainResult<TAnalytics>;
+}
+
+interface CommonExpenseSummary {
+  totalSpentMinor: number;
+  currentUserPaidMinor: number;
+  currentUserShareMinor: number;
+  paymentMethodSpentMinor: Record<PaymentMethodBucket, number>;
+  sharedMinor: number;
+  justMeMinor: number;
+}
+
+type TypedGroupAnalytics =
+  | { type: 'trip'; spending: SpendingSummary }
+  | { type: 'fuel'; common: CommonExpenseSummary; fuel: FuelAnalytics };
+
+const groupTypeDomainRegistry: {
+  trip: GroupTypeDomainDefinition<TripPlanV2, undefined, Extract<TypedGroupAnalytics, { type: 'trip' }>>;
+  fuel: GroupTypeDomainDefinition<FuelMonthlyPlanV2, FuelExpenseDataV1, Extract<TypedGroupAnalytics, { type: 'fuel' }>>;
+};
+```
+
+Common expense parsing happens before type enrichment. Trip's enrichment parser handles optional CR-006 `line_items` through the common optional-enrichment boundary and rejects Fuel `type_data` for new writes. Fuel's parser handles optional Fuel `type_data`; it never asks the generic parser to invent generic line items. Group type comes only from the validated group envelope, never from a repository name, merchant, receipt text, or available model.
+
+The UI registry is keyed by the same union and supplies:
+
+- accessible type name, description, icon, and semantic colour role;
+- create-group confirmation copy;
+- spending-plan editor and summary components;
+- expense-form enrichment and extracted-data preview components;
+- Overview cards and Spending analytics components; and
+- empty, incomplete-data, and warning copy.
+
+Shared Groups, Overview shell, Spending shell, Balances, Members, activity, and expense mutation hooks consume the selected definition. They do not import concrete Fuel parsers or duplicate transport logic.
+
+### 22.4 Typed spending plans and group-file writes
+
+The normalized v2 plan union is discriminated by `kind`:
+
+```ts
+interface TripPlanV2 {
+  kind: 'trip';
+  budget_minor?: number;
+  category_budgets_minor?: Partial<Record<ExpenseCategory, number>>;
+  starts_on: CalendarDate;
+  ends_on: CalendarDate;
+  updated_by: string;
+  updated_at: IsoInstant;
+}
+
+interface FuelMonthlyLimit {
+  effective_month: `${number}-${string}`; // additionally validated real YYYY-MM
+  limit_minor: number;
+}
+
+interface FuelMonthlyPlanV2 {
+  kind: 'fuel_monthly';
+  monthly_limits: FuelMonthlyLimit[];
+  updated_by: string;
+  updated_at: IsoInstant;
+}
+
+type TypedSpendingPlan = TripPlanV2 | FuelMonthlyPlanV2;
+```
+
+Trip validation retains CR-001 money/category invariants and requires a complete inclusive date pair on every new v2 save. A legacy schema-v1 Trip plan without dates remains readable through `LegacyTripPlan`; opening its editor requires valid dates before a write can migrate it.
+
+Fuel monthly limits are positive safe integers keyed by real `YYYY-MM` months, sorted ascending, and duplicate-free. Resolve the applicable limit with the last entry whose `effective_month <= selectedMonth`; months before the first entry have no limit. Removing a Fuel plan removes the whole `spending_plan`, never its expenses. No rollover or Trip dates/category budgets enter the Fuel contract.
+
+Generalize the existing plan operation without creating a second GitHub gateway family:
+
+```ts
+interface GitHubGateway {
+  updateSpendingPlan(
+    repository: RepositoryRef,
+    current: GroupFile,
+    effectiveType: KnownGroupType,
+    next: TypedSpendingPlan | null,
+    signal?: AbortSignal,
+  ): Promise<GroupFile>;
+}
+```
+
+The use case validates `next.kind` against `effectiveType`, applies a schema-v1-to-v2 Trip migration when required, merges into the passthrough source document, and includes the current blob SHA. Existing 409/422 conflict review, reapply-on-latest, ambiguous-write reread, and no-force-write rules remain. Reapply validates against the latest effective type and must stop if the remote type changed.
+
+### 22.5 Expense enrichment and validation isolation
+
+Expense files remain schema version 1 and retain the common fields. Optional enrichment is additive:
+
+```ts
+type FuelType = 'petrol' | 'diesel' | 'lpg' | 'other';
+
+interface FuelExpenseDataV1 {
+  schema_version: 1;
+  type: 'fuel';
+  volume_millilitres: number;
+  unit_price_micros_per_litre?: number;
+  gross_amount_minor?: number;
+  discount_minor?: number;
+  fuel_type?: FuelType;
+}
+
+interface Expense {
+  // Existing common fields and optional CR-006 line_items remain.
+  type_data?: FuelExpenseDataV1;
+}
+```
+
+Parse an expense in two stages:
+
+1. Validate common fields, category/payment metadata, payer, participants, shares, date, audit values, and currency. Common failure excludes the expense from every calculation.
+2. Parse optional enrichment according to the validated group type. Enrichment failure adds a path-specific safe warning and omits that enrichment from type-specific UI/analytics; the otherwise valid common expense still enters spending, shares, balances, and settlements.
+
+Fuel write rules are:
+
+- Category persists as `transport`; the Fuel form does not offer the general category picker.
+- `type_data` is optional, so an amount-only expense remains valid.
+- When `type_data` exists, volume is a positive safe integer. Unit price is a positive safe integer in currency micros per litre. Gross is positive; discount is non-negative and requires gross.
+- When gross and discount are both represented, `gross_amount_minor - discount_minor === amount_minor` exactly. A trustworthy printed zero persists as `0`; an absent discount remains absent unless gross exactly equals paid and the member confirms zero.
+- Volume and printed price may differ from gross by at most two minor units after deterministic rational rounding.
+- New Trip writes cannot include Fuel `type_data`; new Fuel writes do not create generic `line_items` from the Fuel OCR profile.
+
+Parse litres and printed price from input digit strings without first converting the decimal input through binary floating point. Persist litres as integer millilitres and unit price as integer micros per litre. Use checked `bigint` intermediates for the multiplication/rounding formula, then convert to `number` only after a safe-integer bound check:
+
+```text
+round(
+  volume_millilitres
+  × unit_price_micros_per_litre
+  × 10^currency_minor_digits
+  / 1_000_000_000
+)
+```
+
+`amount_minor` is always actual paid amount. Neither gross, discount, item totals, volume, unit price, nor fuel type enters `allocateEqual`, `allocateFull`, `calculateBalances`, or settlement derivation. Add invariant tests that mutate every enrichment field while asserting byte-equivalent balance output.
+
+Edits merge common fields and the active type's known enrichment into the latest passthrough document. Preserve unknown common and nested type-data keys. An edit cannot reinterpret Fuel data in a Trip group or vice versa.
+
+### 22.6 OCR profile routing and model configuration
+
+Extend CR-006's OCR port with an explicit profile selected from the effective group type. When CR-007 is implemented, these signatures supersede the unprofiled `getStatus()` and `recognize()` signatures in section 21.4; `cancel()` remains unchanged:
+
+```ts
+interface ReceiptOcrProfileStatus {
+  profile: ReceiptProfileId;
+  state: 'ready' | 'module_unavailable' | 'models_missing' | 'models_incompatible';
+  engine: 'paddle_ocr';
+  profileVersion: string | null;
+  modelBundleVersion: string | null;
+  safeMessage: string;
+}
+
+interface ReceiptOcrPort {
+  getStatus(profile: ReceiptProfileId): Promise<ReceiptOcrProfileStatus>;
+  recognize(request: {
+    requestId: string;
+    profile: ReceiptProfileId;
+    imageUri: string;
+  }): Promise<unknown>;
+  cancel(requestId: string): Promise<void>;
+}
+```
+
+Routing is exhaustive and contains no heuristic fallback:
+
+```text
+effective trip → generic_v1 → generic parser → GenericReceiptReviewDraft
+effective fuel → fuel_v1    → Fuel parser    → FuelReceiptReviewDraft
+unsupported type → scanner disabled with Update required
+```
+
+The native layer may share detector/recognizer sessions and model files. A profile is still dedicated when its versioned preprocessing parameters, thresholds, maximum regions, parser, validation rules, dataset gates, and manifest are distinct. Do not duplicate identical binary weights merely to produce two bundle names.
+
+Repository-controlled development contracts live at:
+
+- `config/ocr/pipeline.json` for shared quality policy;
+- `config/ocr/profiles/generic.json` for Generic parameters and gates; and
+- `config/ocr/profiles/fuel.json` for Fuel parameters and gates.
+
+Native packaged profile manifests must record the approved version/hash correspondence with those contracts. If the selected profile is absent or incompatible, offer manual entry. Never run the other profile and label its output as type-aware.
+
+The Generic parser follows section 21 and may emit ordered item rows. The Fuel parser independently extracts station, date, currency, paid amount, gross, discount including confirmed zero, litres, unit price, and optional product evidence. It must distinguish paid from a larger pre-discount total and apply:
+
+```text
+gross - discount = paid
+litres × printed unit price ≈ gross (two-minor-unit tolerance)
+```
+
+Failed or low-confidence Fuel fields remain empty or explicitly marked for review. The parser never changes the common Amount after the member edits it.
+
+### 22.7 Sanitized review drafts and layout composition
+
+The CR-006 provider carries a discriminated draft:
+
+```ts
+interface FuelReceiptReviewDraft {
+  profile: 'fuel';
+  stationInput?: string;
+  amountPaidInput?: string;
+  expenseDate?: CalendarDate;
+  litresInput?: string;
+  unitPriceInput?: string;
+  grossInput?: string;
+  discountInput?: string;
+  fuelTypeSuggestion?: FuelType;
+  detected: Partial<Record<
+    'station' | 'amount_paid' | 'date' | 'litres' |
+    'unit_price' | 'gross' | 'discount',
+    { confidence: number }
+  >>;
+  notice: 'receipt_scanned_locally';
+  reviewMessages: string[];
+}
+
+type TypedReceiptReviewDraft = ReceiptReviewDraft | FuelReceiptReviewDraft;
+```
+
+The provider validates that draft profile matches the current effective group type before publish and again on consume. It remains in memory only and is generation-guarded by account, normalized group key, and scan attempt. Raw blocks, boxes, images, and parser evidence are released before navigation.
+
+The layouts represented by mockups 13/14 and 18/19 map to two reusable stages:
+
+1. **Scan stage:** show the selected type/profile, local-only privacy state, camera/photo/manual actions, and a concise card naming the fields that the next editable preview can contain. The card is explanatory navigation, not persisted OCR output.
+2. **Review stage:** show a local-scan notice, then one type-labelled editable extraction panel containing every extracted value before any manual choices. Detected badges/confidence are ephemeral presentation metadata. After the panel, render manual payment/payer/split/participant choices and explicit Save.
+
+Generic review groups Description, Amount, Date, and optional line-item rows. Item description, quantity, unit price, and line total are editable; rows are removable; the list disappears when empty; and its live sum is informational. Manual Generic entry does not render an extraction panel.
+
+Fuel review groups station, Amount paid, Date, litres, printed price, pre-discount total, discount, and the member-reviewed optional fuel type. Arithmetic status recomputes after every related edit and changes to a textual warning when inconsistent; it never overwrites a control. Category appears below as fixed Transport, followed by unselected payment method and normal payer/split defaults. Manual Fuel entry reuses the same field composition with detected treatments removed and optional-details copy substituted.
+
+The review UI owns input strings only. Domain builders perform all decimal/minor-unit/millilitre/micro parsing at Save. A failed save preserves the complete edited panel and manual choices. Retake discards the current review draft only after confirmation when edits have occurred.
+
+### 22.8 Fuel analytics and integer/rational derivation
+
+Derive Fuel analytics from the same validated expense array used by common spending, plus independently valid Fuel enrichment:
+
+```ts
+type MonthKey = `${number}-${string}`; // validated YYYY-MM
+
+interface Rational {
+  numerator: number;   // checked safe integer; cache/JSON serializable
+  denominator: number; // checked positive safe integer
+}
+
+interface FuelMonthSummary {
+  month: MonthKey;
+  paidMinor: number;
+  applicableLimitMinor: number | null;
+  remainingMinor: number | null;
+  status: 'no_limit' | 'under' | 'at' | 'over';
+  expenseCount: number;
+  representedVolumeMl: number;
+  expensesWithVolume: number;
+  weightedPaidPrice: Rational | null;
+  explicitDiscountMinor: number;
+  expensesWithExplicitDiscount: number;
+}
+
+interface FuelAnalytics {
+  selectedMonth: FuelMonthSummary;
+  monthlySeries: FuelMonthSummary[];
+  stationRows: FuelStationSummary[];
+  coverage: FuelCoverage;
+  warnings: DataWarning[];
+}
+```
+
+Use injected `LocalCalendar` to choose the default `YYYY-MM`; bucket each expense from its stored `expense_date` string without timezone conversion. Every valid Fuel expense, including amount-only and Just me, enters paid spending, monthly-limit status, and common balances. Only expenses with valid required enrichment enter volume/price/discount selectors.
+
+Weighted price is aggregate amount divided by aggregate represented volume; never average rounded displayed per-fill prices. Keep aggregate numerators/denominators as checked integers or `bigint` rational intermediates and format at the presentation boundary. Explicit discount sums only represented values. Missing litres, prices, gross, or discounts are omitted and disclosed through coverage counts; never extrapolate.
+
+Station grouping applies Unicode normalization, trim, internal-whitespace collapse, and case folding only. It does not remove accents, strip branch numbers, or claim similarly named merchants are identical. Preserve a deterministic display label by choosing the most frequent original spelling, then code-point order as a tie-breaker.
+
+Fuel Overview consumes current-month summary only. Fuel Spending owns month navigation, spend/limit, volume, unit-price, savings, station, and coverage views. Chart components are leaf renderers over already-derived values; every chart has an ordered text/table equivalent and can apply the same expense filters without recomputing business rules in rendering code.
+
+Trip analytics continue through CR-001/CR-005 selectors. Do not feed Fuel groups into Trip pace/category-mix selectors or Trip groups into Fuel monthly/volume selectors.
+
+### 22.9 Navigation and screen composition
+
+The route graph remains shared:
+
+- **Groups** cards render a leading accessible Trip/Fuel icon and text label. Trip summaries may show dated-plan progress; Fuel summaries may show current-month spend/limit. Currency totals remain separated.
+- **Create group** adds one required immutable type selector after name/currency. Trip is selected by default. Confirmation names the type before repository creation.
+- **Selected-group header** shows type plus group name on Overview, Spending, Balances, Members, plan, expense, and scanner routes.
+- **Overview** and **Spending** keep shared route/shell ownership while the UI registry supplies type-specific bodies.
+- **Balances** and **Members** remain single shared implementations with selected-type context only.
+- **Spending plan**, **Add/Edit expense**, and **Scan receipt** are shared routes that resolve one matching strategy after the group envelope is valid.
+- **Unsupported type** exposes safe group identity and Update required, disables selected-group mutations, and never routes into a known type's plan, expense, scanner, or analytics component.
+
+Do not create parallel `/fuel/...` route trees. Deep links resolve the repository first, validate its current type, and then render the matching strategy. A route cannot force `profile=fuel` or `group_type=fuel` through query parameters.
+
+### 22.10 Provider, snapshot, cache, and synchronization
+
+Keep one `GroupProvider` and introduce a versioned discriminated snapshot:
+
+```ts
+interface GroupSnapshotV2 {
+  cache_version: 2;
+  groupKey: GroupKey;
+  groupEnvelope: ParsedGroupEnvelope;
+  effectiveType: KnownGroupType | null;
+  expenses: ExpenseFile[];
+  balances: BalanceResult | null;
+  settlements: Settlement[];
+  analytics: TypedGroupAnalytics | null;
+  warnings: DataWarning[];
+  synchronizedAt: IsoInstant;
+}
+```
+
+`effectiveType` and discriminant values must agree before publication. Unsupported groups carry no expense array, balances, spending, or analytics because type-specific parsing/writes are unavailable.
+
+Hydration accepts `GroupSnapshotV1` as effective Trip, recomputes derivable values, and never writes remotely. The next local cache write stores V2. If a V1 cache lacks enough group-file information for a safe plan mutation, keep that mutation disabled until refresh supplies the latest source document and SHA. Cache records are non-authoritative and may be discarded on any envelope mismatch.
+
+A complete refresh reads and validates `group.json` before parsing type-specific plans/expense enrichment. It then derives common balances and the matching type's spending/analytics from one valid-file generation and publishes once. Tabs never fetch separate type-specific snapshots.
+
+Confirmed mutations are atomic from the UI's perspective:
+
+- group creation inserts a schema-v2 typed summary only after repository/file creation succeeds;
+- plan mutation replaces group file/SHA, effective plan, summary, and matching analytics together;
+- expense create/edit/delete replaces the expense set, then recomputes balances, settlements, common spending, type analytics, and group-list summary before one reducer commit;
+- enrichment-only edits must leave balances/settlements deeply equal; and
+- remote access loss purges the entire private typed snapshot under existing rules.
+
+Group-list cache summaries include source schema version and effective type. Never combine a fresh monthly limit with stale expense totals or display an old Trip badge after a refreshed schema-v2 Fuel envelope. All cross-group money remains grouped by currency; no type creates a new aggregation exception.
+
+### 22.11 Error, privacy, and accessibility boundaries
+
+Add closed errors/warnings for `unsupported_group_type`, `group_type_changed`, `plan_type_mismatch`, `expense_type_data_invalid`, `receipt_profile_unavailable`, and `receipt_profile_mismatch`. They carry safe paths/codes only, not raw repository JSON or receipt text.
+
+Privacy boundaries are layered:
+
+- group type, confirmed plan, confirmed line items, and confirmed Fuel type data are shared repository metadata visible to accepted members and may exist in the normal account-scoped group snapshot cache until its existing purge rules apply;
+- receipt pixels, raw OCR, boxes, confidence, unconfirmed candidates, parser diagnostics, and correction history remain temporary and local under CR-006;
+- profile selection, station history, Fuel analytics, chart interactions, and coverage details do not enter telemetry, logs, notifications, or external analytics; and
+- commit messages name the operation, never merchant, amount, fuel volume, item, station, or limit values.
+
+Type icons and colours always include text. Editable extraction panels expose a heading, detected status, labels/units, item-row remove names, and textual arithmetic result to TalkBack. Minimum touch targets are 44 dp. Large text preserves field order and does not place manual choices before extracted values. Chart conclusions, selected month, units, data coverage, limit status, and filters have non-graphical equivalents. Reduced motion affects presentation only.
+
+### 22.12 OCR dataset, model, and automation boundary
+
+The private OCR dataset remains outside Git and is never copied into application snapshots or workflow artifacts. Local and self-hosted automation use the same fail-closed entry point documented in `OCR_AUTOMATION.md`:
+
+```text
+scripts/ocr-pipeline.py validate
+scripts/ocr-pipeline.py quality
+scripts/ocr-pipeline.py train-readiness
+scripts/ocr-pipeline.py train --profile generic|fuel
+```
+
+Generic and Fuel have separate held-out merchant/layout groups, field-level gates, profile parameters, parser benchmarks, and provenance. Generic quality includes item-row description/quantity/unit-price/line-total behavior. Fuel quality includes paid-versus-gross, explicit-zero discount, litres, unit price, arithmetic, and missing-field behavior.
+
+The GitHub Actions OCR workflow may run only on the dedicated access-controlled self-hosted runner and uploads no dataset, predictions, reports, crops, annotations, or candidate weights. Passing quality/training does not automatically replace packaged models. Promotion additionally requires manifest/hash review, Android-compatible ONNX execution, frozen held-out results, app-size/memory/latency acceptance, airplane-mode proof, and an intentional repository change to approved application assets.
+
+### 22.13 Test architecture
+
+Platform-free domain tests cover:
+
+- schema-v1 effective-Trip parsing, schema-v2 Trip/Fuel parsing, unknown type, unknown schema, type/plan mismatch, no-read migration, intentional migration, and passthrough preservation;
+- Trip v2 date requirements, legacy date-less plans, Fuel monthly schedule order/duplicates/effective limits/no rollover, month boundaries, leap years, and local-month injection;
+- line-item normalization/limits/empty omission and isolation from common amount/balance validity;
+- Fuel input-string conversion to millilitres/micros, zero-versus-missing discount, gross/discount/paid identity, pump tolerance, `bigint` overflow handling, optional data, and invalid-enrichment isolation;
+- monthly spending, amount-only/Just me inclusion, weighted aggregate prices, explicit-discount coverage, station normalization/tie-breaking, and no extrapolation; and
+- invariants proving that plan/type enrichment and analytics cannot alter shares, balances, or settlements.
+
+Service/integration tests use the scripted GitHub transport, in-memory cache, fake local calendar, and fake OCR port to cover:
+
+- schema-v2 group creation for each type, schema-v1 migration on intentional plan mutation only, stale-SHA conflict/reapply, ambiguous success, and remote type-change refusal;
+- full refresh and cache hydration for both types, V1 cache adaptation, unsupported read-only state, atomic type-specific derivation, and group-list summary freshness;
+- amount-only and enriched Fuel expense creates/edits, invalid remote type data warning without balance exclusion, passthrough preservation, and immediate analytics recomputation;
+- profile routing solely from effective type, status/version mismatch, no cross-profile fallback, one-time discriminated draft consumption, and group/profile mismatch rejection; and
+- the private OCR quality workflow's fail-closed configuration without exposing private artifacts.
+
+Component/navigation tests follow mockups 03–19 and verify type icons/labels, Trip-default creation, immutable type, both plan forms, shared Balances/Members, unsupported Update-required state, and both paired scan/review flows. Generic review must group Description/Amount/Date/items before unselected manual choices and support item edits/removal/reconciliation. Fuel review must group all seven extracted fields, recompute arithmetic warnings after edits, keep paid/gross labels distinct, and put fixed Transport plus unselected payment method after the extraction panel. Manual routes must remove detected treatment.
+
+The physical Android matrix uses two accounts and both group types. It verifies legacy Trip compatibility, typed creation, plan conflicts, Generic and Fuel cold/warm scans in airplane mode, amount-only and discounted/zero-discount Fuel records, three calendar months of fixtures, over-limit state, identical refreshed analytics, enrichment/balance invariance, profile availability failures, TalkBack, large text, light/dark themes, low memory, background/foreground transitions, and absence of receipt/fuel telemetry.
+
+### 22.14 Approval and implementation sequence
+
+CR-007 was implemented in the following order; hardening and OCR acceptance work remain ongoing:
+
+1. **Envelope and compatibility:** known-type union, v1/v2 parser, unsupported-type state, schema-v1 effective-Trip adapter, intentional migration merger, and exhaustive tests.
+2. **Registries and atomic state:** domain/UI registries, GroupSnapshotV2 adapter, provider derivation, typed group-list summaries, and remote type-change protection.
+3. **Creation and navigation:** Trip-default selector, schema-v2 creation, immutable badges/context, shared route composition, and Update-required UI.
+4. **Typed plans:** Trip v2 editor/migration, Fuel monthly schedule, applicable-limit selector, generalized optimistic group-file mutation, and conflict tests.
+5. **Expense enrichment:** CR-006 line-item persistence, Fuel `type_data`, string-to-integer parsers, isolated warnings, passthrough edits, and balance invariants.
+6. **OCR profiles and review layouts:** explicit native profile contract, Generic/Fuel parser registry, model/profile status, scan-stage extraction scope, discriminated draft handoff, editable Generic/Fuel preview panels, and no-fallback tests.
+7. **Fuel experience:** amount-only path, Fuel Overview, month navigation, integer/rational analytics, coverage disclosures, station rows, accessible charts/tables, and filters.
+8. **Hardening and acceptance:** conflict/race/cache tests, frozen OCR gates, Android latency/memory/size checks, privacy/network/log inspection, accessibility, two-account synchronization, and full CI/release validation.
+
+Do not enable Fuel creation in a release that can write schema v2 before unsupported-type behavior, typed snapshot parsing, and matching write guards are complete. Do not replace or materially retune either receipt profile merely because local benchmark scripts pass; native/application quality and physical-device acceptance remain mandatory.
+
+### 22.15 Explicitly outside the CR-007 architecture
+
+- Group-type conversion or migration between Trip and Fuel
+- Additional/custom group types or a runtime plugin system
+- Weekly, annual, rolling, envelope, rollover, or per-member Fuel budgets
+- Multiple vehicles, drivers, odometers, route, fuel economy, emissions, maintenance, or fleet accounting
+- EV charging, energy tariffs, mixed fuel/energy units, inventory, tax reclaim, or mileage reimbursement
+- Forecasting, anomaly detection, background alerts, planned purchases, bank/card import, or FX conversion
+- Receipt attachments, cloud OCR, hosted analytics, member-receipt training, or correction upload
+- Automatic item categorization, duplicate-receipt matching, merchant reconciliation, or cross-receipt item history
+- Automatic group-type inference, automatic payer/split/category decisions, or automatic save
+
+These require new product, privacy, schema, and architecture decisions rather than additions to the initial typed-group registry.

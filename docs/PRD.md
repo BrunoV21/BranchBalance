@@ -1,14 +1,14 @@
 # BranchBalance — Phase 1 Product Requirements Document
 
-**Status:** Phase 1 and CR-001 through CR-005 implemented; CR-006 proposed for product and technical review; CR-003 physical-device acceptance blocked by a known GitHub App token limitation and CR-004/CR-005 physical-device acceptance pending
+**Status:** Phase 1 and CR-001 through CR-007 implemented; CR-003 physical-device acceptance remains blocked by a known GitHub App token limitation, CR-004/CR-005 physical-device acceptance is pending, and the CR-006/CR-007 OCR quality and complete physical-device acceptance matrix remains pending
 
-**Last updated:** 2026-07-20
+**Last updated:** 2026-08-10
 
 **Platform:** Android
 
 **Repository prefix:** `branch-balance`
 
-**Active change requests:** CR-006 proposed; CR-004 and CR-005 await physical-device acceptance
+**Active change requests:** CR-006 and CR-007 implemented with their OCR acceptance matrix still open; CR-004 and CR-005 await physical-device acceptance
 
 ## 1. Product summary
 
@@ -1845,17 +1845,17 @@ These require separate product and privacy decisions before implementation.
 
 ## 21. Change request CR-006 — Private on-device receipt scanning
 
-**Status:** Proposed; product and technical review required before implementation
+**Status:** Implemented; private-dataset quality gates and complete physical-device receipt acceptance pending
 
 **Requested:** 2026-07-20
 
-**Target:** Future product increment; Android-first delivery and release name to be decided
+**Target:** Android-first increment; Generic receipt scanning is available subject to the frozen quality and physical-device gates in this change request
 
 ### 21.1 Context and motivation
 
 Adding an expense currently requires members to transcribe the merchant, total, and date from a receipt. That is deliberate and reliable, but it adds friction at the moment a group is most likely to forget an expense or enter the wrong amount.
 
-CR-006 proposes an optional receipt-assisted path. A member photographs a paper receipt or selects an existing receipt image, BranchBalance reads it on the phone, and the normal **Add expense** form opens with trustworthy fields prefilled. The member remains responsible for reviewing, correcting, completing, and explicitly saving the expense.
+CR-006 adds an optional receipt-assisted path. A member photographs a paper receipt or selects an existing receipt image, BranchBalance reads it on the phone, and the normal **Add expense** form opens with trustworthy fields prefilled. The member remains responsible for reviewing, correcting, completing, and explicitly saving the expense.
 
 Receipts may contain names, addresses, tax identifiers, payment references, and itemized purchasing history. BranchBalance's privacy promise therefore applies to the entire scanning pipeline: receipt pixels and recognized text must not be sent to OpenAI, Paddle-hosted services, another OCR API, telemetry, the BranchBalance website, GitHub, or any other remote processor. PaddleOCR and any later fallback model run locally from open-source model artifacts shipped with or explicitly installed for the app.
 
@@ -1866,7 +1866,7 @@ Receipt scanning adds a faster entry path without creating a second expense work
 1. The existing **Add expense** control becomes a split action with a compact camera segment on its right.
 2. The member can photograph a receipt or choose an image already on the device.
 3. BranchBalance prepares and reads the image locally and reports progress honestly.
-4. The existing **Add expense** form opens with eligible high-confidence values prefilled.
+4. The existing **Add expense** form opens with eligible high-confidence values prefilled and, when available, an appended list of detected line items.
 5. Missing, ambiguous, inconsistent, or low-confidence values remain blank or are clearly marked for review.
 6. The member chooses the normal category, payment method, payer, and split, then explicitly saves.
 
@@ -1876,18 +1876,19 @@ Scanning never creates or writes an expense automatically. The existing expense 
 
 | Area | Decision |
 |---|---|
-| Privacy boundary | Receipt pixels, OCR blocks, parsed values, confidence values, and corrections remain on the device; no cloud OCR, cloud model, remote fallback, or receipt telemetry is permitted |
+| Privacy boundary | Receipt pixels, OCR blocks, confidence values, unconfirmed parser candidates, and diagnostics remain on the device; no cloud OCR, cloud model, remote fallback, or receipt telemetry is permitted. Only final expense fields explicitly confirmed by the member, including optional line items, enter the existing GitHub persistence flow |
 | Entry point | Keep one primary **Add expense** control and add receipt scanning as a compact camera segment on its right, separated by a visible divider |
 | Image sources | Support a new photo and an existing image from the device photo library |
 | Primary engine | PaddleOCR mobile text detection and recognition models exported to ONNX and executed with ONNX Runtime Mobile |
 | Expense workflow | Reuse the existing Add expense form; there is no scan-only save path or separate scanned-expense type |
-| Eligible prefill | Merchant to Description, validated total to Amount, receipt date to Date, and detected currency only as a check against the group's fixed currency |
+| Eligible prefill | Merchant to Description, validated total to Amount, receipt date to Date, detected currency only as a check against the group's fixed currency, and validated generic-receipt rows as an optional appended line-item list |
+| Line items | The default/generic Trip profile may append an ordered item list only when at least one valid row is extracted. Members can edit or remove rows before save; the list is omitted when no rows remain and never changes Amount, category, spending, shares, balances, or settlements |
 | Manual fields | Category, payment method, payer, split type, and participants remain intentional member choices in the first increment |
 | Confidence | Low-confidence or conflicting fields are never silently accepted; they stay blank or receive an explicit review treatment |
 | Currency mismatch | A detected currency never changes the group currency and an amount in a different currency is not silently prefilled or converted |
 | Arithmetic | Subtotal, tax, tip, and total may be extracted to check consistency, but only the final validated total is eligible for the expense Amount field |
 | Confirmation | The member always sees an editable confirmation form and must tap **Save expense** before any GitHub write occurs |
-| Receipt persistence | Receipt images, crops, OCR output, and parser diagnostics are temporary local working data and are not stored in the group repository or attached to the expense |
+| Receipt persistence | Receipt images, crops, raw OCR output, confidence values, unconfirmed candidates, and parser diagnostics are temporary local working data and are not stored in the group repository or attached to the expense. Confirmed line items are ordinary optional expense metadata, not retained OCR output or a receipt attachment |
 | Initial platform | CR-006 acceptance is Android-first, matching the current product scope; the native contract must remain portable to a later Swift/iOS implementation |
 | Offline behavior | Capture, OCR, parsing, and review work without network access; saving still follows BranchBalance's current online-only GitHub requirement |
 
@@ -1918,6 +1919,7 @@ The first parser increment should support common English and Portuguese receipt 
 - Currency symbols/codes for the app's supported EUR, USD, and GBP group currencies
 - ISO dates and unambiguous common day/month/year or month/day/year receipt dates
 - Comma and period decimal conventions, including thousands separators
+- Generic line-item rows containing an item description and line total, with optional quantity and unit price
 
 Field selection uses recognized text, confidence, and position:
 
@@ -1925,6 +1927,7 @@ Field selection uses recognized text, confidence, and position:
 - **Date:** a valid calendar date; an ambiguous numeric date is marked for review instead of guessed without sufficient locale evidence.
 - **Total:** a positive amount associated with a supported total label, weighted toward lower receipt positions and higher confidence. `SUBTOTAL` must not be mistaken for `TOTAL`.
 - **Currency:** explicit code or symbol when present; absence means unknown rather than automatically assigning the group currency to the OCR result.
+- **Line items:** spatially contiguous body rows with a non-empty description and non-negative line total. Quantity and unit price are included only when their association with the same row is unambiguous. Headers and summary/payment rows such as subtotal, tax, tip, discount, amount paid, change, and total are excluded.
 
 When subtotal is available, the scanner checks:
 
@@ -1934,11 +1937,16 @@ subtotal + optional tax + optional tip ≈ total
 
 The permitted difference is at most two minor units for the current supported currencies. A failed consistency check marks Amount for review. Parser output must pass a strict runtime schema before it can prefill the form; malformed native output fails safely and leaves the normal manual flow available.
 
+When line items are available, the parser also calculates their displayed sum. Equality with the expense total is useful confirmation but is not a validity requirement because taxes, tips, discounts, service charges, deposits, and rounding may be represented outside item rows. Receipt order is preserved and duplicate-looking rows are not merged automatically.
+
 ### 21.6 Prefilled expense review
 
 The scan result opens the normal Add expense screen with a local-scan notice at the top. Prefilled fields identify that they were detected and remain ordinary editable controls.
 
 - Description, Amount, and Date may be prefilled only when their individual checks pass.
+- A **Detected line items** section is appended after the common fields only when at least one validated row exists. It shows each description, quantity/unit-price detail when available, and line total in receipt order.
+- Members can edit or remove detected rows before saving. Removing the final row removes the section and causes `line_items` to be omitted from the expense.
+- The section shows the item sum and whether it matches Amount, while explaining that a mismatch can be legitimate. It never rewrites Amount or affects category, payer, split, participants, spending, or balances.
 - The group currency remains fixed and visible.
 - A low-confidence field is blank or visibly flagged; warning copy names the field and the reason in plain language.
 - A currency mismatch leaves Amount blank and names both currencies without offering implicit foreign-exchange conversion.
@@ -1948,9 +1956,45 @@ The scan result opens the normal Add expense screen with a local-scan notice at 
 
 The member can edit any prefilled value, abandon the draft, or save through the existing expense submission. BranchBalance does not learn from corrections or transmit them for model training.
 
+#### 21.6.1 Generic line-item expense metadata
+
+After explicit review, a Trip expense may persist the optional `line_items` field in the existing expense schema (unrelated required expense fields are omitted from this excerpt):
+
+```json
+{
+  "schema_version": 1,
+  "description": "BAGUETTERIA",
+  "amount_minor": 2090,
+  "line_items": [
+    {
+      "description": "SALMON BAGUETTE",
+      "quantity": "1",
+      "unit_price_minor": 895,
+      "line_total_minor": 895
+    },
+    {
+      "description": "FOCACCIA PASTRAMI",
+      "quantity": "1",
+      "unit_price_minor": 1195,
+      "line_total_minor": 1195
+    }
+  ]
+}
+```
+
+The field is additive and optional under expense schema version 1:
+
+- Omit `line_items` when OCR finds no valid rows, the member removes every row, or the expense is entered manually without items; never persist an empty array.
+- Persist 1–80 rows in receipt order. Each row requires a trimmed 1–120 character `description` and a non-negative safe-integer `line_total_minor` in the group currency.
+- `quantity` is optional and, when present, is a normalized positive decimal string rather than a binary floating-point number. `unit_price_minor` is optional and, when present, is a non-negative safe integer in the group currency.
+- The sum of `line_total_minor` values may differ from `amount_minor`; it is informational and never participates in expense validation, spending, budgets, shares, balances, or settlements.
+- OCR confidence, bounding boxes, source text, and scan provenance are not persisted. Compatible readers show the confirmed item list; unaware readers ignore it, and writers preserve it under the existing unknown-field compatibility rule.
+- CR-007's dedicated Fuel profile uses Fuel `type_data` and does not populate this generic `line_items` field.
+
 ### 21.7 Privacy, security, and data lifecycle
 
-- No receipt pixel, recognized text, extracted value, confidence, or correction is included in GitHub requests except the final expense fields the member explicitly confirms under the existing expense schema.
+- No receipt pixel, raw recognized text, unconfirmed extracted value, confidence, bounding box, scan provenance, or parser diagnostic is included in GitHub requests. Final expense fields explicitly confirmed by the member may include the optional normalized `line_items` list from section 21.6.1.
+- The review explains that confirmed line items become shared expense metadata in the private group repository, while the receipt image and raw OCR output remain local and temporary.
 - No scan content is logged to JavaScript/native console output in release builds, crash breadcrumbs, analytics, or error-reporting payloads.
 - Source and prepared images use application cache storage, are excluded from backups, and are deleted on successful handoff, cancellation, failure, and a bounded stale-cache cleanup on later launch.
 - Screenshots and OS-level photo-library copies remain under operating-system/user control; BranchBalance does not claim to delete the member's original photo.
@@ -2035,11 +2079,15 @@ As a privacy-conscious member, I want receipt recognition to run entirely on my 
 
 As a member, I want reliable receipt values prefilled in the normal form and uncertain values clearly identified so that I can correct mistakes before saving.
 
-#### US-CR006-04 — Recover from scan failure
+#### US-CR006-04 — Keep useful line details
+
+As a member scanning a generic receipt, I want validated purchase rows appended as an editable list so that useful item detail is retained without changing how the expense is shared.
+
+#### US-CR006-05 — Recover from scan failure
 
 As a member with a damaged or unsupported receipt, I want to retake, choose another image, or continue manually so that OCR never blocks expense creation.
 
-#### US-CR006-05 — Use assistive technology
+#### US-CR006-06 — Use assistive technology
 
 As a TalkBack or large-text user, I want labelled scanner controls and text-based review warnings so that receipt entry does not depend on seeing the camera frame or confidence colour.
 
@@ -2049,15 +2097,17 @@ As a TalkBack or large-text user, I want labelled scanner controls and text-base
 - [ ] A member can take a photo or select an existing image and can return to manual entry at every recoverable failure state.
 - [ ] Image preparation constrains the maximum dimension, normalizes orientation, and avoids retaining unnecessary duplicate files.
 - [ ] OCR detection and recognition execute on the Android device through the approved open-source PaddleOCR/ONNX Runtime artifacts with network access disabled.
-- [ ] No receipt image, OCR text, parsed field, confidence, correction, or diagnostic is sent to GitHub, telemetry, logs, a cloud model, or another remote service.
+- [ ] No receipt image, raw OCR text, unconfirmed parsed field, confidence, bounding box, correction history, scan provenance, or diagnostic is sent to GitHub, telemetry, logs, a cloud model, or another remote service.
 - [ ] Native OCR output is shape-validated before parsing and malformed output fails safely.
-- [ ] Merchant, date, currency, subtotal, tax, tip, and total parsing follows section 21.5 with deterministic ordering and locale-aware amount handling.
+- [ ] Merchant, date, currency, subtotal, tax, tip, total, and generic line-item parsing follows section 21.5 with deterministic ordering and locale-aware amount handling.
 - [ ] `SUBTOTAL` is never selected as `TOTAL`, invalid dates are rejected, and arithmetic inconsistency is surfaced for review.
-- [ ] Only eligible high-confidence Description, Amount, and Date values prefill the normal Add expense form.
+- [ ] Only eligible high-confidence Description, Amount, and Date values prefill the normal Add expense form; validated generic rows are appended as a line-item list only when at least one exists.
+- [ ] Detected line items preserve receipt order, are editable and removable, show their sum versus Amount, and never alter Amount, category, payer, split, participants, spending, budgets, balances, or settlements.
+- [ ] Saving confirmed generic line items writes only the normalized optional `line_items` metadata from section 21.6.1; no items or removal of all items omits the field rather than writing an empty array.
 - [ ] A detected currency mismatch never changes the group currency, converts the amount, or silently prefills Amount.
 - [ ] Category, payment method, payer, split, and participants remain normal explicit form decisions/defaults.
 - [ ] No expense is written until the member reviews the editable form and explicitly taps Save expense.
-- [ ] Saving uses the existing expense schema and GitHub mutation; no receipt attachment, OCR field, confidence, or scan marker enters the repository.
+- [ ] Saving uses the existing expense schema and GitHub mutation; no receipt attachment, raw OCR field, confidence, bounding box, or scan marker enters the repository. The review discloses that explicitly confirmed `line_items` are shared expense metadata.
 - [ ] Temporary scan artifacts are cleaned after success, cancellation, and failure, with bounded cleanup for stale cache files.
 - [ ] Permission, runtime/model, image, no-text, low-confidence, ambiguity, mismatch, memory, and save-failure states provide actionable alternatives.
 - [ ] TalkBack, large text, light/dark themes, and reduced motion preserve the full capture/review meaning without relying on icon or colour alone.
@@ -2073,17 +2123,20 @@ Pure parser and validation coverage must include:
 - Comma and period decimals, thousands separators, and trailing amounts
 - ISO, day/month/year, month/day/year, invalid, and ambiguous dates
 - Multiple total-like lines, subtotal exclusion, refunds/negative values, duplicated blocks, and coordinate ordering
+- Generic item descriptions, integer and decimal quantities, optional unit prices, line totals, receipt ordering, duplicate-looking rows, and exclusion of summary/payment rows
+- Line-item sums that match Amount and legitimate mismatches caused by tax, tip, discount, service charge, deposit, or rounding
+- Partial, malformed, low-confidence, oversized, and empty line-item output, including the 80-row and description-length limits
 - Missing merchant/currency/date/total, confidence thresholds, arithmetic tolerance, and currency mismatch
 - Strict rejection of malformed native payloads and safe handling of empty OCR results
 
-Component and navigation coverage must verify camera/manual entry points, permission states, capture/retake/photo-library actions, progress and cancellation, review warnings, selective prefilling, unchanged manual fields, explicit save, and return to manual entry.
+Component and navigation coverage must verify camera/manual entry points, permission states, capture/retake/photo-library actions, progress and cancellation, review warnings, selective prefilling, conditional line-item rendering, item editing/removal and empty-list omission, unchanged manual fields, explicit save, and return to manual entry.
 
 The manual Android test matrix must include the oldest supported device and a current representative device, airplane mode, denied permissions, cold and warm scans, repeated scans, rotation, background/foreground transitions, low-memory recovery, long and skewed receipts, glare/shadow/low contrast, English and Portuguese fixtures, and TalkBack/large-text/light/dark verification. Record latency, peak memory, APK-size delta, field-level accuracy, total exact-match rate, and cleanup behavior without logging receipt contents.
 
 ### 21.14 Explicitly deferred from CR-006
 
 - Receipt images or attachments in GitHub, expense history, exports, or shared group storage
-- Item-level extraction, product categorization, inventory, warranties, or nutrition analysis
+- Automatic product categorization, inventory, warranties, nutrition analysis, or item matching across receipts
 - Automatic category, payment-method, payer, or participant decisions
 - Multiple-receipt batching, duplicate-receipt detection, and expense reconciliation
 - Foreign-exchange conversion and multi-currency expenses
@@ -2095,7 +2148,460 @@ The manual Android test matrix must include the oldest supported device and a cu
 
 These require separate product, privacy, performance, and licensing decisions before implementation.
 
-## 22. Technical references
+## 22. Change request CR-007 — Typed groups and fuel expense tracking
+
+**Status:** Implemented; profile-specific quality and complete physical-device acceptance remain pending
+
+**Requested:** 2026-08-10
+
+**Target:** Current typed-groups increment; manual entry, Fuel OCR review, and Fuel analytics are available while the documented quality matrix continues to govern release acceptance
+
+### 22.1 Context and motivation
+
+BranchBalance began with a trip-oriented question: who paid for what, who participated, and who owes whom after a holiday. CR-001 and CR-005 added budgets, dates, categories, and useful spending analytics, but every group still has the same implicit behavior. A trip, an ongoing household, and repeated fuel purchases are stored and presented as though their planning period, receipt structure, and useful insights were identical.
+
+CR-007 introduces explicit group types while preserving the expense-sharing foundation. The first supported types are:
+
+- **Trip** — the default and the effective type of every existing group. It uses an inclusive beginning/end date spending plan, the generic receipt OCR profile with optional confirmed line items, and the current trip pace, mix, and fairness experience.
+- **Fuel** — an ongoing fuel-purchase tracker. It uses recurring calendar-month spending limits, a dedicated fuel receipt OCR/parser profile, and fuel-specific volume, unit-price, discount, fill-up, station, and monthly analytics.
+
+Future group types should be able to supply their own planning cadence, type-specific expense fields, receipt profile, and analytics without duplicating membership, expense sharing, balances, settlements, synchronization, or repository access.
+
+This change does not turn BranchBalance into accounting software or alter the meaning of an expense. `amount_minor` remains the amount actually paid and shared; balances and settlements continue to derive only from payer and shares.
+
+### 22.2 Product outcome
+
+Members can create a group that matches what they are tracking while retaining one recognizable BranchBalance workflow:
+
+1. Group creation asks for a type and selects **Trip** by default.
+2. Existing groups continue to open as Trip groups without a migration write.
+3. The selected type controls the spending-plan editor, receipt extraction profile, type-specific expense fields, Overview summary, and Spending analytics.
+4. Common expense, payer, split, balance, settlement, member, activity, conflict, and privacy behavior remains shared.
+5. Unsupported future types remain discoverable in a safe **Update required** state rather than being misread or silently modified as another type.
+
+Group type is immutable after repository creation in CR-007. Converting a group would change planning and historical-data semantics and requires a later explicit migration design.
+
+### 22.3 Confirmed product decisions
+
+| Area | Decision |
+|---|---|
+| Initial types | `trip` and `fuel`; no free-form or user-created group type |
+| Default | Trip is preselected for new groups and is the effective type of every schema-v1 group that has no type |
+| Type mutability | A group's type cannot be changed after creation in CR-007 |
+| Shared foundation | Membership, currency, expense sharing, balances, settlements, activity, GitHub storage, and conflicts are type-independent |
+| Trip planning | Optional plan with required inclusive beginning/end dates; total/category budgets remain informational |
+| Fuel planning | Optional recurring monthly-limit schedule keyed by calendar month; no trip beginning/end dates and no rollover |
+| Expense amount | Always the amount actually paid after discounts, never the pre-discount pump total |
+| Fuel details | Optional typed metadata enriches an expense; missing details never exclude a valid amount from spending or balances |
+| Trip OCR | Generic CR-006 receipt profile and parser, including the optional reviewed `line_items` list when valid rows are extracted |
+| Fuel OCR | Dedicated fuel profile selected from the validated group type, never guessed from receipt appearance |
+| OCR implementation | Profiles may share detector/recognizer weights; “dedicated” requires separately versioned parameters, parser, thresholds, and quality gates, not necessarily duplicate model files |
+| Analytics | Type-specific analytics are derived locally from validated expenses and plans; chart series and insights are not persisted |
+| Currency | One immutable supported currency per group remains authoritative; no fuel-specific FX behavior |
+| Budget enforcement | Trip budgets and fuel monthly limits are guidance only and never block an expense |
+| Privacy | CR-006's fully local receipt-processing boundary applies to every profile. Only member-confirmed expense metadata—generic `line_items` for Trip or validated Fuel `type_data`—may enter the private repository; images, raw OCR, confidence, and diagnostics remain temporary |
+
+### 22.4 Versioning and legacy-group compatibility
+
+Typed groups use `group.json` schema version 2. Version 2 is required because an older client must not open a Fuel group as an untyped Trip group, run the wrong parser, or overwrite its spending plan with the legacy shape.
+
+Compatibility behavior is:
+
+- A valid schema-v1 `group.json` has effective type `trip`.
+- No refresh, discovery, or cache hydration writes a migration commit.
+- A schema-v1 group and its existing spending plan remain readable and writable through a compatibility adapter.
+- The first intentional `group.json` mutation by a CR-007 client may migrate it to schema version 2 with `group_type: "trip"`, preserving all known and unknown source-document fields.
+- A legacy Trip plan without dates remains readable. Editing it in the v2 editor requires a valid date pair before the migrated plan can be saved; expense and settlement writes remain available meanwhile.
+- New groups always use schema version 2 and an explicit `group_type`.
+- A client that recognizes the schema envelope but not its `group_type` shows the group name, currency, repository owner, and **Update required**. It must not read type-specific details, add/edit expenses, scan receipts, edit the plan, or write `group.json`.
+- Local caches and list summaries include schema version and effective group type. Hydrating an older cache must apply the same schema-v1-to-Trip rule.
+
+The repository prefix and layout remain unchanged. Group types do not create separate repository classes or folders.
+
+### 22.5 Group creation and selected-group navigation
+
+The Create group screen adds a required type selector after name and currency:
+
+- **Trip** — “A dated trip with a total budget and daily pace.”
+- **Fuel** — “Ongoing fuel purchases with monthly limits and fuel insights.”
+
+Trip is selected initially. Each option has a text label, short explanation, and distinct accessible icon; colour alone does not identify the type. The confirmation step names the selected type before creating the private repository.
+
+The group list and selected-group header show a compact type label. They do not replace the group name with the type. Group-list summary behavior varies safely:
+
+- Trip may show the existing trip period and total-budget progress.
+- Fuel may show current-calendar-month spend and remaining/over-limit amount.
+- A group with no plan shows tracked spending without presenting a missing plan as an error.
+
+Overview, Spending, Balances, and Members remain the primary selected-group destinations. Their common structure and navigation stay recognizable; cards inside Overview and Spending adapt to the group type. Balances and Members do not gain separate Fuel implementations.
+
+### 22.6 Type-specific spending plans
+
+Every spending plan remains optional, shared with all group members, editable by accepted members with write access, informational, and protected by the latest `group.json` blob SHA.
+
+#### 22.6.1 Trip plan
+
+A new or migrated v2 Trip spending plan has `kind: "trip"` and requires both `starts_on` and `ends_on`. The dates are inclusive valid `YYYY-MM-DD` calendar dates and `ends_on` cannot precede `starts_on`.
+
+The plan may additionally contain:
+
+- One positive total `budget_minor`.
+- Optional positive `category_budgets_minor`, allowed only when a total budget exists.
+
+CR-001 remaining-per-day guidance and CR-005 even-budget pace continue to apply. Expenses before and after the date range retain their existing treatment. A Trip group may have no plan, but a newly saved v2 Trip plan cannot be budget-only or contain a partial date range.
+
+#### 22.6.2 Fuel monthly-limit plan
+
+A Fuel plan has `kind: "fuel_monthly"` and contains a non-empty limit schedule. Each entry has:
+
+- `effective_month`: a real calendar month in `YYYY-MM` form.
+- `limit_minor`: a positive safe integer in the group currency.
+
+Entries are ordered by month and no month may occur twice. The limit applicable to month `M` is the last entry whose `effective_month` is less than or equal to `M`. Months before the first entry have no limit. Changing a limit adds or replaces an entry for the selected current/future month so historical months keep the limit members saw at the time.
+
+For an expense:
+
+```text
+expense_month = first seven characters of expense_date
+monthly_spent[expense_month] = sum(amount_minor for valid expenses in expense_month)
+monthly_remaining = applicable_limit - monthly_spent
+```
+
+- All valid Fuel-group expenses count, including expenses without fuel details and Just me expenses.
+- A positive remainder is under limit, zero is at limit, and a negative remainder is over limit.
+- Unused limit never rolls into another month.
+- Future-dated expenses belong to their stored month and are disclosed when viewing the current month.
+- Device-local calendar month selects the default view; stored expense dates require no timezone conversion.
+- Fuel plans do not accept Trip date fields or category limits in CR-007.
+- Removing the plan removes the whole object. It does not delete expenses or derived historical totals.
+
+### 22.7 Persistence contract
+
+A new Trip group uses:
+
+```json
+{
+  "schema_version": 2,
+  "group_type": "trip",
+  "name": "Portugal road trip",
+  "currency": "EUR",
+  "spending_plan": {
+    "kind": "trip",
+    "budget_minor": 180000,
+    "category_budgets_minor": {
+      "accommodation": 70000,
+      "transport": 30000
+    },
+    "starts_on": "2026-09-04",
+    "ends_on": "2026-09-14",
+    "updated_by": "octocat",
+    "updated_at": "2026-08-10T12:00:00Z"
+  },
+  "created_by": "octocat",
+  "created_at": "2026-08-10T11:55:00Z"
+}
+```
+
+A Fuel group uses:
+
+```json
+{
+  "schema_version": 2,
+  "group_type": "fuel",
+  "name": "Family car fuel",
+  "currency": "EUR",
+  "spending_plan": {
+    "kind": "fuel_monthly",
+    "monthly_limits": [
+      { "effective_month": "2026-08", "limit_minor": 25000 },
+      { "effective_month": "2026-11", "limit_minor": 30000 }
+    ],
+    "updated_by": "octocat",
+    "updated_at": "2026-11-01T09:00:00Z"
+  },
+  "created_by": "octocat",
+  "created_at": "2026-08-10T12:05:00Z"
+}
+```
+
+New expenses keep the common expense fields. A Fuel expense may add `type_data`:
+
+```json
+{
+  "schema_version": 1,
+  "id": "83e06318-6220-4db5-8e2e-2f7bb93c5307",
+  "description": "Pingo Doce",
+  "amount_minor": 3601,
+  "currency": "EUR",
+  "category": "transport",
+  "payment_method": "card",
+  "paid_by": "octocat",
+  "split_type": "equal",
+  "participants": ["octocat"],
+  "shares_minor": { "octocat": 3601 },
+  "expense_date": "2026-08-10",
+  "type_data": {
+    "schema_version": 1,
+    "type": "fuel",
+    "volume_millilitres": 24500,
+    "unit_price_micros_per_litre": 1633000,
+    "gross_amount_minor": 4001,
+    "discount_minor": 400,
+    "fuel_type": "diesel"
+  },
+  "created_by": "octocat",
+  "created_at": "2026-08-10T12:14:00Z",
+  "updated_by": null,
+  "updated_at": null
+}
+```
+
+`type_data` rules are:
+
+- It is optional so a member can still record a valid paid expense when a receipt is incomplete or fuel details are unavailable.
+- If present in a Fuel group, `type` must equal `fuel` and `schema_version` must equal 1.
+- Trip expenses must not write Fuel type data.
+- `volume_millilitres` is required within Fuel type data and is a positive safe integer. Display converts it to litres without persisting binary floating-point values.
+- `unit_price_micros_per_litre` is optional and, when present, is a positive safe integer where one currency unit equals 1,000,000 micros. This supports pump prices such as EUR 1.633 without rounding them to cents.
+- `gross_amount_minor` is the positive pre-discount total and is optional.
+- `discount_minor` is optional, non-negative, and requires `gross_amount_minor`. When omitted with a gross amount it means zero discount.
+- If gross and discount are present, `gross_amount_minor - discount_minor` must equal the common `amount_minor` exactly.
+- `fuel_type` is optional and one of `petrol`, `diesel`, `lpg`, or `other`; it is a member-reviewed classification, not a credential or vehicle identifier.
+- When volume and printed unit price are present, their calculated gross amount may differ from `gross_amount_minor` by at most two minor units because pumps round the final amount:
+
+```text
+calculated_gross_minor = round(
+  volume_millilitres
+  * unit_price_micros_per_litre
+  * 10^currency_minor_digits
+  / 1_000_000_000
+)
+```
+
+- Invalid type data produces a warning and is excluded from fuel-specific analytics, but the otherwise valid common expense continues to participate in spending, shares, balances, and settlements.
+- Writers preserve unknown common and type-data fields during edits under the existing forward-compatibility rule.
+
+### 22.8 Expense entry and fuel receipt review
+
+Trip expense entry remains the existing CR-001/CR-006 experience. When the generic profile extracts valid receipt rows, the review appends CR-006's optional editable line-item list; no section or `line_items` field appears when none are extracted or the member removes them all.
+
+Fuel expense entry keeps Description, Amount, Date, payment method, payer, split, participants, and explicit Save. Category defaults to and persists as `transport`; CR-007 does not present the general category picker because Fuel analytics replace category-mix analytics. A member can save without fuel details after a concise warning that volume and unit-price insights will be incomplete.
+
+When fuel details are available, the review form presents:
+
+- Amount paid — the common expense Amount and the only amount used by balances.
+- Litres.
+- Printed price per litre.
+- Pre-discount total.
+- Discount.
+- Optional fuel type.
+
+The form derives consistency feedback but never silently changes a member-edited field. Gross total and amount paid must be labelled distinctly. A discount of zero is a valid value; a missing discount is not presented as a detected zero unless gross equals paid.
+
+OCR prefill remains assistance only. No type of group automatically saves an expense, decides payer/split/participants, or writes temporary receipt data to GitHub.
+
+### 22.9 OCR profile routing
+
+The app selects its receipt profile from the already validated group:
+
+```text
+trip group -> generic receipt profile
+fuel group -> fuel receipt profile
+unknown type -> scanning unavailable; update required
+```
+
+The native contract accepts an explicit profile identifier and reports the available profile versions in runtime status. Type selection is not inferred from OCR text, merchant name, repository name, or image appearance.
+
+The generic profile retains CR-006 behavior, including optional ordered item-row extraction and review. The Fuel profile does not populate the common generic `line_items` field; it may use different detector dimensions, thresholds, maximum regions, recognition weights, and parser logic. It extracts and independently scores:
+
+- Merchant/station.
+- Receipt date.
+- Currency.
+- Pre-discount total.
+- Amount actually paid.
+- Discount, including a trustworthy explicit zero.
+- Printed price per litre.
+- Purchased litres.
+- Optional fuel product/type evidence.
+
+Fuel arithmetic checks include:
+
+```text
+gross - discount = paid
+litres * printed unit price ≈ gross
+```
+
+The second comparison uses the two-minor-unit tolerance from section 22.7. A currency mismatch, competing paid totals, impossible volume/unit price, failed arithmetic, or low-confidence source leaves the affected field blank or explicitly marked for review. The parser must not use a larger pre-discount total as the expense Amount when a lower paid amount is present.
+
+Each profile has separate dataset coverage, held-out merchant/layout groups, quality thresholds, model/parser provenance, and physical-device latency/size results. Training data remains developer-managed and private under the approved OCR proposal. A profile may reuse shared ONNX weights when benchmarked parameters and deterministic parsing provide the required specialization; the APK must not bundle redundant copies merely to call them separate models.
+
+If the selected profile is absent or incompatible, the scanner offers manual entry. It must not quietly run another profile and present its values as type-aware extraction.
+
+### 22.10 Fuel Overview and Spending analytics
+
+Fuel groups retain common total spending, current-user paid/share, payment-method, scope, balance, and settlement information. They replace Trip date/pace and category-mix cards with Fuel-specific information.
+
+The default Fuel Overview shows the current calendar month:
+
+- Amount paid this month.
+- Applicable monthly limit and remaining/over-limit amount when configured.
+- Fill-up count.
+- Total litres represented by valid Fuel type data.
+- Weighted effective paid price per litre when volume is available.
+- Discount saved when explicitly represented.
+- A completeness statement such as **8 of 10 expenses include litres**.
+
+The Fuel Spending view supports month navigation and provides:
+
+1. **Monthly spend versus limit** — paid amount by month with the applicable limit, never a cumulative Trip pace line.
+2. **Fuel volume** — litres by month and selected-month total.
+3. **Unit-price trend** — printed pump price and effective paid price per litre for eligible fill-ups, with discount context.
+4. **Savings** — gross, paid, and explicit discount totals; missing discount data is excluded rather than assumed.
+5. **Stations** — paid amount, litres, and fill-up count grouped by normalized merchant description.
+6. **Data coverage** — counts of expenses included/excluded from each metric and why.
+
+Derived definitions use integer/rational inputs and defer decimal formatting until display:
+
+```text
+selected_paid_minor = sum(amount_minor for selected-month expenses)
+selected_volume_ml = sum(volume_millilitres for eligible selected-month expenses)
+effective_paid_price = selected_paid_minor / selected_volume_ml
+explicit_discount_minor = sum(discount_minor where discount is present)
+average_fill_minor = selected_paid_minor / selected expense count
+```
+
+- Weighted prices divide aggregate paid/gross amount by aggregate volume; the UI must not average displayed per-fill prices directly.
+- Amount-only expenses count toward monthly spending and limits but not volume, unit-price, or discount metrics.
+- Station grouping uses trimmed case-insensitive merchant descriptions and does not claim two differently named stations are the same business.
+- The UI never extrapolates missing litres, unit prices, or discounts.
+- Selecting a month, station, or eligible point applies a visible expense filter and has a non-chart alternative.
+- Every chart has a title, legend, units, period, textual conclusion, and ordered text/table equivalent under the CR-005 accessibility rules.
+- Different group currencies are never aggregated.
+
+### 22.11 Architecture, synchronization, privacy, and safety
+
+The implementation should use a typed registry rather than scattering unrelated `if (group_type)` branches across screens:
+
+```text
+group type definition
+├── spending-plan schema/editor/summary
+├── receipt profile and parser
+├── optional expense type-data schema/editor
+├── Overview cards
+└── Spending analytics and insights
+
+shared group core
+├── repository and membership
+├── common expense fields and mutation
+├── balances and settlements
+├── activity and optimistic conflicts
+└── cache and refresh
+```
+
+All persisted input is schema-validated at the GitHub and local-cache boundaries. Pure domain functions receive validated group type, plan, expenses, current user, currency, and an injected device-local date/month. Rendering code must not reimplement monthly-limit or fuel arithmetic.
+
+- Group type participates in snapshot/cache identity and refresh is atomic across group, plan, expenses, spending, and analytics.
+- Type is immutable; a remote type change is a data-integrity warning, not an automatic conversion.
+- Plan updates retain the existing stale-SHA review/reapply behavior.
+- Fuel details are shared financial metadata visible to all repository members, just like amount and description.
+- Receipt pixels, OCR blocks, confidence, parser diagnostics, and abandoned corrections remain temporary and local under CR-006.
+- No fuel data, chart use, station history, or derived value enters telemetry or external analytics.
+- Charts are supplementary and cannot be the only source of a value, filter, warning, or conclusion.
+- Over-limit and data-quality states use text and do not rely on colour.
+- Large text, TalkBack, reduced motion, and minimum touch targets apply to type selection, month navigation, receipt review, metrics, and charts.
+
+### 22.12 User stories
+
+#### US-CR007-01 — Continue with an existing trip
+
+As an existing member, I want my current group to remain a Trip group without a migration task so that all expenses, plans, balances, and analytics continue to work.
+
+#### US-CR007-02 — Create the right kind of group
+
+As a member creating a group, I want to choose Trip or Fuel with Trip selected by default so that BranchBalance configures the right planning and tracking experience.
+
+#### US-CR007-03 — Set a recurring fuel limit
+
+As a Fuel-group member, I want a monthly spending limit that preserves historical changes so that I can compare each month with the limit that applied then.
+
+#### US-CR007-04 — Scan a fuel receipt accurately
+
+As a driver, I want a Fuel receipt profile to distinguish gross total, discount, paid amount, litres, and unit price so that the expense records what I actually paid and enriches my fuel history.
+
+#### US-CR007-05 — Understand fuel costs
+
+As a Fuel-group member, I want monthly spend, volume, price, savings, and station insights so that I can understand changes without manually transcribing a spreadsheet.
+
+#### US-CR007-06 — Record incomplete information safely
+
+As a member with an incomplete receipt, I want to save the valid paid expense without invented fuel values so that balances remain current and analytics disclose their coverage.
+
+#### US-CR007-07 — Use equivalent accessible information
+
+As a TalkBack or large-text user, I want every group-type choice, fuel metric, chart, filter, and warning represented in text so that specialized tracking remains fully usable.
+
+### 22.13 Acceptance criteria
+
+- [ ] Create group offers Trip and Fuel, selects Trip by default, persists schema-v2 `group_type`, and confirms the selected type.
+- [ ] Every valid schema-v1 group is treated as Trip without a refresh-time GitHub write or loss of unknown fields.
+- [ ] New schema-v2 Trip and Fuel groups validate only their matching plan and type-data contracts.
+- [ ] Group type cannot be edited after creation, and unsupported future types are discoverable but read-only with Update required.
+- [ ] Trip groups preserve CR-001 and CR-005 behavior, route receipt scans through the generic profile, and append optional reviewed line items under CR-006 when valid rows are extracted.
+- [ ] A newly saved v2 Trip plan requires a valid inclusive beginning/end date pair; legacy date-less plans remain readable until edited.
+- [ ] Fuel plans use an ordered, duplicate-free monthly-limit schedule and never accept Trip dates or category limits.
+- [ ] The applicable monthly limit is deterministic, historical limit changes remain visible, and unused limit never rolls forward.
+- [ ] All valid Fuel expenses count toward monthly spending and balances, including Just me and amount-only expenses.
+- [ ] Fuel `amount_minor` is the actual paid amount; gross, discount, volume, unit price, and fuel type remain separate reviewed metadata.
+- [ ] Fuel type data uses integer millilitres and currency micros, validates discount and pump arithmetic, and never persists binary floating-point money/volume.
+- [ ] Invalid Fuel type data is excluded with a warning while an otherwise valid common expense still affects balances and spending.
+- [ ] Receipt scanning selects generic/fuel profile solely from validated group type and never silently falls back to another profile.
+- [ ] Fuel OCR distinguishes paid from pre-discount total and uncertain/inconsistent values never silently prefill.
+- [ ] Every OCR path remains on-device, temporary, explicitly reviewed, and manually saved under CR-006.
+- [ ] Fuel Overview shows current-month limit status, spend, fill-ups, litres, effective paid unit price, explicit discounts, and coverage where eligible.
+- [ ] Fuel Spending provides monthly spend/limit, volume, unit-price, savings, station, and coverage views with correct integer/rational derivation.
+- [ ] Amount-only expenses are included in spending and visibly excluded from metrics that require missing Fuel data; no values are extrapolated.
+- [ ] Type-specific metadata, plan edits, or analytics never alter payer/share balance and settlement results.
+- [ ] Every chart has an equivalent textual summary/filter path and meets TalkBack, large-text, colour-independence, and touch-target requirements.
+- [ ] Two Android sessions reading the same repository derive the same effective group type, applicable monthly limits, fuel totals, and balances after refresh.
+
+### 22.14 Test requirements
+
+Pure domain and schema tests must cover:
+
+- Schema-v1 effective-Trip mapping and schema-v2 type validation.
+- Unknown group types and mismatched plan/type-data rejection.
+- Trip plan date requirements and legacy date-less compatibility.
+- Monthly schedule ordering, duplicate months, before-first-limit months, exact effective-month changes, and no rollover.
+- Month bucketing around year boundaries, leap years, future dates, and injected device-local current month.
+- Fuel integer parsing for litres and three-decimal unit prices.
+- Gross/discount/paid identities, pump-rounding tolerance, safe-integer overflow, and zero-versus-missing discount.
+- Amount-only Fuel expenses and invalid-type-data exclusion without balance exclusion.
+- Weighted aggregate unit price rather than mean-of-means behavior.
+- Station normalization, coverage counts, and deterministic tie-breaking.
+- The invariant that changing group type data cannot change shares, balances, or settlements.
+
+OCR tests must cover generic and Fuel profile routing, generic item-row extraction/order/exclusions and absent-item behavior, Fuel non-population of generic `line_items`, profile availability/version mismatch, total-versus-paid selection, explicit-zero discount, comma/period litres and unit prices, competing totals, missing fields, arithmetic failure, currency mismatch, and strict runtime schemas. Profile benchmarks require held-out merchant/layout groups and separate field-level recall/precision gates.
+
+Integration/component tests must cover type selection/defaulting, legacy group discovery, unsupported-type state, type badges, both plan editors, stale plan conflicts, generic/Fuel scan review, save-without-details warning, current/historical month navigation, filters, coverage disclosures, and cache hydration followed by a remote plan/expense change.
+
+The manual physical-device test uses two sessions and both group types. Verify legacy Trip compatibility, new Trip creation and generic scanning, Fuel creation and monthly-plan changes, at least three months of fuel fixtures, a discounted and a zero-discount receipt, an amount-only expense, a Just me fill-up, an over-limit month, identical analytics after refresh, profile cold/warm latency, airplane-mode scanning, TalkBack, large text, light/dark themes, and no receipt/fuel telemetry.
+
+### 22.15 Explicitly deferred from CR-007
+
+- Group-type conversion or migration between Trip and Fuel.
+- Additional types such as household, event, subscription, business, vehicle maintenance, or general recurring budget.
+- Custom group types, fields, formulas, dashboards, or plugins.
+- Weekly, quarterly, annual, rolling, envelope, rollover, or per-member Fuel budgets.
+- Planned future fuel purchases, forecasts, anomaly alerts, or background notifications.
+- Multiple vehicles, drivers, tanks, odometer readings, distance, fuel economy, route, CO2, and maintenance tracking.
+- Electric-vehicle charging, kWh, time-of-use tariffs, and mixed energy/fuel units.
+- Fuel inventory, fleet management, tax reclaim, mileage reimbursement, business accounting, and receipt attachments.
+- Automatic merchant reconciliation, duplicate-receipt detection, bank/card import, or foreign-exchange conversion.
+- Cloud OCR, hosted analytics, member-receipt training, or any weakening of CR-006's local privacy boundary.
+
+These capabilities require separate product and data-model decisions rather than additions to the initial Fuel type.
+
+## 23. Technical references
 
 - [Generating a user access token for a GitHub App](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)
 - [Refreshing GitHub App user access tokens](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/refreshing-user-access-tokens)
