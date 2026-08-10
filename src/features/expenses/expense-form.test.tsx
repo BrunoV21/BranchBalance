@@ -65,10 +65,32 @@ describe('ExpenseForm', () => {
   });
 
   it('shows an editable review notice for receipt-prefilled fields', async () => {
-    const view = await render(<ThemeProvider><ExpenseForm currency="EUR" members={members} initial={{ description: 'Cafe', amount: '4.20', category: null, paymentMethod: null, paidBy: 'alice', splitType: 'equal', participants: ['alice', 'bob'], expenseDate: '2026-07-20' }} receiptPrefill={{ description: 'Cafe', amount: '4.20', expenseDate: '2026-07-20', confidence: { merchant: 0.98, total: 0.99, date: 0.97 }, warnings: ['Review the total.'], modelBundleVersion: 'test' }} submitLabel="Save expense" onSubmit={async () => undefined} /></ThemeProvider>);
+    const view = await render(<ThemeProvider><ExpenseForm currency="EUR" members={members} initial={{ description: 'Cafe', amount: '4.20', category: null, paymentMethod: null, paidBy: 'alice', splitType: 'equal', participants: ['alice', 'bob'], expenseDate: '2026-07-20' }} receiptPrefill={{ profile: 'generic_v1', profileVersion: 'test-profile', description: 'Cafe', amount: '4.20', expenseDate: '2026-07-20', confidence: { merchant: 0.98, total: 0.99, date: 0.97 }, warnings: ['Review the total.'], modelBundleVersion: 'test' }} submitLabel="Save expense" onSubmit={async () => undefined} /></ThemeProvider>);
 
     expect(view.getByText(/Receipt read on this device.*Review every field.*Review the total/)).toBeTruthy();
-    await fireEvent.changeText(view.getByLabelText('Description'), 'Edited cafe');
+    await fireEvent.changeText(view.getByLabelText('Description · Detected'), 'Edited cafe');
     expect(view.getByDisplayValue('Edited cafe')).toBeTruthy();
+  });
+
+  it('shows editable generic line items in the extracted panel and removes the section with the final row', async () => {
+    const item = { description: 'Coffee', quantity: '1', unitPrice: '4.20', lineTotal: '4.20' };
+    const view = await render(<ThemeProvider><ExpenseForm currency="EUR" members={members} initial={{ description: 'Cafe', amount: '4.20', category: null, paymentMethod: null, paidBy: 'alice', splitType: 'equal', participants: ['alice', 'bob'], expenseDate: '2026-07-20', lineItems: [item] }} receiptPrefill={{ profile: 'generic_v1', profileVersion: 'generic', description: 'Cafe', amount: '4.20', expenseDate: '2026-07-20', lineItems: [item], confidence: {}, warnings: [], modelBundleVersion: 'bundle' }} submitLabel="Save expense" onSubmit={async () => undefined} /></ThemeProvider>);
+    expect(view.getByText('Detected line items')).toBeTruthy();
+    expect(view.getByText(/matches Amount/)).toBeTruthy();
+    await fireEvent.changeText(view.getByLabelText('Item 1 description'), 'Edited coffee');
+    expect(view.getByDisplayValue('Edited coffee')).toBeTruthy();
+    await fireEvent.press(view.getByRole('button', { name: 'Remove item 1' }));
+    expect(view.queryByText('Detected line items')).toBeNull();
+  });
+
+  it('uses fixed Transport and optional Fuel fields without requiring details', async () => {
+    const onSubmit = jest.fn(async () => undefined);
+    const view = await render(<ThemeProvider><ExpenseForm groupType="fuel" currency="EUR" members={members} initial={{ description: 'Station', amount: '36.01', category: null, paymentMethod: null, paidBy: 'alice', splitType: 'equal', participants: ['alice', 'bob'], expenseDate: '2026-07-20', fuelDetails: null }} submitLabel="Add expense" onSubmit={onSubmit} /></ThemeProvider>);
+    expect(view.getByText('Fuel details (optional)')).toBeTruthy();
+    expect(view.getByText('Transport')).toBeTruthy();
+    expect(view.queryByRole('radio', { name: 'Food & drinks' })).toBeNull();
+    await fireEvent.press(view.getByRole('radio', { name: 'Cash' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Add expense' }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ fuelDetails: null, paymentMethod: 'cash' }));
   });
 });

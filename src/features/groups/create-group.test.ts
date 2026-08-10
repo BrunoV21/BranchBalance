@@ -18,8 +18,15 @@ describe('createGroupRepository', () => {
     const remote = gateway();
     const result = await createGroupRepository({ ...input, gateway: remote, store });
     expect(remote.createPrivateRepository).toHaveBeenCalledWith('branch-balance-trip');
-    expect(remote.createGroupFile).toHaveBeenCalledWith(repository, expect.objectContaining({ name: 'Trip', currency: 'EUR' }));
+    expect(remote.createGroupFile).toHaveBeenCalledWith(repository, expect.objectContaining({ schema_version: 2, group_type: 'trip', name: 'Trip', currency: 'EUR' }));
     expect(result.value.key).toBe('alice/branch-balance-trip');
+  });
+
+  it('creates an explicit schema-v2 Fuel group when selected', async () => {
+    const store = new SnapshotStoreImpl(new MemoryKeyValueStore());
+    const remote = gateway();
+    await createGroupRepository({ ...input, groupType: 'fuel', gateway: remote, store });
+    expect(remote.createGroupFile).toHaveBeenCalledWith(repository, expect.objectContaining({ schema_version: 2, group_type: 'fuel' }));
   });
 
   it('persists partial creation for bootstrap-only recovery', async () => {

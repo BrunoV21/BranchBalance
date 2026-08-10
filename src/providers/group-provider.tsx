@@ -1,6 +1,7 @@
 import { createContext, type PropsWithChildren, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { AppFailure, DomainValidationError, messageForError } from '@/domain/errors';
+import { effectiveGroupType } from '@/domain/groups';
 import { normalizeLogin, type CommittedMutation, type ExpenseFile, type GroupFile, type GroupKey, type RemoteGroupSnapshot, type SettlementLedgerFile, type SettlementLedgerState, type SettlementPayment, type SpendingPlan, type WritableExpense } from '@/domain/types';
 import { hydrateCachedSnapshot, type ConfirmedExpenseMutation, withExpenses, withGroupFile } from '@/features/expenses/snapshot-reconciliation';
 import { githubGateway, snapshotStore, systemClock, systemLocalCalendar } from '@/infrastructure/runtime';
@@ -74,6 +75,9 @@ export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ own
       try {
         const startedAtRevision = snapshotRevision.current;
         const remote = await githubGateway.refreshGroup(currentDescriptor.repository, account.login);
+        const previousType = stateRef.current.data ? stateRef.current.data.effectiveType ?? effectiveGroupType(stateRef.current.data.group) : currentDescriptor.effectiveType ?? effectiveGroupType(currentDescriptor.group);
+        const remoteType = remote.effectiveType ?? effectiveGroupType(remote.group);
+        if (previousType && remoteType !== previousType) throw new AppFailure({ kind: 'group_type_changed' });
         if (snapshotRevision.current !== startedAtRevision && stateRef.current.data) return stateRef.current.data;
         const snapshot = reconcileRemoteGroupSnapshot(remote);
         snapshotRevision.current += 1;
@@ -120,6 +124,7 @@ export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ own
   const invite = useCallback(async (login: string) => {
     const normalized = normalizeLogin(login);
     let snapshot = await refresh();
+    requireKnownSnapshot(snapshot);
     if (normalized === snapshot.repository.owner.toLowerCase()) throw new DomainValidationError('The repository owner is already a member.', 'login');
     if (snapshot.members.some((member) => member.login.toLowerCase() === normalized)) throw new DomainValidationError('This GitHub user is already a member.', 'login');
     if (snapshot.pendingMembers?.some((member) => member.login.toLowerCase() === normalized)) throw new DomainValidationError('This GitHub user already has a pending invitation.', 'login');
@@ -132,8 +137,9 @@ export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ own
   const createExpense = useCallback(async (expense: WritableExpense) => {
     const current = stateRef.current.data;
     if (!current) throw new DomainValidationError('Refresh the group before adding an expense.');
+    const type = requireKnownSnapshot(current);
     let committed: CommittedMutation<ExpenseFile>;
-    try { committed = await githubGateway.createExpense(current.repository, expense); }
+    try { committed = await githubGateway.createExpense(current.repository, expense, undefined, type); }
     catch (error) {
       if (!(error instanceof AppFailure) || !('retryable' in error.detail && error.detail.retryable)) throw error;
       const remote = await githubGateway.readExpense(current.repository, expense.id);
@@ -148,7 +154,8 @@ export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ own
   const updateExpense = useCallback(async (expense: WritableExpense, target: ExpenseFile) => {
     const current = stateRef.current.data;
     if (!current) throw new DomainValidationError('Refresh the group before editing an expense.');
-    const committed = await githubGateway.updateExpense(current.repository, target, expense);
+    const type = requireKnownSnapshot(current);
+    const committed = await githubGateway.updateExpense(current.repository, target, expense, undefined, type);
     await commitExpenseMutation({ kind: 'upsert', file: committed.value });
     await recordLocalActivity(key, 'expense_updated', committed.commit, expense.id);
   }, [commitExpenseMutation, key, recordLocalActivity]);
@@ -156,6 +163,7 @@ export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ own
   const deleteExpense = useCallback(async (target: ExpenseFile) => {
     const current = stateRef.current.data;
     if (!current) throw new DomainValidationError('Refresh the group before deleting an expense.');
+    requireKnownSnapshot(current);
     const committed = await githubGateway.deleteExpense(current.repository, target);
     await commitExpenseMutation({ kind: 'delete', expenseId: target.expense.id });
     await recordLocalActivity(key, 'expense_deleted', committed.commit, target.expense.id);
@@ -176,8 +184,9 @@ export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ own
     const current = stateRef.current.data;
     const groupFile = target ?? current?.groupFile;
     if (!current || !groupFile) throw new DomainValidationError('Refresh the group before changing its spending plan.');
+    const type = requireKnownSnapshot(current);
     if (!current.repository.canWrite) throw new DomainValidationError('Your GitHub account cannot update this spending plan.');
-    const committed = await githubGateway.updateSpendingPlan(current.repository, groupFile, plan);
+    const committed = await githubGateway.updateSpendingPlan(current.repository, groupFile, plan, undefined, type);
     await commitSpendingPlanMutation(committed.value);
     await recordLocalActivity(key, 'spending_plan_updated', committed.commit);
   }, [commitSpendingPlanMutation, key, recordLocalActivity]);
@@ -186,8 +195,9 @@ export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ own
     const current = stateRef.current.data;
     const groupFile = target ?? current?.groupFile;
     if (!current || !groupFile) throw new DomainValidationError('Refresh the group before changing its spending plan.');
+    const type = requireKnownSnapshot(current);
     if (!current.repository.canWrite) throw new DomainValidationError('Your GitHub account cannot update this spending plan.');
-    const committed = await githubGateway.updateSpendingPlan(current.repository, groupFile, null);
+    const committed = await githubGateway.updateSpendingPlan(current.repository, groupFile, null, undefined, type);
     await commitSpendingPlanMutation(committed.value);
     await recordLocalActivity(key, 'spending_plan_removed', committed.commit);
   }, [commitSpendingPlanMutation, key, recordLocalActivity]);
@@ -215,6 +225,7 @@ export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ own
   const recordSettlementPayment = useCallback(async (payment: SettlementPayment) => {
     if (!account) throw new DomainValidationError('Sign in to record a payment.');
     const current = await refresh();
+    requireKnownSnapshot(current);
     if (!current.repository.canWrite || !current.members.some((member) => normalizeLogin(member.login) === normalizeLogin(account.login))) {
       throw new DomainValidationError('Only an accepted group member with write access can record settlement payments.');
     }
@@ -237,6 +248,7 @@ export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ own
   const confirmSettlementPayment = useCallback(async (paymentId: string) => {
     if (!account) throw new DomainValidationError('Sign in to confirm a payment.');
     const current = await refresh();
+    requireKnownSnapshot(current);
     if (!current.repository.canWrite || !current.members.some((member) => normalizeLogin(member.login) === normalizeLogin(account.login))) {
       throw new AppFailure({ kind: 'settlement_confirmation_unauthorized' });
     }
@@ -252,6 +264,7 @@ export function GroupProvider({ owner, repo, children }: PropsWithChildren<{ own
   const deleteSettlementPayment = useCallback(async (paymentId: string) => {
     if (!account) throw new DomainValidationError('Sign in to delete a payment.');
     const current = await refresh();
+    requireKnownSnapshot(current);
     if (!current.repository.canWrite || !current.members.some((member) => normalizeLogin(member.login) === normalizeLogin(account.login))) {
       throw new DomainValidationError('Only an accepted group member with write access can delete settlement payments.');
     }
@@ -270,4 +283,10 @@ export function useGroup() {
   const value = useContext(GroupContext);
   if (!value) throw new Error('useGroup must be used inside GroupProvider.');
   return value;
+}
+
+function requireKnownSnapshot(snapshot: RemoteGroupSnapshot) {
+  const type = snapshot.effectiveType ?? effectiveGroupType(snapshot.group);
+  if (!type) throw new AppFailure({ kind: 'unsupported_group_type', groupType: snapshot.group.schema_version === 2 ? snapshot.group.group_type : 'unknown' });
+  return type;
 }

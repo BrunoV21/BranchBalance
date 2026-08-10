@@ -29,7 +29,8 @@ export class MemoryKeyValueStore implements KeyValueStore {
 }
 
 const accountSchema = z.object({ id: z.number().int(), login: z.string(), name: z.string().nullable(), avatarUrl: z.string().nullable() });
-const groupsSchema = z.array(z.object({ key: z.string(), repository: z.object({ id: z.number() }).passthrough(), group: z.object({ schema_version: z.literal(1) }).passthrough(), summary: z.unknown().nullable() }).passthrough());
+const cachedGroupSchema = z.object({ schema_version: z.union([z.literal(1), z.literal(2)]), name: z.string(), currency: z.enum(['EUR', 'USD', 'GBP']), created_by: z.string(), created_at: z.string(), group_type: z.string().optional() }).passthrough();
+const groupsSchema = z.array(z.object({ key: z.string(), repository: z.object({ id: z.number() }).passthrough(), group: cachedGroupSchema, effectiveType: z.enum(['trip', 'fuel']).nullable().optional(), summary: z.unknown().nullable() }).passthrough());
 const repositorySchema = z.object({
   id: z.number().int(), owner: z.string(), name: z.string(), defaultBranch: z.string(), installationId: z.number().int().nullable(),
   private: z.literal(true), canAdmin: z.boolean(), canWrite: z.boolean(),
@@ -45,14 +46,15 @@ const groupFileSchema = z.object({
 }).passthrough();
 const snapshotSchema = z.object({
   key: z.string(), repository: repositorySchema,
-  group: z.object({ schema_version: z.literal(1), name: z.string(), currency: z.enum(['EUR', 'USD', 'GBP']), created_by: z.string(), created_at: z.string() }).passthrough(),
+  group: cachedGroupSchema,
   groupFile: groupFileSchema.nullable().optional(),
   members: z.array(memberSchema), pendingMembers: z.array(pendingMemberSchema).nullable(), expenses: z.array(expenseFileSchema),
   balances: z.unknown(), settlements: z.array(z.unknown()), spending: z.unknown().nullable().optional(),
   settlementLedger: z.unknown().optional(), payments: z.array(z.unknown()).optional(), reservations: z.array(z.unknown()).optional(),
+  effectiveType: z.enum(['trip', 'fuel']).nullable().optional(), analytics: z.unknown().nullable().optional(), cacheVersion: z.literal(2).optional(),
   warnings: z.array(z.object({ path: z.string(), reason: z.string() })), syncedAt: z.string(),
 }).passthrough().transform((value) => ({ ...value, groupFile: value.groupFile ?? null, spending: null }));
-const pendingSchema = z.object({ repository: z.object({ id: z.number() }).passthrough(), group: z.object({ schema_version: z.literal(1) }).passthrough() }).passthrough();
+const pendingSchema = z.object({ repository: z.object({ id: z.number() }).passthrough(), group: cachedGroupSchema }).passthrough();
 
 const ACTIVE_ACCOUNT = 'bb:v1:active-account';
 const THEME = 'bb:v1:theme';

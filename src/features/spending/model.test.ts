@@ -10,6 +10,7 @@ describe('spending plan form model', () => {
     draft.startsOn = '2026-08-10';
     draft.endsOn = '2026-08-16';
     expect(buildSpendingPlan(draft, 'EUR', ' OctoCat ', clock)).toEqual({
+      kind: 'trip',
       budget_minor: 100000,
       category_budgets_minor: { food_drink: 12550 },
       starts_on: '2026-08-10', ends_on: '2026-08-16',
@@ -23,7 +24,7 @@ describe('spending plan form model', () => {
     expect(buildSpendingPlan(dates, 'EUR', 'octocat', clock)).toMatchObject({ starts_on: '2026-08-10' });
     const partial = { ...dates, endsOn: '' as const };
     expect(() => buildSpendingPlan(partial, 'EUR', 'octocat', clock)).toThrow(/both/i);
-    expect(() => buildSpendingPlan(emptySpendingPlanDraft(), 'EUR', 'octocat', clock)).toThrow(/budget/i);
+    expect(() => buildSpendingPlan(emptySpendingPlanDraft(), 'EUR', 'octocat', clock)).toThrow(/dates/i);
     const limits = emptySpendingPlanDraft(); limits.categoryBudgets.food_drink = '10';
     expect(() => buildSpendingPlan(limits, 'EUR', 'octocat', clock)).toThrow(/total budget/i);
   });

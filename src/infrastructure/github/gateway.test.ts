@@ -250,7 +250,7 @@ describe('GitHubGateway spending-plan writes', () => {
     const commitSha = 'b'.repeat(40);
     const request = jest.fn(async (route: string, _parameters: Record<string, unknown>) => {
       if (route.startsWith('PUT ')) throw new AppFailure({ kind: 'network', retryable: true });
-      if (route === 'GET /repos/{owner}/{repo}/contents/{path}') return { data: { type: 'file', sha: 'confirmed-sha', content: encoded({ ...group, spending_plan: plan }) }, headers: {}, status: 200 };
+      if (route === 'GET /repos/{owner}/{repo}/contents/{path}') return { data: { type: 'file', sha: 'confirmed-sha', content: encoded({ ...group, schema_version: 2, group_type: 'trip', spending_plan: { kind: 'trip', ...plan } }) }, headers: {}, status: 200 };
       if (route === 'GET /repos/{owner}/{repo}/commits') return { data: [{ sha: commitSha, commit: { message: 'Update spending plan', committer: { date: '2026-07-19T12:00:00Z' } }, author: { login: 'owner' } }], headers: {}, status: 200 };
       throw new Error(`Unexpected ${route}`);
     });

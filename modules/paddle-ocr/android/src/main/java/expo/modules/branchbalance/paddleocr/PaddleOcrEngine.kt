@@ -25,12 +25,6 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-private const val DETECTION_THRESHOLD = 0.30
-private const val BOX_THRESHOLD = 0.60
-private const val UNCLIP_RATIO = 1.5
-private const val MAX_TEXT_REGIONS = 256
-private const val MAX_RECOGNITION_WIDTH = 960
-
 internal class PaddleOcrEngine(
   private val context: Context,
   private val assetRoot: String,
@@ -45,7 +39,7 @@ internal class PaddleOcrEngine(
   private val orientation = loadSession("text_orientation.onnx")
   private val characters = context.assets.open("$assetRoot/characters.txt").bufferedReader().use { it.readLines() }
 
-  fun recognize(imageUri: String, isCancelled: () -> Boolean): Map<String, Any> {
+  fun recognize(imageUri: String, profile: OcrProfile, isCancelled: () -> Boolean): Map<String, Any> {
     checkCancelled(isCancelled)
     val bitmap = loadBitmap(imageUri) ?: throw ImageUnreadableException()
     if (bitmap.width !in 1..2048 || bitmap.height !in 1..2048) {
@@ -60,14 +54,14 @@ internal class PaddleOcrEngine(
     }
     Imgproc.cvtColor(original, original, Imgproc.COLOR_RGBA2BGR)
     try {
-      val boxes = detect(original, isCancelled)
+      val boxes = detect(original, profile, isCancelled)
       val blocks = mutableListOf<Map<String, Any>>()
-      for (box in boxes.take(MAX_TEXT_REGIONS)) {
+      for (box in boxes.take(profile.maxRegions)) {
         checkCancelled(isCancelled)
         val crop = perspectiveCrop(original, box)
         try {
           if (shouldRotate(crop, isCancelled)) Core.rotate(crop, crop, Core.ROTATE_180)
-          val recognized = recognizeLine(crop, isCancelled)
+          val recognized = recognizeLine(crop, profile, isCancelled)
           if (recognized.text.isNotBlank()) {
             blocks += mapOf(
               "text" to recognized.text.take(256),
@@ -85,9 +79,9 @@ internal class PaddleOcrEngine(
     }
   }
 
-  private fun detect(image: Mat, isCancelled: () -> Boolean): List<List<Point>> {
+  private fun detect(image: Mat, profile: OcrProfile, isCancelled: () -> Boolean): List<List<Point>> {
     val longEdge = max(image.cols(), image.rows())
-    val ratio = 960.0 / longEdge
+    val ratio = profile.longEdge.toDouble() / longEdge
     val width = max(32, ((image.cols() * ratio / 32.0).roundToInt() * 32))
     val height = max(32, ((image.rows() * ratio / 32.0).roundToInt() * 32))
     val resized = Mat()
@@ -99,7 +93,7 @@ internal class PaddleOcrEngine(
       val probability = Mat(height, width, CvType.CV_32F)
       probability.put(0, 0, output)
       val binary = Mat()
-      Imgproc.threshold(probability, binary, DETECTION_THRESHOLD, 255.0, Imgproc.THRESH_BINARY)
+      Imgproc.threshold(probability, binary, profile.detectionThreshold, 255.0, Imgproc.THRESH_BINARY)
       binary.convertTo(binary, CvType.CV_8U)
       val contours = mutableListOf<MatOfPoint>()
       val hierarchy = Mat()
@@ -115,13 +109,13 @@ internal class PaddleOcrEngine(
           Imgproc.drawContours(mask, listOf(contour), 0, Scalar(255.0), -1)
           val score = Core.mean(probability, mask).`val`[0]
           mask.release()
-          if (score < BOX_THRESHOLD) return@mapNotNull null
+          if (score < profile.boxThreshold) return@mapNotNull null
           val points2f = MatOfPoint2f(*contour.toArray())
           val rect = Imgproc.minAreaRect(points2f)
           points2f.release()
           if (min(rect.size.width, rect.size.height) < 3.0) return@mapNotNull null
           val perimeter = 2.0 * (rect.size.width + rect.size.height)
-          val distance = rect.size.area() * UNCLIP_RATIO / max(1.0, perimeter)
+          val distance = rect.size.area() * profile.unclipRatio / max(1.0, perimeter)
           val expanded = RotatedRect(rect.center, Size(rect.size.width + 2 * distance, rect.size.height + 2 * distance), rect.angle)
           val rawPoints = arrayOf(Point(), Point(), Point(), Point())
           expanded.points(rawPoints)
@@ -129,7 +123,7 @@ internal class PaddleOcrEngine(
         } finally {
           contour.release()
         }
-      }.sortedWith(compareBy<List<Point>> { it.sumOf { point -> point.y } / 4.0 }.thenBy { it.sumOf { point -> point.x } / 4.0 }).take(MAX_TEXT_REGIONS).toList()
+      }.sortedWith(compareBy<List<Point>> { it.sumOf { point -> point.y } / 4.0 }.thenBy { it.sumOf { point -> point.x } / 4.0 }).take(profile.maxRegions).toList()
       probability.release()
       return boxes
     } finally {
@@ -165,9 +159,9 @@ internal class PaddleOcrEngine(
     }
   }
 
-  private fun recognizeLine(crop: Mat, isCancelled: () -> Boolean): RecognizedLine {
+  private fun recognizeLine(crop: Mat, profile: OcrProfile, isCancelled: () -> Boolean): RecognizedLine {
     val ratio = crop.cols().toDouble() / max(1, crop.rows())
-    val contentWidth = max(1, min(MAX_RECOGNITION_WIDTH, ceil(48 * ratio).toInt()))
+    val contentWidth = max(1, min(profile.maxRecognitionWidth, ceil(48 * ratio).toInt()))
     val tensorWidth = max(320, ((contentWidth + 31) / 32) * 32)
     val resized = Mat()
     Imgproc.resize(crop, resized, Size(contentWidth.toDouble(), 48.0))

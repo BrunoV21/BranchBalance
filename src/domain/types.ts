@@ -5,6 +5,9 @@ export type SplitType = 'equal' | 'full';
 export type IsoInstant = string;
 export type CalendarDate = string;
 export type GroupKey = `${string}/${string}`;
+export type KnownGroupType = 'trip' | 'fuel';
+export type ReceiptProfileId = 'generic_v1' | 'fuel_v1';
+export type MonthKey = `${number}-${string}`;
 
 export interface AccountProfile {
   id: number;
@@ -24,16 +27,7 @@ export interface RepositoryRef {
   canWrite: boolean;
 }
 
-export interface Group {
-  schema_version: 1;
-  name: string;
-  currency: CurrencyCode;
-  spending_plan?: SpendingPlan;
-  created_by: string;
-  created_at: IsoInstant;
-}
-
-export interface SpendingPlan {
+export interface LegacyTripPlan {
   budget_minor?: number;
   category_budgets_minor?: Partial<Record<ExpenseCategory, number>>;
   starts_on?: CalendarDate;
@@ -42,11 +36,92 @@ export interface SpendingPlan {
   updated_at: IsoInstant;
 }
 
+export interface TripPlanV2 {
+  kind: 'trip';
+  budget_minor?: number;
+  category_budgets_minor?: Partial<Record<ExpenseCategory, number>>;
+  starts_on: CalendarDate;
+  ends_on: CalendarDate;
+  updated_by: string;
+  updated_at: IsoInstant;
+}
+
+export interface FuelMonthlyLimit {
+  effective_month: MonthKey;
+  limit_minor: number;
+}
+
+export interface FuelMonthlyPlanV2 {
+  kind: 'fuel_monthly';
+  monthly_limits: FuelMonthlyLimit[];
+  budget_minor?: undefined;
+  category_budgets_minor?: undefined;
+  starts_on?: undefined;
+  ends_on?: undefined;
+  updated_by: string;
+  updated_at: IsoInstant;
+}
+
+export type SpendingPlan = LegacyTripPlan | TripPlanV2 | FuelMonthlyPlanV2;
+export type TypedSpendingPlan = TripPlanV2 | FuelMonthlyPlanV2;
+
+export interface GroupV1 {
+  schema_version: 1;
+  name: string;
+  currency: CurrencyCode;
+  spending_plan?: LegacyTripPlan;
+  created_by: string;
+  created_at: IsoInstant;
+}
+
+export interface KnownGroupV2 {
+  schema_version: 2;
+  group_type: KnownGroupType;
+  name: string;
+  currency: CurrencyCode;
+  spending_plan?: TypedSpendingPlan;
+  created_by: string;
+  created_at: IsoInstant;
+}
+
+export interface UnsupportedGroupV2 {
+  schema_version: 2;
+  group_type: string;
+  name: string;
+  currency: CurrencyCode;
+  spending_plan?: undefined;
+  created_by: string;
+  created_at: IsoInstant;
+}
+
+export type Group = GroupV1 | KnownGroupV2 | UnsupportedGroupV2;
+
 export interface GroupFile {
   group: Group;
   blobSha: string;
   path: 'group.json';
   sourceDocument: Record<string, unknown>;
+  sourceVersion?: 1 | 2;
+  effectiveType?: KnownGroupType | null;
+}
+
+export interface ExpenseLineItem {
+  description: string;
+  quantity?: string;
+  unit_price_minor?: number;
+  line_total_minor: number;
+}
+
+export type FuelType = 'petrol' | 'diesel' | 'lpg' | 'other';
+
+export interface FuelExpenseDataV1 {
+  schema_version: 1;
+  type: 'fuel';
+  volume_millilitres: number;
+  unit_price_micros_per_litre?: number;
+  gross_amount_minor?: number;
+  discount_minor?: number;
+  fuel_type?: FuelType;
 }
 
 export interface Expense {
@@ -66,6 +141,8 @@ export interface Expense {
   created_at: IsoInstant;
   updated_by: string | null;
   updated_at: IsoInstant | null;
+  line_items?: ExpenseLineItem[];
+  type_data?: FuelExpenseDataV1;
 }
 
 export type WritableExpense = Omit<Expense, 'category' | 'payment_method'> & {
@@ -210,6 +287,12 @@ export interface GroupSummary {
   memberCount: number;
   expenseCount: number;
   syncedAt: IsoInstant;
+  sourceSchemaVersion?: 1 | 2;
+  effectiveType?: KnownGroupType | null;
+  totalSpentMinor?: number;
+  currentMonth?: MonthKey;
+  currentMonthSpentMinor?: number;
+  currentMonthLimitMinor?: number | null;
 }
 
 export interface SpendingSummary {
@@ -282,6 +365,55 @@ export interface SpendingAnalytics {
   insights: SpendingInsight[];
 }
 
+export interface Rational {
+  numerator: number;
+  denominator: number;
+}
+
+export interface FuelMonthSummary {
+  month: MonthKey;
+  paidMinor: number;
+  applicableLimitMinor: number | null;
+  remainingMinor: number | null;
+  status: 'no_limit' | 'under' | 'at' | 'over';
+  expenseCount: number;
+  representedVolumeMl: number;
+  expensesWithVolume: number;
+  weightedPaidPrice: Rational | null;
+  explicitDiscountMinor: number;
+  expensesWithExplicitDiscount: number;
+  futureDatedMinor: number;
+}
+
+export interface FuelStationSummary {
+  key: string;
+  label: string;
+  paidMinor: number;
+  representedVolumeMl: number;
+  expenseCount: number;
+}
+
+export interface FuelCoverage {
+  expenseCount: number;
+  withValidFuelData: number;
+  withVolume: number;
+  withPrintedPrice: number;
+  withGross: number;
+  withExplicitDiscount: number;
+}
+
+export interface FuelAnalytics {
+  selectedMonth: FuelMonthSummary;
+  monthlySeries: FuelMonthSummary[];
+  stationRows: FuelStationSummary[];
+  coverage: FuelCoverage;
+  warnings: DataWarning[];
+}
+
+export type TypedGroupAnalytics =
+  | { type: 'trip'; spending: SpendingSummary }
+  | { type: 'fuel'; common: SpendingSummary; fuel: FuelAnalytics };
+
 export interface ExpenseFundingAnalytics {
   scaleMaxMinor: number;
   rows: {
@@ -298,6 +430,7 @@ export interface DiscoveredGroup {
   repository: RepositoryRef;
   group: Group;
   summary: GroupSummary | null;
+  effectiveType?: KnownGroupType | null;
 }
 
 export interface RemoteGroupSnapshot {
@@ -314,6 +447,9 @@ export interface RemoteGroupSnapshot {
   payments?: SettlementPayment[];
   reservations?: SettlementReservation[];
   spending: SpendingSummary | null;
+  effectiveType?: KnownGroupType | null;
+  analytics?: TypedGroupAnalytics | null;
+  cacheVersion?: 2;
   warnings: DataWarning[];
   syncedAt: IsoInstant;
 }

@@ -9,6 +9,7 @@ import expo.modules.kotlin.records.Record
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.opencv.android.OpenCVLoader
+import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -19,7 +20,24 @@ private const val ASSET_ROOT = "paddle_ocr"
 class RecognizeOptions : Record {
   @Field lateinit var requestId: String
   @Field lateinit var imageUri: String
+  @Field lateinit var profile: String
 }
+
+internal data class OcrProfile(
+  val id: String,
+  val version: String,
+  val longEdge: Int,
+  val detectionThreshold: Double,
+  val boxThreshold: Double,
+  val unclipRatio: Double,
+  val maxRegions: Int,
+  val maxRecognitionWidth: Int,
+)
+
+private val PROFILES = mapOf(
+  "generic_v1" to OcrProfile("generic_v1", "generic-v1-2026-08-10", 960, 0.30, 0.60, 1.5, 192, 960),
+  "fuel_v1" to OcrProfile("fuel_v1", "fuel-v1-2026-08-10", 1280, 0.30, 0.60, 1.5, 160, 960),
+)
 
 class ModelsMissingException : CodedException("The local OCR models are missing from this build.")
 class ModelsIncompatibleException : CodedException("The local OCR models are incompatible with this build.")
@@ -35,21 +53,28 @@ class PaddleOcrModule : Module() {
   override fun definition() = ModuleDefinition {
     Name(MODULE_NAME)
 
-    AsyncFunction("getStatus").Coroutine<Map<String, Any?>> {
+    AsyncFunction("getStatus").Coroutine { profileId: String ->
       val context = requireNotNull(appContext.reactContext)
       val assets = context.assets
-      val required = listOf("model-bundle.json", "text_detection.onnx", "text_recognition.onnx", "text_orientation.onnx", "characters.txt")
+      val profile = PROFILES[profileId]
+        ?: return@Coroutine status("models_incompatible", profileId, null, null, "The selected receipt profile is unavailable in this build.")
+      val required = listOf("model-bundle.json", "profile-manifest.json", "text_detection.onnx", "text_recognition.onnx", "text_orientation.onnx", "characters.txt")
       if (required.any { runCatching { assets.open("$ASSET_ROOT/$it").use { stream -> stream.read() } }.isFailure }) {
-        return@Coroutine status("models_missing", null, "The local OCR models are missing from this build.")
+        return@Coroutine status("models_missing", profile.id, null, null, "The local OCR models are missing from this build.")
       }
       val manifest = assets.open("$ASSET_ROOT/model-bundle.json").bufferedReader().use { it.readText() }
       if (!manifest.contains("\"bundleVersion\": \"$MODEL_BUNDLE_VERSION\"")) {
-        return@Coroutine status("models_incompatible", null, "The local OCR model bundle does not match this app build.")
+        return@Coroutine status("models_incompatible", profile.id, null, null, "The local OCR model bundle does not match this app build.")
+      }
+      val profileManifest = JSONObject(assets.open("$ASSET_ROOT/profile-manifest.json").bufferedReader().use { it.readText() })
+      val packagedProfile = profileManifest.getJSONObject("profiles").optJSONObject(profile.id)
+      if (packagedProfile?.optString("version") != profile.version) {
+        return@Coroutine status("models_incompatible", profile.id, null, MODEL_BUNDLE_VERSION, "The selected receipt profile does not match this app build.")
       }
       if (!OpenCVLoader.initLocal()) {
-        return@Coroutine status("models_incompatible", null, "The local image-processing runtime could not be loaded.")
+        return@Coroutine status("models_incompatible", profile.id, null, MODEL_BUNDLE_VERSION, "The local image-processing runtime could not be loaded.")
       }
-      status("ready", MODEL_BUNDLE_VERSION, "Receipt scanning is ready.")
+      status("ready", profile.id, profile.version, MODEL_BUNDLE_VERSION, "${if (profile.id == "fuel_v1") "Fuel" else "Generic"} receipt scanning is ready.")
     }
 
     AsyncFunction("recognize") Coroutine { options: RecognizeOptions ->
@@ -59,10 +84,11 @@ class PaddleOcrModule : Module() {
         withContext(Dispatchers.Default) {
           if (cancelled.get()) throw CancelledException()
           val context = requireNotNull(appContext.reactContext)
+          val profile = PROFILES[options.profile] ?: throw ModelsIncompatibleException()
           val activeEngine = synchronized(this@PaddleOcrModule) {
             engine ?: PaddleOcrEngine(context, ASSET_ROOT).also { engine = it }
           }
-          activeEngine.recognize(options.imageUri) { cancelled.get() }
+          activeEngine.recognize(options.imageUri, profile) { cancelled.get() }
         }
       } catch (error: CancelledException) {
         throw error
@@ -89,9 +115,11 @@ class PaddleOcrModule : Module() {
     }
   }
 
-  private fun status(state: String, version: String?, message: String) = mapOf(
+  private fun status(state: String, profile: String, profileVersion: String?, version: String?, message: String) = mapOf(
     "state" to state,
     "engine" to "paddle_ocr",
+    "profile" to profile,
+    "profileVersion" to profileVersion,
     "modelBundleVersion" to version,
     "safeMessage" to message,
   )

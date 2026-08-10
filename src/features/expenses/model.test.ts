@@ -29,4 +29,15 @@ describe('expense form model', () => {
     const expense = buildNewExpense({ description: 'Coffee', amount: '4.25', category: 'food_drink', paymentMethod: 'cash', paidBy: 'alice', splitType: 'just_me', participants: ['bob'], expenseDate: '2026-07-15' }, '7a3d2c4b-1e5f-4a8b-9c6d-2f0e1a3b4c5d', 'EUR', members, 'alice', clock);
     expect(expense).toMatchObject({ split_type: 'equal', participants: ['alice'], shares_minor: { alice: 425 } });
   });
+
+  it('persists reviewed Trip line items without changing amount or shares', () => {
+    const expense = buildNewExpense({ description: 'Cafe', amount: '10.01', category: 'food_drink', paymentMethod: 'card', paidBy: 'alice', splitType: 'equal', participants: ['alice', 'bob'], expenseDate: '2026-07-15', lineItems: [{ description: 'Coffee', quantity: '2', unitPrice: '4.50', lineTotal: '9.00' }] }, '00000000-0000-4000-8000-000000000010', 'EUR', members, 'alice', clock, 'trip');
+    expect(expense.line_items).toEqual([{ description: 'Coffee', quantity: '2', unit_price_minor: 450, line_total_minor: 900 }]);
+    expect(expense).toMatchObject({ amount_minor: 1001, shares_minor: { alice: 501, bob: 500 } });
+  });
+
+  it('builds integer Fuel enrichment and fixes category to Transport', () => {
+    const expense = buildNewExpense({ description: 'Station', amount: '36.01', category: null, paymentMethod: 'card', paidBy: 'alice', splitType: 'just_me', participants: ['alice'], expenseDate: '2026-07-15', fuelDetails: { litres: '24.500', unitPrice: '1.633', gross: '40.01', discount: '4.00', fuelType: 'diesel' } }, '00000000-0000-4000-8000-000000000011', 'EUR', members, 'alice', clock, 'fuel');
+    expect(expense).toMatchObject({ category: 'transport', amount_minor: 3601, shares_minor: { alice: 3601 }, type_data: { volume_millilitres: 24500, unit_price_micros_per_litre: 1633000, gross_amount_minor: 4001, discount_minor: 400, fuel_type: 'diesel' } });
+  });
 });

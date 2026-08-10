@@ -1,7 +1,8 @@
 import { createContext, type PropsWithChildren, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { AppFailure, DomainValidationError, messageForError } from '@/domain/errors';
-import { groupKey, type AcceptedInvitationPendingDiscovery, type ActivityInboxV1, type ActivityItem, type ActivityKind, type ConfirmedInvitationDecision, type CurrencyCode, type DiscoveredGroup, type GroupCommitSlice, type GroupFile, type GroupKey, type PendingGroupCreation, type PendingGroupInvitation, type RepositoryCommitRef, type RemoteGroupSnapshot, type SettlementLedgerState } from '@/domain/types';
+import { groupKey, type AcceptedInvitationPendingDiscovery, type ActivityInboxV1, type ActivityItem, type ActivityKind, type ConfirmedInvitationDecision, type CurrencyCode, type DiscoveredGroup, type GroupCommitSlice, type GroupFile, type GroupKey, type KnownGroupType, type PendingGroupCreation, type PendingGroupInvitation, type RepositoryCommitRef, type RemoteGroupSnapshot, type SettlementLedgerState } from '@/domain/types';
+import { effectiveGroupType } from '@/domain/groups';
 import { githubGateway, snapshotStore, systemClock, systemLocalCalendar } from '@/infrastructure/runtime';
 import { clearActivity as clearActivityItems, dismissActivity as dismissActivityItem, markActivityRead as markActivityItemsRead, reconcileActivity, recordLocalCommit, registerLocalGroup, removeGroupActivity } from '@/features/activity/model';
 import type { GitHubGateway } from '@/infrastructure/github/contracts';
@@ -32,7 +33,7 @@ type GroupsContextValue = {
   refresh(): Promise<void>;
   acceptInvitation(invitationId: number): Promise<void>;
   declineInvitation(invitationId: number): Promise<void>;
-  createGroup(name: string, currency: CurrencyCode): Promise<DiscoveredGroup>;
+  createGroup(name: string, currency: CurrencyCode, groupType?: KnownGroupType): Promise<DiscoveredGroup>;
   retryPendingCreation(): Promise<DiscoveredGroup>;
   applyGroupSnapshot(snapshot: RemoteGroupSnapshot): Promise<void>;
   recordConfirmedExpenseMutation(key: string, mutation: ConfirmedExpenseMutation): void;
@@ -607,10 +608,10 @@ export function GroupsProvider({ children }: PropsWithChildren) {
     confirmedSettlementLedgers.current.set(key, ledger);
   }, []);
 
-  const createGroup = useCallback(async (name: string, currency: CurrencyCode) => {
+  const createGroup = useCallback(async (name: string, currency: CurrencyCode, groupType: KnownGroupType = 'trip') => {
     if (!account) throw new DomainValidationError('Sign in to create a group.');
     try {
-      const created = await createGroupRepository({ gateway: githubGateway, store: snapshotStore, accountId: account.id, login: account.login, name, currency, canCreate: canCreateGroups, clock: systemClock });
+      const created = await createGroupRepository({ gateway: githubGateway, store: snapshotStore, accountId: account.id, login: account.login, name, currency, groupType, canCreate: canCreateGroups, clock: systemClock });
       const descriptor = created.value;
       const groups = [...stateRef.current.data, descriptor].sort((a, b) => a.group.name.localeCompare(b.group.name));
       patchState((value) => ({ ...value, data: groups, status: 'ready' }));
@@ -631,7 +632,7 @@ export function GroupsProvider({ children }: PropsWithChildren) {
   const retryPendingCreation = useCallback(async () => {
     if (!account || !pendingCreation) throw new DomainValidationError('There is no group setup to retry.');
     const initialized = await githubGateway.createGroupFile(pendingCreation.repository, pendingCreation.group);
-    const descriptor = { key: groupKey(pendingCreation.repository.owner, pendingCreation.repository.name), repository: pendingCreation.repository, group: pendingCreation.group, summary: null } satisfies DiscoveredGroup;
+    const descriptor = { key: groupKey(pendingCreation.repository.owner, pendingCreation.repository.name), repository: pendingCreation.repository, group: pendingCreation.group, effectiveType: effectiveGroupType(pendingCreation.group), summary: null } satisfies DiscoveredGroup;
     const groups = [...stateRef.current.data.filter((item) => item.key !== descriptor.key), descriptor].sort((a, b) => a.group.name.localeCompare(b.group.name));
     await snapshotStore.writePendingGroup(account.id, null);
     await snapshotStore.writeGroups(account.id, groups);
@@ -857,12 +858,21 @@ function descriptorFromSnapshot(snapshot: RemoteGroupSnapshot, currentLogin: str
     key: snapshot.key,
     repository: snapshot.repository,
     group: snapshot.group,
+    effectiveType: snapshot.effectiveType ?? effectiveGroupType(snapshot.group),
     summary: {
       currency: snapshot.group.currency,
       currentUserBalanceMinor: currentBalance,
       memberCount: snapshot.members.length,
       expenseCount: snapshot.expenses.length,
       syncedAt: snapshot.syncedAt,
+      sourceSchemaVersion: snapshot.group.schema_version,
+      effectiveType: snapshot.effectiveType ?? effectiveGroupType(snapshot.group),
+      totalSpentMinor: snapshot.spending?.totalSpentMinor ?? snapshot.balances.totalSpentMinor,
+      ...(snapshot.analytics?.type === 'fuel' ? {
+        currentMonth: snapshot.analytics.fuel.selectedMonth.month,
+        currentMonthSpentMinor: snapshot.analytics.fuel.selectedMonth.paidMinor,
+        currentMonthLimitMinor: snapshot.analytics.fuel.selectedMonth.applicableLimitMinor,
+      } : {}),
     },
   };
 }

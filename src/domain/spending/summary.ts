@@ -1,4 +1,5 @@
 import { DomainValidationError } from '@/domain/errors';
+import { isTripPlan } from '@/domain/groups';
 import { normalizeLogin, type CalendarDate, type Expense, type SpendingInsight, type SpendingPlan, type SpendingSummary } from '@/domain/types';
 
 import { calendarDayOrdinal, inclusiveCalendarDays } from './calendar';
@@ -73,6 +74,7 @@ export function deriveSpendingSummary(
   currentUser: string,
   today: CalendarDate,
 ): SpendingSummary {
+  const tripPlan = isTripPlan(plan) ? plan : undefined;
   const categorySpentMinor = Object.fromEntries(categoryBuckets.map((bucket) => [bucket, 0])) as Record<CategoryBucket, number>;
   const paymentMethodSpentMinor = Object.fromEntries(paymentMethodBuckets.map((bucket) => [bucket, 0])) as Record<PaymentMethodBucket, number>;
   const normalizedCurrentUser = normalizeLogin(currentUser);
@@ -101,10 +103,10 @@ export function deriveSpendingSummary(
   }
 
   let budget: SpendingSummary['budget'] = null;
-  if (plan?.budget_minor !== undefined) {
-    const remainingMinor = plan.budget_minor - totalSpentMinor;
+  if (tripPlan?.budget_minor !== undefined) {
+    const remainingMinor = tripPlan.budget_minor - totalSpentMinor;
     const categoryLimits: NonNullable<SpendingSummary['budget']>['categoryLimits'] = {};
-    for (const [category, limitMinor] of Object.entries(plan.category_budgets_minor ?? {}) as [ExpenseCategory, number][]) {
+    for (const [category, limitMinor] of Object.entries(tripPlan.category_budgets_minor ?? {}) as [ExpenseCategory, number][]) {
       const spentMinor = categorySpentMinor[category];
       const categoryRemainingMinor = limitMinor - spentMinor;
       categoryLimits[category] = {
@@ -116,20 +118,20 @@ export function deriveSpendingSummary(
       };
     }
     budget = {
-      budgetMinor: plan.budget_minor,
+      budgetMinor: tripPlan.budget_minor,
       remainingMinor,
       status: statusFor(remainingMinor),
-      percentageUsed: percentage(totalSpentMinor, plan.budget_minor),
+      percentageUsed: percentage(totalSpentMinor, tripPlan.budget_minor),
       categoryLimits,
     };
   }
 
   let trip: SpendingSummary['trip'] = null;
-  if (plan?.starts_on && plan.ends_on) {
-    const start = calendarDayOrdinal(plan.starts_on);
-    const end = calendarDayOrdinal(plan.ends_on);
+  if (tripPlan?.starts_on && tripPlan.ends_on) {
+    const start = calendarDayOrdinal(tripPlan.starts_on);
+    const end = calendarDayOrdinal(tripPlan.ends_on);
     const current = calendarDayOrdinal(today);
-    const totalDays = inclusiveCalendarDays(plan.starts_on, plan.ends_on);
+    const totalDays = inclusiveCalendarDays(tripPlan.starts_on, tripPlan.ends_on);
     const phase = current < start ? 'before' : current > end ? 'after' : 'during';
     const availableDays = phase === 'before' ? totalDays : phase === 'during' ? end - current + 1 : 0;
     trip = {
@@ -142,7 +144,7 @@ export function deriveSpendingSummary(
   }
 
   const buckets = [...dailyAmounts.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([date, amountMinor]) => ({ date, amountMinor }));
-  const period = plan?.starts_on && plan.ends_on ? { startsOn: plan.starts_on, endsOn: plan.ends_on, totalDays: inclusiveCalendarDays(plan.starts_on, plan.ends_on) } : null;
+  const period = tripPlan?.starts_on && tripPlan.ends_on ? { startsOn: tripPlan.starts_on, endsOn: tripPlan.ends_on, totalDays: inclusiveCalendarDays(tripPlan.starts_on, tripPlan.ends_on) } : null;
   let preTripMinor = 0;
   let afterTripMinor = 0;
   if (period) {

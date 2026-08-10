@@ -81,6 +81,7 @@ describe('GroupsProvider snapshot summaries', () => {
 
     expect(view.result.current.state.data[0]?.summary).toEqual({
       currency: 'EUR', currentUserBalanceMinor: 500, memberCount: 2, expenseCount: 1, syncedAt: confirmed.syncedAt,
+      sourceSchemaVersion: 1, effectiveType: 'trip', totalSpentMinor: 1000,
     });
     expect(snapshotStore.writeGroup).toHaveBeenCalledWith(7, confirmed.key, confirmed);
     expect(snapshotStore.writeGroups).toHaveBeenCalledWith(7, view.result.current.state.data);
@@ -210,6 +211,7 @@ describe('GroupsProvider snapshot summaries', () => {
     expect(githubGateway.refreshGroup).toHaveBeenCalledWith(repository, 'owner');
     expect(view.result.current.state.data[0]?.summary).toEqual({
       currency: 'EUR', currentUserBalanceMinor: 1000, memberCount: 2, expenseCount: 1, syncedAt: refreshedSnapshot.syncedAt,
+      sourceSchemaVersion: 1, effectiveType: 'trip', totalSpentMinor: 2000,
     });
     expect(snapshotStore.writeGroup).toHaveBeenCalledWith(7, refreshedSnapshot.key, refreshedSnapshot);
     expect(snapshotStore.writeActivity).toHaveBeenLastCalledWith(7, expect.objectContaining({ checkpoints: [expect.objectContaining({ headCommitSha: newSha })] }));

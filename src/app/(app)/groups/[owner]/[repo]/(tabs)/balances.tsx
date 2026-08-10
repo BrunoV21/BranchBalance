@@ -5,9 +5,11 @@ import { ArrowRight, CircleCheck, Clock3, HandCoins, History, ReceiptText, Scale
 
 import { Banner, Body, Button, Card, ConfirmDialog, EmptyState, Screen, Title } from '@/components/ui';
 import { formatMoney } from '@/domain/money';
+import { effectiveGroupType } from '@/domain/groups';
 import { deriveExpenseFundingAnalytics } from '@/domain/spending';
 import { normalizeLogin, type SettlementPayment } from '@/domain/types';
 import { useGroupRefresh } from '@/features/groups/use-group-refresh';
+import { groupContextLabel } from '@/features/groups/group-type-ui';
 import { ExpenseFundingCard } from '@/features/spending/analytics-components';
 import { useGroup } from '@/providers/group-provider';
 import { useSession } from '@/providers/session-provider';
@@ -42,9 +44,10 @@ export default function BalancesScreen() {
   };
 
   if (!snapshot) return <Screen><Title eyebrow="BranchBalance">Balances</Title><BalancesSyncing /></Screen>;
+  const context = groupContextLabel(effectiveGroupType(snapshot.group), snapshot.group.name);
   const ledger = snapshot.settlementLedger ?? { kind: 'unverified' as const };
   if (ledger.kind === 'unverified') return <Screen>
-    <Title eyebrow={snapshot.group.name}>Balances</Title>
+    <Title eyebrow={context}>Balances</Title>
     {state.error
       ? <Banner tone="warning" action={<Button variant="ghost" onPress={refresh}>Retry</Button>}>{state.error}</Banner>
       : <BalancesSyncing />}
@@ -62,7 +65,7 @@ export default function BalancesScreen() {
   });
 
   return <Screen>
-    <Title eyebrow={snapshot.group.name}>Balances</Title>
+    <Title eyebrow={context}>Balances</Title>
     {state.isRefreshing ? <BalancesSyncing compact /> : null}
     {state.error ? <Banner tone="warning">{state.error}</Banner> : null}
     {snapshot.warnings.filter((warning) => warning.path.startsWith('settlements.json')).map((warning) => <Banner key={`${warning.path}:${warning.reason}`}>Skipped {warning.path}: {warning.reason}</Banner>)}

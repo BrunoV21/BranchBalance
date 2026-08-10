@@ -1,10 +1,12 @@
 import { calculateBalances, simplifySettlements, sortExpenses } from '@/domain/balances';
 import { decodeUtf8Base64, encodeUtf8Base64, serializeJson } from '@/domain/codec';
 import { AppFailure, DomainValidationError } from '@/domain/errors';
-import { parseExpenseDocument, parseGroupDocument } from '@/domain/schemas';
+import { parseExpenseDocument, parseGroupDocument, parseSpendingPlan } from '@/domain/schemas';
+import { deriveFuelAnalytics } from '@/domain/analytics';
+import { effectiveGroupType } from '@/domain/groups';
 import { deriveSettlementReservations, parseSettlementLedgerDocument, parseSettlementPayment, settlementCreationMatches, sortSettlementPayments } from '@/domain/settlements';
 import { deriveSpendingSummary, systemLocalCalendar, type LocalCalendar } from '@/domain/spending';
-import { groupKey, normalizeLogin, type AccountProfile, type CommittedMutation, type CurrencyCode, type DataWarning, type DiscoveredGroup, type ExpenseFile, type Group, type GroupCommitSlice, type GroupFile, type InvitationDiscoveryResult, type IsoInstant, type Member, type PendingMember, type RemoteGroupSnapshot, type RepositoryCommitRef, type RepositoryRef, type SettlementLedgerFile, type SettlementLedgerState, type SettlementPayment, type SettlementReservation, type SettlementValidationBasis, type SpendingPlan, type UnclassifiedGroupCommit, type WritableExpense } from '@/domain/types';
+import { groupKey, normalizeLogin, type AccountProfile, type CommittedMutation, type CurrencyCode, type DataWarning, type DiscoveredGroup, type ExpenseFile, type Group, type GroupCommitSlice, type GroupFile, type InvitationDiscoveryResult, type IsoInstant, type KnownGroupType, type Member, type PendingMember, type RemoteGroupSnapshot, type RepositoryCommitRef, type RepositoryRef, type SettlementLedgerFile, type SettlementLedgerState, type SettlementPayment, type SettlementReservation, type SettlementValidationBasis, type SpendingPlan, type UnclassifiedGroupCommit, type WritableExpense } from '@/domain/types';
 import type { Clock } from '@/features/auth/contracts';
 import { discoverEligibleGroupInvitations } from '@/features/invitations/eligibility';
 
@@ -47,7 +49,7 @@ export class GitHubGatewayImpl implements GitHubGateway {
       const ref = this.mapRepository(repository, installationId);
       try {
         const groupFile = await this.readGroup(ref, signal);
-        groups.push({ key: groupKey(ref.owner, ref.name), repository: ref, group: groupFile.group, summary: null });
+        groups.push({ key: groupKey(ref.owner, ref.name), repository: ref, group: groupFile.group, effectiveType: groupFile.effectiveType ?? effectiveGroupType(groupFile.group), summary: null });
       } catch (error) {
         warnings.push({ path: `${ref.owner}/${ref.name}/group.json`, reason: error instanceof Error ? error.message : 'Invalid group file.' });
       }
@@ -150,7 +152,7 @@ export class GitHubGatewayImpl implements GitHubGateway {
   private async readGroupResult(repository: RepositoryRef, signal?: AbortSignal): Promise<{ file: GroupFile; spendingPlanWarning: string | null }> {
     const file = await this.readContent(repository, 'group.json', signal);
     const parsed = parseGroupDocument(JSON.parse(decodeUtf8Base64(file.content)));
-    return { file: { group: parsed.group, blobSha: file.sha, path: 'group.json', sourceDocument: parsed.sourceDocument }, spendingPlanWarning: parsed.spendingPlanWarning };
+    return { file: { group: parsed.group, blobSha: file.sha, path: 'group.json', sourceDocument: parsed.sourceDocument, sourceVersion: parsed.sourceVersion, effectiveType: parsed.effectiveType }, spendingPlanWarning: parsed.spendingPlanWarning };
   }
 
   async createGroupFile(repository: RepositoryRef, group: Group, signal?: AbortSignal): Promise<CommittedMutation<GroupFile>> {
@@ -159,7 +161,7 @@ export class GitHubGatewayImpl implements GitHubGateway {
       message: 'Initialize BranchBalance group', content: encodeUtf8Base64(serializeJson(group)), request: { signal },
     });
     const sha = response.data.content?.sha;
-    const value = sha ? { group, blobSha: sha, path: 'group.json' as const, sourceDocument: { ...group } } : await this.readGroup(repository, signal);
+    const value = sha ? { group, blobSha: sha, path: 'group.json' as const, sourceDocument: { ...group }, sourceVersion: group.schema_version, effectiveType: effectiveGroupType(group) } : await this.readGroup(repository, signal);
     return { value, commit: repositoryCommitFromMutation(response.data) };
   }
 
@@ -167,6 +169,16 @@ export class GitHubGatewayImpl implements GitHubGateway {
     const metadata = await this.client.request<GitHubRepository>('GET /repos/{owner}/{repo}', { owner: repository.owner, repo: repository.name, request: { signal } });
     const ref = this.mapRepository(metadata.data, repository.installationId);
     const groupResult = await this.readGroupResult(ref, signal);
+    const effectiveType = groupResult.file.effectiveType ?? effectiveGroupType(groupResult.file.group);
+    if (!effectiveType) {
+      return {
+        key: groupKey(ref.owner, ref.name), repository: ref, group: groupResult.file.group, groupFile: groupResult.file,
+        effectiveType: null, members: [], pendingMembers: null, expenses: [],
+        balances: { totalSpentMinor: 0, members: [], zeroSum: true }, settlements: [], settlementLedger: { kind: 'unverified' }, payments: [], reservations: [],
+        spending: null, analytics: null, warnings: [{ path: 'group.json#group_type', reason: 'This group type requires a newer BranchBalance version.' }],
+        syncedAt: this.clock.now().toISOString(), cacheVersion: 2,
+      };
+    }
     const [collaboratorData, pendingMembers, tree, settlementLedger] = await Promise.all([
       this.paginate<{ login: string; avatar_url: string | null; permissions?: { admin?: boolean; maintain?: boolean; push?: boolean } }>('GET /repos/{owner}/{repo}/collaborators', null, { owner: ref.owner, repo: ref.name, affiliation: 'direct' }, signal),
       this.readPending(ref, signal),
@@ -195,7 +207,8 @@ export class GitHubGatewayImpl implements GitHubGateway {
         const response = await this.client.request<{ encoding: string; content: string }>('GET /repos/{owner}/{repo}/git/blobs/{file_sha}', {
           owner: ref.owner, repo: ref.name, file_sha: item.sha, request: { signal },
         });
-        const parsed = parseExpenseDocument(JSON.parse(decodeUtf8Base64(response.data.content)), item.path, group.currency);
+        const parsed = parseExpenseDocument(JSON.parse(decodeUtf8Base64(response.data.content)), item.path, group.currency, effectiveType);
+        for (const reason of parsed.enrichmentWarnings) warnings.push({ path: `${item.path}#${effectiveType === 'fuel' ? 'type_data' : 'line_items'}`, reason });
         return { expense: parsed.expense, blobSha: item.sha, path: item.path as `expenses/${string}.json`, sourceDocument: parsed.sourceDocument };
       } catch (error) {
         warnings.push({ path: item.path, reason: error instanceof Error ? error.message : 'Invalid expense file.' });
@@ -213,11 +226,21 @@ export class GitHubGatewayImpl implements GitHubGateway {
     try { reservations = settlementLedger.kind === 'invalid' ? [] : deriveSettlementReservations(settlements, payments); }
     catch (error) { warnings.push({ path: 'settlements.json', reason: error instanceof Error ? error.message : 'Unable to derive pending reservations.' }); }
     let spending = null;
-    try { spending = deriveSpendingSummary(expenses.map((file) => file.expense), group.spending_plan, currentLogin, this.calendar.today()); }
+    try { spending = deriveSpendingSummary(expenses.map((file) => file.expense), effectiveType === 'trip' ? group.spending_plan : undefined, currentLogin, this.calendar.today()); }
     catch (error) { warnings.push({ path: 'expenses/', reason: error instanceof Error ? error.message : 'Unable to derive spending totals.' }); }
+    let analytics: RemoteGroupSnapshot['analytics'] = null;
+    if (spending) {
+      try {
+        analytics = effectiveType === 'trip'
+          ? { type: 'trip' as const, spending }
+          : { type: 'fuel' as const, common: spending, fuel: deriveFuelAnalytics(expenses.map((file) => file.expense), group.spending_plan, this.calendar.today(), undefined, warnings.filter((warning) => warning.path.includes('#type_data'))) };
+      } catch (error) {
+        warnings.push({ path: 'expenses/#analytics', reason: error instanceof Error ? error.message : 'Unable to derive type-specific analytics.' });
+      }
+    }
     return {
       key: groupKey(ref.owner, ref.name), repository: ref, group, groupFile, members, pendingMembers, expenses,
-      balances, settlements, settlementLedger, payments, reservations, spending, warnings, syncedAt: this.clock.now().toISOString(),
+      effectiveType, balances, settlements, settlementLedger, payments, reservations, spending, analytics, warnings, syncedAt: this.clock.now().toISOString(), cacheVersion: 2,
     };
   }
 
@@ -234,8 +257,9 @@ export class GitHubGatewayImpl implements GitHubGateway {
     }
   }
 
-  async createExpense(repository: RepositoryRef, expense: WritableExpense, signal?: AbortSignal): Promise<CommittedMutation<ExpenseFile>> {
+  async createExpense(repository: RepositoryRef, expense: WritableExpense, signal?: AbortSignal, effectiveType: KnownGroupType = 'trip'): Promise<CommittedMutation<ExpenseFile>> {
     const path = `expenses/${expense.id}.json` as const;
+    validateWritableExpense(expense, path, effectiveType);
     const subject = `Add expense ${expense.id}`;
     try {
       const response = await this.client.request<ContentMutationData>('PUT /repos/{owner}/{repo}/contents/{path}', {
@@ -258,7 +282,9 @@ export class GitHubGatewayImpl implements GitHubGateway {
     try {
       const file = await this.readContent(repository, path, signal);
       const groupFile = await this.readGroup(repository, signal);
-      const parsed = parseExpenseDocument(JSON.parse(decodeUtf8Base64(file.content)), path, groupFile.group.currency);
+      const type = groupFile.effectiveType ?? effectiveGroupType(groupFile.group);
+      if (!type) throw new AppFailure({ kind: 'unsupported_group_type', groupType: groupFile.group.schema_version === 2 ? groupFile.group.group_type : 'unknown' });
+      const parsed = parseExpenseDocument(JSON.parse(decodeUtf8Base64(file.content)), path, groupFile.group.currency, type);
       return { expense: parsed.expense, blobSha: file.sha, path, sourceDocument: parsed.sourceDocument };
     } catch (error) {
       if (error instanceof AppFailure && error.detail.kind === 'not_found') return null;
@@ -266,9 +292,10 @@ export class GitHubGatewayImpl implements GitHubGateway {
     }
   }
 
-  async updateExpense(repository: RepositoryRef, current: ExpenseFile, expense: WritableExpense, signal?: AbortSignal): Promise<CommittedMutation<ExpenseFile>> {
+  async updateExpense(repository: RepositoryRef, current: ExpenseFile, expense: WritableExpense, signal?: AbortSignal, effectiveType: KnownGroupType = 'trip'): Promise<CommittedMutation<ExpenseFile>> {
     const path = `expenses/${expense.id}.json` as const;
-    const sourceDocument = { ...current.sourceDocument, ...expense };
+    validateWritableExpense(expense, path, effectiveType);
+    const sourceDocument = mergeExpenseSource(current.sourceDocument, expense, effectiveType);
     const subject = `Update expense ${expense.id}`;
     try {
       const response = await this.client.request<ContentMutationData>('PUT /repos/{owner}/{repo}/contents/{path}', {
@@ -536,12 +563,16 @@ export class GitHubGatewayImpl implements GitHubGateway {
     return reservations.find((item) => normalizeLogin(item.from) === normalizeLogin(intended.from) && normalizeLogin(item.to) === normalizeLogin(intended.to))?.availableToRecordMinor ?? 0;
   }
 
-  async updateSpendingPlan(repository: RepositoryRef, current: GroupFile, next: SpendingPlan | null, signal?: AbortSignal): Promise<CommittedMutation<GroupFile>> {
-    return this.writeSpendingPlan(repository, current, next, signal, true);
+  async updateSpendingPlan(repository: RepositoryRef, current: GroupFile, next: SpendingPlan | null, signal?: AbortSignal, requestedType?: KnownGroupType): Promise<CommittedMutation<GroupFile>> {
+    const type = requestedType ?? current.effectiveType ?? effectiveGroupType(current.group);
+    if (!type) throw new AppFailure({ kind: 'unsupported_group_type', groupType: current.group.schema_version === 2 ? current.group.group_type : 'unknown' });
+    return this.writeSpendingPlan(repository, current, normalizePlanForWrite(next, type), type, signal, true);
   }
 
-  private async writeSpendingPlan(repository: RepositoryRef, current: GroupFile, next: SpendingPlan | null, signal: AbortSignal | undefined, allowSafeRetry: boolean): Promise<CommittedMutation<GroupFile>> {
+  private async writeSpendingPlan(repository: RepositoryRef, current: GroupFile, next: SpendingPlan | null, type: KnownGroupType, signal: AbortSignal | undefined, allowSafeRetry: boolean): Promise<CommittedMutation<GroupFile>> {
     const sourceDocument = { ...current.sourceDocument };
+    sourceDocument.schema_version = 2;
+    sourceDocument.group_type = type;
     if (next) sourceDocument.spending_plan = next;
     else delete sourceDocument.spending_plan;
     const subject = next ? 'Update spending plan' : 'Remove spending plan';
@@ -551,22 +582,29 @@ export class GitHubGatewayImpl implements GitHubGateway {
         message: subject, content: encodeUtf8Base64(serializeJson(sourceDocument)), request: { signal },
       });
       const sha = response.data.content?.sha;
-      if (sha) return { value: { group: parseGroupDocument(sourceDocument).group, blobSha: sha, path: 'group.json', sourceDocument }, commit: repositoryCommitFromMutation(response.data) };
+      if (sha) {
+        const parsed = parseGroupDocument(sourceDocument);
+        return { value: { group: parsed.group, blobSha: sha, path: 'group.json', sourceDocument, sourceVersion: parsed.sourceVersion, effectiveType: parsed.effectiveType }, commit: repositoryCommitFromMutation(response.data) };
+      }
       const confirmed = await this.readGroup(repository, signal);
+      requireUnchangedGroupType(confirmed, type);
       if (spendingPlanMatches(confirmed, next)) return { value: confirmed, commit: null };
       throw new AppFailure({ kind: 'spending_plan_conflict', latest: confirmed, submitted: next });
     } catch (error) {
       if (error instanceof AppFailure && error.detail.kind === 'spending_plan_conflict') throw error;
       if (isConflict(error)) {
-        throw new AppFailure({ kind: 'spending_plan_conflict', latest: await this.readGroup(repository, signal), submitted: next });
+        const latest = await this.readGroup(repository, signal);
+        requireUnchangedGroupType(latest, type);
+        throw new AppFailure({ kind: 'spending_plan_conflict', latest, submitted: next });
       }
       if (isRetryable(error)) {
         const latest = await this.readGroup(repository, signal);
+        requireUnchangedGroupType(latest, type);
         if (spendingPlanMatches(latest, next)) {
           return { value: latest, commit: await this.resolveConfirmedCommit(repository, 'group.json', subject, next?.updated_by ?? null, signal) };
         }
         if (latest.blobSha === current.blobSha) {
-          if (allowSafeRetry) return this.writeSpendingPlan(repository, latest, next, signal, false);
+          if (allowSafeRetry) return this.writeSpendingPlan(repository, latest, next, type, signal, false);
           throw error;
         }
         throw new AppFailure({ kind: 'spending_plan_conflict', latest, submitted: next });
@@ -675,6 +713,44 @@ export class GitHubGatewayImpl implements GitHubGateway {
 function spendingPlanMatches(file: GroupFile, intended: SpendingPlan | null): boolean {
   if (intended === null) return !Object.prototype.hasOwnProperty.call(file.sourceDocument, 'spending_plan');
   return JSON.stringify(file.group.spending_plan) === JSON.stringify(intended);
+}
+
+function normalizePlanForWrite(next: SpendingPlan | null, type: KnownGroupType): SpendingPlan | null {
+  if (next === null) return null;
+  if (type === 'fuel') {
+    if (!('kind' in next) || next.kind !== 'fuel_monthly') throw new AppFailure({ kind: 'plan_type_mismatch' });
+    return parseSpendingPlan(next, 'fuel', 2);
+  }
+  if ('kind' in next && next.kind === 'fuel_monthly') throw new AppFailure({ kind: 'plan_type_mismatch' });
+  const candidate = 'kind' in next ? next : { ...next, kind: 'trip' as const };
+  return parseSpendingPlan(candidate, 'trip', 2);
+}
+
+function validateWritableExpense(expense: WritableExpense, path: string, type: KnownGroupType): void {
+  const parsed = parseExpenseDocument(expense, path, expense.currency, type);
+  if (parsed.enrichmentWarnings.length) throw new DomainValidationError(parsed.enrichmentWarnings[0] ?? 'Expense enrichment is invalid.');
+  if (type === 'fuel' && expense.category !== 'transport') throw new DomainValidationError('Fuel expenses must use the Transport category.');
+}
+
+function mergeExpenseSource(source: Record<string, unknown>, expense: WritableExpense, type: KnownGroupType): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...source, ...expense };
+  if (type === 'trip') {
+    delete next.type_data;
+    if (expense.line_items?.length) next.line_items = expense.line_items;
+    else delete next.line_items;
+  } else {
+    delete next.line_items;
+    if (expense.type_data) {
+      const previous = isRecord(source.type_data) ? source.type_data : {};
+      next.type_data = { ...previous, ...expense.type_data };
+    } else delete next.type_data;
+  }
+  return next;
+}
+
+function requireUnchangedGroupType(file: GroupFile, expected: KnownGroupType): void {
+  const actual = file.effectiveType ?? effectiveGroupType(file.group);
+  if (actual !== expected) throw new AppFailure({ kind: 'group_type_changed' });
 }
 
 function isRetryable(error: unknown): boolean {

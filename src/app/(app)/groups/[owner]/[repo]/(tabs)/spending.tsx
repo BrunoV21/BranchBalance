@@ -5,6 +5,7 @@ import { CalendarDays, ListFilter, UserRound, UsersRound } from 'lucide-react-na
 
 import { Banner, Body, Button, Card, EmptyState, Screen, Title } from '@/components/ui';
 import { formatMoney } from '@/domain/money';
+import { effectiveGroupType } from '@/domain/groups';
 import { categoryBuckets, categoryLabel, emptySpendingFilters, expenseCategories, filterExpenses, formatPercentage, paymentMethodBuckets, paymentMethodLabel, paymentMethods, type CategoryBucket, type PaymentMethodBucket, type SpendingFilters } from '@/domain/spending';
 import type { ExpenseFile } from '@/domain/types';
 import { CategoryIcon, PaymentMethodIcon } from '@/features/expenses/metadata-icons';
@@ -12,6 +13,7 @@ import { DatePickerDialog } from '@/features/expenses/date-picker-dialog';
 import { useGroupRefresh } from '@/features/groups/use-group-refresh';
 import { DailySpendCard, formatCalendarDate, PaceChartCard, ScopeMixCard, SpendingPulse } from '@/features/spending/analytics-components';
 import { BudgetSummaryCard, FilterChip, MetadataItem, ProgressBar } from '@/features/spending/components';
+import { FuelSpendingScreen } from '@/features/spending/fuel-spending-screen';
 import { useGroup } from '@/providers/group-provider';
 import { useTheme } from '@/providers/theme-provider';
 
@@ -62,6 +64,7 @@ export default function SpendingScreen() {
   const addExpense = () => router.push({ pathname: '/groups/[owner]/[repo]/expenses/new', params: { owner, repo } } as never);
 
   if (!snapshot) return <Screen><Title>Spending</Title><EmptyState title="Loading spending…" body="Spending insights appear after the group refreshes." /></Screen>;
+  if (effectiveGroupType(snapshot.group) === 'fuel') return <FuelSpendingScreen snapshot={snapshot} openPlan={openPlan} />;
 
   return <Screen scrollViewRef={scrollRef}>
     <View style={styles.titleRow}><View style={{ flex: 1 }}><Title eyebrow={snapshot.group.name}>Spending</Title></View><Button variant="secondary" onPress={openPlan}>Spending plan</Button></View>

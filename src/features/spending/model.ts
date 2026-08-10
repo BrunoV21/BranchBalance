@@ -1,7 +1,8 @@
 import { DomainValidationError } from '@/domain/errors';
 import { currencies, parseAmountToMinor } from '@/domain/money';
+import { isTripPlan } from '@/domain/groups';
 import { expenseCategories, isCalendarDate, type ExpenseCategory } from '@/domain/spending';
-import { normalizeLogin, type CalendarDate, type CurrencyCode, type SpendingPlan } from '@/domain/types';
+import { normalizeLogin, type CalendarDate, type CurrencyCode, type SpendingPlan, type TripPlanV2 } from '@/domain/types';
 import type { Clock } from '@/features/auth/contracts';
 
 export interface SpendingPlanDraft {
@@ -22,7 +23,7 @@ export function emptySpendingPlanDraft(): SpendingPlanDraft {
 
 export function spendingPlanDraftFrom(plan: SpendingPlan | undefined, currency: CurrencyCode): SpendingPlanDraft {
   const draft = emptySpendingPlanDraft();
-  if (!plan) return draft;
+  if (!isTripPlan(plan)) return draft;
   draft.budget = plan.budget_minor === undefined ? '' : minorUnitsForInput(plan.budget_minor, currency);
   for (const category of expenseCategories) {
     const value = plan.category_budgets_minor?.[category];
@@ -33,7 +34,7 @@ export function spendingPlanDraftFrom(plan: SpendingPlan | undefined, currency: 
   return draft;
 }
 
-export function buildSpendingPlan(draft: SpendingPlanDraft, currency: CurrencyCode, actor: string, clock: Clock): SpendingPlan {
+export function buildSpendingPlan(draft: SpendingPlanDraft, currency: CurrencyCode, actor: string, clock: Clock): TripPlanV2 {
   const budget = draft.budget.trim() ? parsePlanAmount(draft.budget, currency, 'budget') : undefined;
   const categoryBudgets: Partial<Record<ExpenseCategory, number>> = {};
   for (const category of expenseCategories) {
@@ -41,15 +42,16 @@ export function buildSpendingPlan(draft: SpendingPlanDraft, currency: CurrencyCo
     if (value) categoryBudgets[category] = parsePlanAmount(value, currency, category);
   }
   if (Object.keys(categoryBudgets).length && budget === undefined) throw new DomainValidationError('Category limits require a total budget.', 'budget');
-  if ((draft.startsOn === '') !== (draft.endsOn === '')) throw new DomainValidationError('Set both budget-period dates or leave both empty.', 'dates');
+  if (!draft.startsOn || !draft.endsOn) throw new DomainValidationError('Set both inclusive Trip dates.', 'dates');
   if (draft.startsOn && !isCalendarDate(draft.startsOn)) throw new DomainValidationError('Select a valid budget start date.', 'startsOn');
   if (draft.endsOn && !isCalendarDate(draft.endsOn)) throw new DomainValidationError('Select a valid budget end date.', 'endsOn');
   if (draft.startsOn && draft.endsOn && draft.endsOn < draft.startsOn) throw new DomainValidationError('Budget end date cannot be before its start date.', 'endsOn');
-  if (budget === undefined && !draft.startsOn) throw new DomainValidationError('Enter a total budget, a budget period, or both.', 'budget');
   return {
+    kind: 'trip',
     ...(budget === undefined ? {} : { budget_minor: budget }),
     ...(Object.keys(categoryBudgets).length ? { category_budgets_minor: categoryBudgets } : {}),
-    ...(draft.startsOn && draft.endsOn ? { starts_on: draft.startsOn, ends_on: draft.endsOn } : {}),
+    starts_on: draft.startsOn,
+    ends_on: draft.endsOn,
     updated_by: normalizeLogin(actor),
     updated_at: clock.now().toISOString(),
   };

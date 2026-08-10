@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { Avatar, Banner, Body, Button, Card, Field, Screen, Title } from '@/components/ui';
+import { effectiveGroupType } from '@/domain/groups';
 import { normalizeLogin } from '@/domain/types';
 import { useGroupRefresh } from '@/features/groups/use-group-refresh';
+import { groupContextLabel } from '@/features/groups/group-type-ui';
 import { useGroup } from '@/providers/group-provider';
 import { useTheme } from '@/providers/theme-provider';
 
@@ -29,7 +31,7 @@ export default function MembersScreen() {
     finally { setLoading(false); }
   };
   return <Screen>
-    <Title eyebrow={snapshot?.group.name ?? 'BranchBalance'}>Members</Title>
+    <Title eyebrow={snapshot ? groupContextLabel(effectiveGroupType(snapshot.group), snapshot.group.name) : 'BranchBalance'}>Members</Title>
     {invitationNotice ? <Banner tone="info">{invitationNotice}</Banner> : null}
     {snapshot?.repository.canAdmin ? <Card><Body>Invite a GitHub user</Body><Field label="GitHub username" autoCapitalize="none" autoCorrect={false} value={login} onChangeText={setLogin} placeholder="e.g. octocat" error={error ?? undefined} /><Button loading={loading} onPress={() => void submit()}>Invite</Button><Body muted>They accept the private repository invitation through GitHub. GitHub may not show it inside BranchBalance before acceptance.</Body></Card> : <Banner>Only the personal repository owner can send invitations.</Banner>}
     <Body>{snapshot?.members.length ?? 0} active members</Body>

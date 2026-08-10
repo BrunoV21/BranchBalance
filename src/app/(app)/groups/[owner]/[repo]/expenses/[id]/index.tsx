@@ -4,9 +4,11 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { CalendarClock, CalendarDays, ChevronDown, ChevronUp, GitCommitHorizontal, PencilLine, UserRound, UsersRound } from 'lucide-react-native';
 
 import { Banner, Body, Button, Card, ConfirmDialog, EmptyState, Screen, Title } from '@/components/ui';
+import { effectiveGroupType } from '@/domain/groups';
 import { formatMoney } from '@/domain/money';
 import { categoryLabel, isJustMeExpense, paymentMethodLabel } from '@/domain/spending';
 import { CategoryIcon, PaymentMethodIcon } from '@/features/expenses/metadata-icons';
+import { groupContextLabel } from '@/features/groups/group-type-ui';
 import { MetadataItem } from '@/features/spending/components';
 import { useGroup } from '@/providers/group-provider';
 import { useTheme } from '@/providers/theme-provider';
@@ -23,6 +25,7 @@ export default function ExpenseDetailScreen() {
   const file = state.data?.expenses.find((item) => item.expense.id === id);
   if (!file) return <Screen><EmptyState title="Expense unavailable" body="It may have been deleted on another device." action={<Button onPress={() => void refresh().catch(() => undefined)}>Refresh group</Button>} /></Screen>;
   const expense = file.expense;
+  const groupType = state.data ? effectiveGroupType(state.data.group) : null;
   const confirmDelete = async () => {
     setDeleting(true); setError(null);
     try { await deleteExpense(file); router.back(); }
@@ -33,9 +36,11 @@ export default function ExpenseDetailScreen() {
   const splitLabel = justMe ? 'Just me' : expense.split_type === 'equal' ? 'Equal split' : 'Full to one';
   const activityCount = 2 + (expense.updated_at ? 1 : 0);
   return <Screen>
-    <Title eyebrow={state.data?.group.name}>Expense details</Title>
+    <Title eyebrow={state.data && groupType ? groupContextLabel(groupType, state.data.group.name) : state.data?.group.name}>Expense details</Title>
     <Card><Text style={[styles.description, { color: colors.text }]}>{expense.description}</Text><Text style={[styles.heroAmount, { color: colors.text }]}>{formatMoney(expense.amount_minor, expense.currency)}</Text><View style={styles.metadataGrid}><View style={styles.metadataCell}><MetadataItem icon={<CategoryIcon category={expense.category ?? 'uncategorized'} size={19} />} label={categoryLabel(expense.category ?? 'uncategorized')} accessibilityLabel={`Category: ${categoryLabel(expense.category ?? 'uncategorized')}`} /></View><View style={styles.metadataCell}><MetadataItem icon={<PaymentMethodIcon method={expense.payment_method ?? 'unspecified'} size={19} />} label={paymentMethodLabel(expense.payment_method ?? 'unspecified')} accessibilityLabel={`Payment method: ${paymentMethodLabel(expense.payment_method ?? 'unspecified')}`} /></View><View style={styles.metadataCell}><MetadataItem icon={<UserRound color={colors.accent} size={19} />} label={`@${expense.paid_by}`} accessibilityLabel={`Paid by @${expense.paid_by}`} /></View><View style={styles.metadataCell}><MetadataItem icon={<CalendarDays color={colors.accent} size={19} />} label={expense.expense_date} accessibilityLabel={`Expense date ${expense.expense_date}`} /></View></View></Card>
     <Card><View style={styles.sectionHeading}>{justMe ? <UserRound color={colors.accent} size={21} /> : <UsersRound color={colors.accent} size={21} />}<Text style={[styles.sectionTitle, { color: colors.text }]}>{splitLabel}</Text></View><View style={styles.shareList}>{Object.entries(expense.shares_minor).map(([login, share]) => <View key={login} style={styles.shareRow}><MetadataItem icon={<UserRound color={colors.accent} size={18} />} label={`@${login}`} accessibilityLabel={`Share assigned to @${login}`} /><Text style={[styles.shareAmount, { color: colors.text }]}>{formatMoney(share, expense.currency)}</Text></View>)}</View></Card>
+    {groupType === 'trip' && expense.line_items?.length ? <Card><Text style={[styles.sectionTitle, { color: colors.text }]}>Line items</Text>{expense.line_items.map((item, index) => <View key={index} style={styles.shareRow}><View style={{ flex: 1 }}><Body>{item.description}</Body>{item.quantity || item.unit_price_minor !== undefined ? <Body muted>{item.quantity ? `${item.quantity} × ` : ''}{item.unit_price_minor !== undefined ? formatMoney(item.unit_price_minor, expense.currency) : 'unit price unavailable'}</Body> : null}</View><Body>{formatMoney(item.line_total_minor, expense.currency)}</Body></View>)}<Body muted>Informational only · does not change Amount or shares.</Body></Card> : null}
+    {groupType === 'fuel' ? <Card><Text style={[styles.sectionTitle, { color: colors.text }]}>Fuel details</Text>{expense.type_data ? <><DetailRow label="Litres" value={`${formatScaled(expense.type_data.volume_millilitres, 3)} L`} /><DetailRow label="Printed price per litre" value={expense.type_data.unit_price_micros_per_litre === undefined ? 'Not recorded' : `${expense.currency} ${formatScaled(expense.type_data.unit_price_micros_per_litre, 6)}/L`} /><DetailRow label="Pre-discount total" value={expense.type_data.gross_amount_minor === undefined ? 'Not recorded' : formatMoney(expense.type_data.gross_amount_minor, expense.currency)} /><DetailRow label="Discount" value={expense.type_data.discount_minor === undefined ? 'Not recorded' : formatMoney(expense.type_data.discount_minor, expense.currency)} /><DetailRow label="Fuel type" value={expense.type_data.fuel_type ?? 'Not recorded'} /></> : <Body muted>Amount-only expense. Litres, unit price, savings, and fuel type were not recorded.</Body>}</Card> : null}
     <Card>
       <Pressable accessibilityRole="button" accessibilityLabel="Activity log" accessibilityState={{ expanded: activityExpanded }} onPress={() => setActivityExpanded((value) => !value)} style={styles.activityToggle}><View style={{ flex: 1 }}><Text style={[styles.sectionTitle, { color: colors.text }]}>Activity log</Text><Body muted>{activityCount} {activityCount === 1 ? 'entry' : 'entries'} · repository-backed history</Body></View>{activityExpanded ? <ChevronUp color={colors.accent} size={22} /> : <ChevronDown color={colors.accent} size={22} />}</Pressable>
       {activityExpanded ? <View style={styles.activityList}>
@@ -49,6 +54,15 @@ export default function ExpenseDetailScreen() {
     <Button variant="danger" onPress={() => setShowDelete(true)}>Delete expense</Button>
     <ConfirmDialog visible={showDelete} title={`Delete “${expense.description}”?`} message={`${formatMoney(expense.amount_minor, expense.currency)} will be removed from spending and balance calculations. Git history remains available.`} confirmLabel="Delete" loading={deleting} onCancel={() => setShowDelete(false)} onConfirm={() => void confirmDelete()} />
   </Screen>;
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return <View style={styles.shareRow}><Body muted>{label}</Body><Body>{value}</Body></View>;
+}
+
+function formatScaled(value: number, scale: number): string {
+  const raw = String(value).padStart(scale + 1, '0');
+  return `${raw.slice(0, -scale)}.${raw.slice(-scale)}`.replace(/0+$/, '').replace(/\.$/, '');
 }
 
 function ActivityEntry({ icon, title, timestamp, actor, detail }: { icon: React.ReactNode; title: string; timestamp?: string; actor?: string; detail?: string }) {

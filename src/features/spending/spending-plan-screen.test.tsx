@@ -20,7 +20,7 @@ jest.mock('@/infrastructure/runtime', () => ({
 }));
 
 const repository = { id: 1, owner: 'owner', name: 'branch-balance-trip', defaultBranch: 'main', installationId: 10, private: true as const, canAdmin: true, canWrite: true };
-const group = { schema_version: 1 as const, name: 'Trip', currency: 'EUR' as const, created_by: 'owner', created_at: '2026-07-13T12:00:00.000Z' };
+const group = { schema_version: 1 as const, name: 'Trip', currency: 'EUR' as const, spending_plan: { starts_on: '2026-07-17', ends_on: '2026-07-24', updated_by: 'owner', updated_at: '2026-07-17T12:00:00.000Z' }, created_by: 'owner', created_at: '2026-07-13T12:00:00.000Z' };
 const groupFile = { group, blobSha: 'group-sha', path: 'group.json' as const, sourceDocument: { ...group } };
 const snapshot: RemoteGroupSnapshot = {
   key: 'owner/branch-balance-trip', repository, group, groupFile, members: [{ login: 'owner', name: null, avatarUrl: null, role: 'owner' }], pendingMembers: [], expenses: [],
@@ -46,7 +46,7 @@ describe('Spending plan screen', () => {
     await fireEvent.changeText(view.getByLabelText('Budget amount (EUR)'), '1000');
     await fireEvent.changeText(view.getByLabelText('Food & drinks (EUR)'), '125.50');
     await fireEvent.press(view.getByRole('button', { name: 'Save spending plan' }));
-    await waitFor(() => expect(updateSpendingPlan).toHaveBeenCalledWith(expect.objectContaining({ budget_minor: 100000, category_budgets_minor: { food_drink: 12550 }, updated_by: 'owner', updated_at: '2026-07-17T14:00:00.000Z' }), groupFile));
+    await waitFor(() => expect(updateSpendingPlan).toHaveBeenCalledWith(expect.objectContaining({ kind: 'trip', budget_minor: 100000, category_budgets_minor: { food_drink: 12550 }, starts_on: '2026-07-17', ends_on: '2026-07-24', updated_by: 'owner', updated_at: '2026-07-17T14:00:00.000Z' }), groupFile));
     expect(back).toHaveBeenCalledTimes(1);
   });
 
@@ -61,5 +61,18 @@ describe('Spending plan screen', () => {
     expect(view.getByText('€1,200.00')).toBeTruthy();
     expect(view.getByText('€1,000.00')).toBeTruthy();
     expect(back).not.toHaveBeenCalled();
+  });
+
+  it('builds a sorted Fuel monthly-limit plan without Trip fields', async () => {
+    const fuelGroup = { schema_version: 2 as const, group_type: 'fuel' as const, name: 'Car', currency: 'EUR' as const, created_by: 'owner', created_at: '2026-07-13T12:00:00.000Z' };
+    const fuelFile = { group: fuelGroup, blobSha: 'fuel-sha', path: 'group.json' as const, sourceDocument: { ...fuelGroup }, sourceVersion: 2 as const, effectiveType: 'fuel' as const };
+    const fuelSnapshot: RemoteGroupSnapshot = { ...snapshot, group: fuelGroup, groupFile: fuelFile, effectiveType: 'fuel', spending: deriveSpendingSummary([], undefined, 'owner', '2026-07-17') };
+    jest.mocked(useGroup).mockReturnValue({ state: { data: fuelSnapshot, status: 'ready', isRefreshing: false, lastSuccessfulAt: snapshot.syncedAt, error: null }, updateSpendingPlan, removeSpendingPlan, acceptSpendingPlanFile } as never);
+    const view = await render(<ThemeProvider><SpendingPlanScreen /></ThemeProvider>);
+    await fireEvent.press(view.getByRole('button', { name: 'Add effective-month limit' }));
+    await fireEvent.changeText(view.getByLabelText('Effective month 1 (YYYY-MM)'), '2026-08');
+    await fireEvent.changeText(view.getByLabelText('Monthly limit 1 (EUR)'), '250');
+    await fireEvent.press(view.getByRole('button', { name: 'Save monthly limits' }));
+    await waitFor(() => expect(updateSpendingPlan).toHaveBeenCalledWith(expect.objectContaining({ kind: 'fuel_monthly', monthly_limits: [{ effective_month: '2026-08', limit_minor: 25000 }], updated_by: 'owner' }), fuelFile));
   });
 });

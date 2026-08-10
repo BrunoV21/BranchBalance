@@ -11,6 +11,9 @@ export type AppError =
   | { kind: 'data_warning'; path: string; reason: string }
   | { kind: 'repository_name_taken'; repository: string }
   | { kind: 'partial_group_creation'; repository: RepositoryRef }
+  | { kind: 'unsupported_group_type'; groupType: string }
+  | { kind: 'group_type_changed' }
+  | { kind: 'plan_type_mismatch' }
   | { kind: 'expense_conflict'; latest: ExpenseFile | null; operation: 'edit' | 'delete' }
   | { kind: 'spending_plan_conflict'; latest: GroupFile; submitted: SpendingPlan | null }
   | { kind: 'settlement_stale'; availableMinor: number }
@@ -51,6 +54,9 @@ export function messageForError(error: AppError): string {
     case 'data_warning': return `Skipped invalid data at ${error.path}: ${error.reason}`;
     case 'repository_name_taken': return `The repository ${error.repository} already exists. Choose another group name.`;
     case 'partial_group_creation': return 'The private repository was created, but its group file still needs to be added.';
+    case 'unsupported_group_type': return `Group type “${error.groupType}” requires a newer BranchBalance version.`;
+    case 'group_type_changed': return 'This group type changed on GitHub. BranchBalance disabled writes to protect the repository.';
+    case 'plan_type_mismatch': return 'This spending plan does not match the group type.';
     case 'expense_conflict': return 'This expense changed on GitHub. Review the latest version before trying again.';
     case 'spending_plan_conflict': return 'The spending plan changed on GitHub. Review both versions before trying again.';
     case 'settlement_stale': return error.availableMinor > 0 ? 'This settlement changed. Review the latest available amount and try again.' : 'This settlement is no longer available to record.';

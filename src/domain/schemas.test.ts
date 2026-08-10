@@ -84,4 +84,36 @@ describe('GitHub document schemas', () => {
     expect(() => parseSpendingPlan({ budget_minor: 100, category_budgets_minor: {}, updated_by: 'octocat', updated_at: '2026-07-17T14:00:00.000Z' })).toThrow();
     expect(() => parseSpendingPlan({ starts_on: '2026-02-30', ends_on: '2026-03-01', updated_by: 'octocat', updated_at: '2026-07-17T14:00:00.000Z' })).toThrow();
   });
+
+  it('maps schema-v1 to effective Trip and validates typed v2 envelopes', () => {
+    const legacy = parseGroupDocument({ schema_version: 1, name: 'Legacy', currency: 'EUR', created_by: 'octocat', created_at: '2026-07-16T12:00:00.000Z' });
+    expect(legacy).toMatchObject({ sourceVersion: 1, effectiveType: 'trip', unsupportedType: null });
+    expect(legacy.sourceDocument).not.toHaveProperty('group_type');
+    const fuel = parseGroupDocument({ schema_version: 2, group_type: 'fuel', name: 'Car', currency: 'EUR', spending_plan: { kind: 'fuel_monthly', monthly_limits: [{ effective_month: '2026-08', limit_minor: 25000 }], updated_by: 'octocat', updated_at: '2026-08-01T09:00:00.000Z' }, created_by: 'octocat', created_at: '2026-07-16T12:00:00.000Z' });
+    expect(fuel).toMatchObject({ sourceVersion: 2, effectiveType: 'fuel', group: { group_type: 'fuel', spending_plan: { kind: 'fuel_monthly' } } });
+    expect(() => parseGroupDocument({ ...fuel.sourceDocument, spending_plan: { kind: 'trip', starts_on: '2026-08-01', ends_on: '2026-08-02', updated_by: 'octocat', updated_at: '2026-08-01T09:00:00.000Z' } })).toThrow(/Fuel monthly/i);
+  });
+
+  it('keeps an unknown v2 type discoverable but unsupported', () => {
+    const parsed = parseGroupDocument({ schema_version: 2, group_type: 'household_future', name: 'Home', currency: 'GBP', created_by: 'octocat', created_at: '2026-07-16T12:00:00.000Z' });
+    expect(parsed).toMatchObject({ effectiveType: null, unsupportedType: 'household_future', group: { name: 'Home', currency: 'GBP' } });
+  });
+
+  it('enforces sorted duplicate-free Fuel monthly limits', () => {
+    const base = { kind: 'fuel_monthly', updated_by: 'octocat', updated_at: '2026-08-01T09:00:00.000Z' };
+    expect(() => parseSpendingPlan({ ...base, monthly_limits: [{ effective_month: '2026-09', limit_minor: 100 }, { effective_month: '2026-08', limit_minor: 200 }] }, 'fuel', 2)).toThrow(/sorted/i);
+    expect(() => parseSpendingPlan({ ...base, monthly_limits: [{ effective_month: '2026-08', limit_minor: 100 }, { effective_month: '2026-08', limit_minor: 200 }] }, 'fuel', 2)).toThrow(/duplicate/i);
+  });
+
+  it('isolates generic and Fuel enrichment from otherwise valid common expenses', () => {
+    const trip = parseExpenseDocument({ ...baseExpense, line_items: [{ description: 'Coffee', quantity: '1', unit_price_minor: 4250, line_total_minor: 4250 }] }, `expenses/${baseExpense.id}.json`, 'EUR', 'trip');
+    expect(trip.expense.line_items).toHaveLength(1);
+    const fuelData = { schema_version: 1, type: 'fuel', volume_millilitres: 24500, unit_price_micros_per_litre: 1633000, gross_amount_minor: 4001, discount_minor: 400 };
+    const fuel = parseExpenseDocument({ ...baseExpense, amount_minor: 3601, shares_minor: { monalisa: 1801, octocat: 1800 }, category: 'transport', payment_method: 'card', type_data: fuelData }, `expenses/${baseExpense.id}.json`, 'EUR', 'fuel');
+    expect(fuel.expense.type_data).toEqual(fuelData);
+    const invalid = parseExpenseDocument({ ...baseExpense, category: 'transport', payment_method: 'card', type_data: { ...fuelData, discount_minor: 100 } }, `expenses/${baseExpense.id}.json`, 'EUR', 'fuel');
+    expect(invalid.expense.amount_minor).toBe(baseExpense.amount_minor);
+    expect(invalid.expense.type_data).toBeUndefined();
+    expect(invalid.enrichmentWarnings[0]).toMatch(/Amount paid/i);
+  });
 });

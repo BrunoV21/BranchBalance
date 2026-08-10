@@ -2,7 +2,7 @@ import { currencies } from '@/domain/money';
 import { isCalendarDate } from '@/domain/spending';
 import type { CalendarDate, CurrencyCode } from '@/domain/types';
 
-import { ReceiptDraftSchema, type OcrBlock, type OcrResult, type ReceiptDraft, type ReceiptExpensePrefill } from './receipt-types';
+import { GenericReceiptReviewDraftSchema, ReceiptDraftSchema, type GenericReceiptReviewDraft, type OcrBlock, type OcrResult, type ReceiptDraft, type ReceiptLineItemCandidate } from './receipt-types';
 
 const merchantThreshold = 0.88;
 const dateThreshold = 0.90;
@@ -14,22 +14,23 @@ const taxLabel = /\b(tax|vat|iva|gst)\b/i;
 const tipLabel = /\b(tip|gorjeta)\b/i;
 const subtotalLabel = /\b(subtotal|sub-total)\b/i;
 const amountPattern = /(?:\d{1,3}(?:[ .,'’]\d{3})+|\d+)(?:[,.]\d{2})/g;
+const excludedItemLabel = /\b(sub[ -]?total|total|tax|vat|iva|gst|tip|gorjeta|discount|desconto|change|troco|amount\s+(?:due|paid)|a\s+pagar|valor\s+(?:total|pago)|cash|card|multibanco|payment|pagamento)\b/i;
 
 type AmountCandidate = { value: number; score: number; block: OcrBlock; confidence: number };
 
-function maxY(block: OcrBlock): number {
+export function maxY(block: OcrBlock): number {
   return Math.max(...block.points.map((point) => point.y));
 }
 
-function minY(block: OcrBlock): number {
+export function minY(block: OcrBlock): number {
   return Math.min(...block.points.map((point) => point.y));
 }
 
-function minX(block: OcrBlock): number {
+export function minX(block: OcrBlock): number {
   return Math.min(...block.points.map((point) => point.x));
 }
 
-function maxX(block: OcrBlock): number {
+export function maxX(block: OcrBlock): number {
   return Math.max(...block.points.map((point) => point.x));
 }
 
@@ -64,7 +65,16 @@ export function parseMinorAmount(text: string): number | undefined {
   return Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }
 
-function parseCurrency(blocks: OcrBlock[]): { value?: CurrencyCode; mismatch: boolean; ambiguous: boolean } {
+export function parseNonnegativeMinorAmount(text: string): number | undefined {
+  const raw = [...text.matchAll(amountPattern)].at(-1)?.[0];
+  if (!raw) return undefined;
+  const separatorIndex = Math.max(raw.lastIndexOf(','), raw.lastIndexOf('.'));
+  const major = raw.slice(0, separatorIndex).replace(/\D/g, '').replace(/^0+(?=\d)/, '') || '0';
+  const value = Number(`${major}${raw.slice(separatorIndex + 1)}`);
+  return Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+export function parseReceiptCurrency(blocks: OcrBlock[]): { value?: CurrencyCode; ambiguous: boolean } {
   const found = new Set<CurrencyCode>();
   for (const block of blocks) {
     if (/(?:€|\bEUR\b)/i.test(block.text)) found.add('EUR');
@@ -72,10 +82,10 @@ function parseCurrency(blocks: OcrBlock[]): { value?: CurrencyCode; mismatch: bo
     if (/(?:£|\bGBP\b)/i.test(block.text)) found.add('GBP');
     if (/\$/.test(block.text) && !/US\$/.test(block.text)) found.add('USD');
   }
-  return { value: found.size === 1 ? [...found][0] : undefined, mismatch: false, ambiguous: found.size > 1 };
+  return { value: found.size === 1 ? [...found][0] : undefined, ambiguous: found.size > 1 };
 }
 
-function parseDate(text: string, currency?: CurrencyCode): CalendarDate | undefined {
+export function parseReceiptDate(text: string, currency?: CurrencyCode): CalendarDate | undefined {
   const iso = /\b(20\d{2})[-/.](0?[1-9]|1[0-2])[-/.](0?[1-9]|[12]\d|3[01])\b/.exec(text);
   if (iso) {
     const value = `${iso[1]}-${iso[2]!.padStart(2, '0')}-${iso[3]!.padStart(2, '0')}`;
@@ -112,7 +122,7 @@ function cleanMerchant(text: string): string {
 export function parseReceipt(result: OcrResult, groupCurrency: CurrencyCode): ReceiptDraft {
   const blocks = [...result.blocks].sort((left, right) => maxY(left) - maxY(right));
   const warnings: string[] = [];
-  const detectedCurrency = parseCurrency(blocks);
+  const detectedCurrency = parseReceiptCurrency(blocks);
   if (detectedCurrency.ambiguous) warnings.push('Several currencies were detected; review the amount.');
   const currencyMismatch = Boolean(detectedCurrency.value && detectedCurrency.value !== groupCurrency);
   if (currencyMismatch) warnings.push(`Receipt currency ${detectedCurrency.value} does not match this ${groupCurrency} group.`);
@@ -131,7 +141,7 @@ export function parseReceipt(result: OcrResult, groupCurrency: CurrencyCode): Re
   if (competingTotal) warnings.push('Several possible totals were found; enter the amount manually.');
 
   const dateCandidates = blocks
-    .map((block) => ({ value: parseDate(block.text, detectedCurrency.value), score: block.confidence, block }))
+    .map((block) => ({ value: parseReceiptDate(block.text, detectedCurrency.value), score: block.confidence, block }))
     .filter((candidate): candidate is { value: CalendarDate; score: number; block: OcrBlock } => candidate.value !== undefined)
     .sort((left, right) => right.score - left.score);
   const date = dateCandidates[0];
@@ -140,7 +150,7 @@ export function parseReceipt(result: OcrResult, groupCurrency: CurrencyCode): Re
   const merchant = blocks
     .filter((block) => maxY(block) / result.height <= 0.36)
     .map((block) => ({ value: cleanMerchant(block.text), score: block.confidence + 0.08 * (1 - maxY(block) / result.height), block }))
-    .filter((candidate) => candidate.value.length >= 2 && /\p{L}/u.test(candidate.value) && !totalLabel.test(candidate.value) && !parseDate(candidate.value, detectedCurrency.value) && parseMinorAmount(candidate.value) === undefined)
+    .filter((candidate) => candidate.value.length >= 2 && /\p{L}/u.test(candidate.value) && !totalLabel.test(candidate.value) && !parseReceiptDate(candidate.value, detectedCurrency.value) && parseMinorAmount(candidate.value) === undefined)
     .sort((left, right) => right.score - left.score)[0];
 
   const subtotal = bestLabeledAmount(blocks, subtotalLabel, result.height);
@@ -162,29 +172,91 @@ export function parseReceipt(result: OcrResult, groupCurrency: CurrencyCode): Re
     taxMinor: tax?.value,
     tipMinor: tip?.value,
     totalMinor: currencyMismatch || detectedCurrency.ambiguous || competingTotal || arithmeticInconsistent ? undefined : total?.value,
+    lineItems: extractLineItems(blocks, result, total?.block),
     confidence: { merchant: merchant?.block.confidence, date: date?.block.confidence, total: total?.confidence },
     warnings,
   }) as ReceiptDraft;
 }
 
-function minorToInput(amountMinor: number, currency: CurrencyCode): string {
+export function minorToInput(amountMinor: number, currency: CurrencyCode): string {
   const digits = currencies[currency].minorDigits;
   return `${Math.floor(amountMinor / 10 ** digits)}.${String(amountMinor % 10 ** digits).padStart(digits, '0')}`;
 }
 
-export function buildReceiptExpensePrefill(result: OcrResult, groupCurrency: CurrencyCode, modelBundleVersion: string): ReceiptExpensePrefill {
+export function buildReceiptExpensePrefill(result: OcrResult, groupCurrency: CurrencyCode, modelBundleVersion: string, profileVersion = 'generic-v1'): GenericReceiptReviewDraft {
   const receipt = parseReceipt(result, groupCurrency);
   const warnings = [...receipt.warnings];
   if (receipt.merchant && (receipt.confidence.merchant ?? 0) < merchantThreshold) warnings.push('Merchant confidence is low; review the description.');
   if (receipt.date && (receipt.confidence.date ?? 0) < dateThreshold) warnings.push('Date confidence is low; review the expense date.');
   if (receipt.totalMinor && (receipt.confidence.total ?? 0) < totalThreshold) warnings.push('Total confidence is low; enter the amount manually.');
-  return {
+  return GenericReceiptReviewDraftSchema.parse({
+    profile: 'generic_v1',
+    profileVersion,
     description: receipt.merchant && (receipt.confidence.merchant ?? 0) >= merchantThreshold ? receipt.merchant : undefined,
     amount: receipt.totalMinor && (receipt.confidence.total ?? 0) >= totalThreshold ? minorToInput(receipt.totalMinor, groupCurrency) : undefined,
     expenseDate: receipt.date && (receipt.confidence.date ?? 0) >= dateThreshold ? receipt.date : undefined,
+    lineItems: receipt.lineItems?.map((item) => ({ description: item.description, quantity: item.quantity ?? '', unitPrice: item.unitPriceMinor === undefined ? '' : minorToInput(item.unitPriceMinor, groupCurrency), lineTotal: minorToInput(item.lineTotalMinor, groupCurrency) })),
     detectedCurrency: receipt.currency,
     confidence: receipt.confidence,
     warnings,
     modelBundleVersion,
-  };
+  });
+}
+
+function extractLineItems(blocks: OcrBlock[], result: OcrResult, totalBlock?: OcrBlock): ReceiptLineItemCandidate[] | undefined {
+  const body = blocks.filter((block) => {
+    const center = (minY(block) + maxY(block)) / 2;
+    const beforeSummary = totalBlock ? center < minY(totalBlock) : center < result.height * 0.82;
+    return center > result.height * 0.12 && beforeSummary && !excludedItemLabel.test(block.text) && !parseReceiptDate(block.text);
+  }).sort((left, right) => ((minY(left) + maxY(left)) / 2) - ((minY(right) + maxY(right)) / 2) || minX(left) - minX(right));
+  const rows: OcrBlock[][] = [];
+  for (const block of body) {
+    const center = (minY(block) + maxY(block)) / 2;
+    const height = Math.max(1, maxY(block) - minY(block));
+    const row = rows.at(-1);
+    const rowCenter = row ? row.reduce((sum, item) => sum + (minY(item) + maxY(item)) / 2, 0) / row.length : 0;
+    const rowHeight = row ? Math.max(...row.map((item) => Math.max(1, maxY(item) - minY(item)))) : 0;
+    if (row && Math.abs(center - rowCenter) <= Math.max(height, rowHeight) * 0.72) row.push(block);
+    else rows.push([block]);
+  }
+  const items: ReceiptLineItemCandidate[] = [];
+  for (const row of rows) {
+    row.sort((left, right) => minX(left) - minX(right));
+    const text = row.map((block) => block.text.trim()).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    const amounts = [...text.matchAll(amountPattern)];
+    const lastAmount = amounts.at(-1);
+    const lineTotalMinor = parseNonnegativeMinorAmount(lastAmount?.[0] ?? '');
+    if (!lastAmount || lineTotalMinor === undefined) continue;
+    let prefix = text.slice(0, lastAmount.index).trim().replace(/[·:;-]+$/, '').trim();
+    let quantity: string | undefined;
+    let unitPriceMinor: number | undefined;
+    const quantityPrice = /(?:^|\s)(\d+(?:[,.]\d+)?)\s*[xX@]\s*(\d+[,.]\d{2})(?:\s|$)/.exec(prefix);
+    if (quantityPrice) {
+      quantity = normalizeQuantity(quantityPrice[1]!);
+      unitPriceMinor = parseNonnegativeMinorAmount(quantityPrice[2]!);
+      prefix = `${prefix.slice(0, quantityPrice.index)} ${prefix.slice(quantityPrice.index + quantityPrice[0].length)}`.replace(/\s+/g, ' ').trim();
+    } else if (amounts.length >= 2) {
+      const possibleUnit = amounts.at(-2)!;
+      const between = text.slice((possibleUnit.index ?? 0) + possibleUnit[0].length, lastAmount.index).trim();
+      if (!between || /^[xX@]?$/.test(between)) {
+        unitPriceMinor = parseNonnegativeMinorAmount(possibleUnit[0]);
+        prefix = text.slice(0, possibleUnit.index).trim();
+      }
+    }
+    const leadingQuantity = /^(\d+(?:[,.]\d+)?)\s*[xX]\s+/.exec(prefix);
+    if (leadingQuantity) {
+      quantity ??= normalizeQuantity(leadingQuantity[1]!);
+      prefix = prefix.slice(leadingQuantity[0].length).trim();
+    }
+    const description = cleanMerchant(prefix);
+    const confidence = Math.min(...row.map((block) => block.confidence));
+    if (description.length < 2 || !/\p{L}/u.test(description) || excludedItemLabel.test(description) || confidence < 0.86 || items.length >= 80) continue;
+    items.push({ description, ...(quantity ? { quantity } : {}), ...(unitPriceMinor === undefined ? {} : { unitPriceMinor }), lineTotalMinor, confidence });
+  }
+  return items.length ? items : undefined;
+}
+
+function normalizeQuantity(value: string): string | undefined {
+  const normalized = value.replace(',', '.').replace(/^0+(?=\d)/, '').replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
+  return /^\d+(?:\.\d+)?$/.test(normalized) && Number(normalized) > 0 ? normalized : undefined;
 }

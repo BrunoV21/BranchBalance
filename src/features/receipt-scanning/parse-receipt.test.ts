@@ -10,6 +10,18 @@ function result(blocks: OcrBlock[]): OcrResult {
 }
 
 describe('receipt parser', () => {
+  it('extracts ordered generic line items while excluding totals', () => {
+    const parsed = parseReceipt(result([
+      block('BAGUETTERIA', 0.99, 40),
+      block('1 x 8,95 SALMON BAGUETTE 8,95', 0.97, 420),
+      block('FOCACCIA PASTRAMI 11,95', 0.96, 500),
+      block('TOTAL EUR 20,90', 0.99, 1300),
+    ]), 'EUR');
+    expect(parsed.lineItems).toEqual([
+      expect.objectContaining({ description: 'SALMON BAGUETTE', quantity: '1', unitPriceMinor: 895, lineTotalMinor: 895 }),
+      expect.objectContaining({ description: 'FOCACCIA PASTRAMI', lineTotalMinor: 1195 }),
+    ]);
+  });
   it('extracts Portuguese/European receipt fields as integer minor units', () => {
     const parsed = parseReceipt(result([
       block('SUPERMARKET LISBOA', 0.97, 70),

@@ -1,14 +1,19 @@
 import { requireOptionalNativeModule } from 'expo-modules-core';
 
+import type { ReceiptProfileId } from '@/domain/types';
 import { OcrResultSchema, RECEIPT_MODEL_BUNDLE_VERSION, ReceiptOcrStatusSchema, type OcrResult, type ReceiptOcrErrorCode, type ReceiptOcrStatus } from './receipt-types';
 
 type NativePaddleOcrModule = {
-  getStatus(): Promise<unknown>;
-  recognize(options: { requestId: string; imageUri: string }): Promise<unknown>;
+  getStatus(profile: ReceiptProfileId): Promise<unknown>;
+  recognize(options: { requestId: string; profile: ReceiptProfileId; imageUri: string }): Promise<unknown>;
   cancel(requestId: string): Promise<void>;
 };
 
 const nativeModule = requireOptionalNativeModule<NativePaddleOcrModule>('BranchBalancePaddleOCR');
+export const RECEIPT_PROFILE_VERSIONS: Record<ReceiptProfileId, string> = {
+  generic_v1: 'generic-v1-2026-08-10',
+  fuel_v1: 'fuel-v1-2026-08-10',
+};
 
 export class ReceiptOcrError extends Error {
   constructor(readonly code: ReceiptOcrErrorCode, message: string) {
@@ -38,14 +43,17 @@ function normalizeNativeError(error: unknown): ReceiptOcrError {
 }
 
 export const receiptOcr = {
-  async getStatus(): Promise<ReceiptOcrStatus> {
-    if (!nativeModule) return { state: 'module_unavailable', engine: 'paddle_ocr', modelBundleVersion: null, safeMessage: 'Receipt scanning requires the BranchBalance development build.' };
+  async getStatus(profile: ReceiptProfileId = 'generic_v1'): Promise<ReceiptOcrStatus> {
+    if (!nativeModule) return { state: 'module_unavailable', engine: 'paddle_ocr', profile, profileVersion: null, modelBundleVersion: null, safeMessage: 'Receipt scanning requires the BranchBalance development build.' };
     try {
-      const parsed = ReceiptOcrStatusSchema.safeParse(await nativeModule.getStatus());
+      const parsed = ReceiptOcrStatusSchema.safeParse(await nativeModule.getStatus(profile));
       if (!parsed.success) throw new ReceiptOcrError('models_incompatible', 'The receipt reader reported an invalid runtime status.');
       const status = parsed.data;
       if (status.state === 'ready' && status.modelBundleVersion !== RECEIPT_MODEL_BUNDLE_VERSION) {
         return { ...status, state: 'models_incompatible', safeMessage: 'The local OCR model bundle does not match this app build.' };
+      }
+      if (status.profile !== profile || (status.state === 'ready' && status.profileVersion !== RECEIPT_PROFILE_VERSIONS[profile])) {
+        return { ...status, state: 'models_incompatible', profile, safeMessage: 'The selected receipt profile does not match this app build.' };
       }
       return status;
     } catch (error) {
@@ -53,10 +61,10 @@ export const receiptOcr = {
     }
   },
 
-  async recognize(requestId: string, imageUri: string): Promise<OcrResult> {
+  async recognize(requestId: string, imageUri: string, profile: ReceiptProfileId = 'generic_v1'): Promise<OcrResult> {
     if (!nativeModule) throw new ReceiptOcrError('module_unavailable', 'Receipt scanning requires the BranchBalance development build.');
     try {
-      const raw = await nativeModule.recognize({ requestId, imageUri });
+      const raw = await nativeModule.recognize({ requestId, profile, imageUri });
       const parsed = OcrResultSchema.safeParse(raw);
       if (!parsed.success) throw new ReceiptOcrError('invalid_output', 'The receipt reader returned an invalid result. Try another photo.');
       return parsed.data;

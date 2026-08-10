@@ -7,8 +7,10 @@ import { Inbox } from 'lucide-react-native';
 
 import { Avatar, Banner, Body, Button, Card, ConfirmDialog, EmptyState, Title } from '@/components/ui';
 import { formatMoney } from '@/domain/money';
+import { effectiveGroupType } from '@/domain/groups';
 import type { DiscoveredGroup, PendingGroupInvitation } from '@/domain/types';
 import { useInstallationRecheck } from '@/features/groups/use-installation-recheck';
+import { GroupTypeBadge, GroupTypeIcon } from '@/features/groups/group-type-ui';
 import { githubAuthorizationSettingsUrl, githubInstallationUrl } from '@/config/app';
 import { useGroups } from '@/providers/groups-provider';
 import { useSession } from '@/providers/session-provider';
@@ -41,15 +43,20 @@ export default function GroupsScreen() {
     void declineInvitation(declineTarget.id).catch(() => undefined).finally(() => setDeclineTarget(null));
   };
 
-  const renderGroup = ({ item }: { item: DiscoveredGroup }) => <Pressable accessibilityRole="button" accessibilityLabel={`Open ${item.group.name}`} onPress={() => router.push({ pathname: '/groups/[owner]/[repo]', params: { owner: item.repository.owner, repo: item.repository.name } } as never)}>
+  const renderGroup = ({ item }: { item: DiscoveredGroup }) => {
+    const type = item.effectiveType ?? effectiveGroupType(item.group);
+    return <Pressable accessibilityRole="button" accessibilityLabel={`Open ${item.group.name}${type ? `, ${type} group` : ', update required'}`} onPress={() => router.push({ pathname: '/groups/[owner]/[repo]', params: { owner: item.repository.owner, repo: item.repository.name } } as never)}>
     <Card>
-      <Text style={[styles.groupName, { color: colors.text }]}>{item.group.name}</Text>
+      <View style={styles.groupHeading}>{type ? <View style={[styles.groupIcon, { backgroundColor: colors.surfaceStrong, borderColor: colors.border }]}><GroupTypeIcon type={type} size={24} /></View> : null}<View style={{ flex: 1 }}><Text style={[styles.groupName, { color: colors.text }]}>{item.group.name}</Text><Body muted>{type ? `${type === 'trip' ? 'Trip' : 'Fuel'} · ${item.group.currency}` : `${item.group.currency} · Update required`}</Body></View>{type ? <GroupTypeBadge type={type} compact /> : null}</View>
       <Body muted>{item.summary ? `${item.summary.memberCount} members · ${item.summary.expenseCount} expenses` : 'Open to sync group data'}</Body>
+      {type === 'fuel' && item.summary?.currentMonthSpentMinor !== undefined ? <Body>{item.summary.currentMonth}: {formatMoney(item.summary.currentMonthSpentMinor, item.group.currency)}{item.summary.currentMonthLimitMinor ? ` of ${formatMoney(item.summary.currentMonthLimitMinor, item.group.currency)}` : ' · no monthly limit'}</Body> : null}
       {item.summary ? <Text style={{ color: item.summary.currentUserBalanceMinor >= 0 ? colors.positive : colors.negative, fontWeight: '800' }}>
         {item.summary.currentUserBalanceMinor >= 0 ? 'You are owed ' : 'You owe '}{formatMoney(Math.abs(item.summary.currentUserBalanceMinor), item.group.currency)}
       </Text> : null}
+      {!type ? <Body style={{ color: colors.warning }}>Update BranchBalance before viewing or changing this group.</Body> : null}
     </Card>
   </Pressable>;
+  };
 
   return <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]}>
     <FlatList data={state.data} keyExtractor={(item) => item.key} renderItem={renderGroup} contentContainerStyle={styles.content} alwaysBounceVertical overScrollMode="always"
@@ -133,4 +140,4 @@ function InstallationConnectionCard({ attempts, maxAttempts, checking, exhausted
   </Card>;
 }
 
-const styles = StyleSheet.create({ screen: { flex: 1 }, content: { flexGrow: 1, padding: 20, gap: 13 }, header: { gap: 14 }, accountRow: { flexDirection: 'row', alignItems: 'center', gap: 10 }, inboxButton: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, alignItems: 'center', justifyContent: 'center' }, unreadDot: { position: 'absolute', right: 8, top: 7, width: 8, height: 8, borderRadius: 4 }, bannerActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, connectionCard: { borderLeftWidth: 4 }, connectionHeading: { flexDirection: 'row', alignItems: 'flex-start', gap: 11 }, connectionTitle: { fontSize: 18, lineHeight: 24, fontWeight: '800' }, progressTrack: { height: 8, overflow: 'hidden', borderRadius: 999 }, progressFill: { height: '100%', borderRadius: 999 }, connectionAction: { flexGrow: 1, minWidth: 130 }, totals: { flexDirection: 'row', justifyContent: 'space-between' }, total: { fontSize: 22, fontWeight: '800' }, groupName: { fontSize: 19, fontWeight: '800' }, sectionTitle: { fontSize: 20, lineHeight: 26, fontWeight: '800' }, sectionHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }, countPill: { minWidth: 28, minHeight: 28, borderRadius: 14, overflow: 'hidden', textAlign: 'center', textAlignVertical: 'center', paddingHorizontal: 8, fontWeight: '800' }, invitationSection: { gap: 12 }, invitationLoading: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 10 }, invitationMetadata: { gap: 4 }, wrapText: { flexShrink: 1 }, invitationActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 }, invitationAction: { flexGrow: 1, minWidth: 130 } });
+const styles = StyleSheet.create({ screen: { flex: 1 }, content: { flexGrow: 1, padding: 20, gap: 13 }, header: { gap: 14 }, accountRow: { flexDirection: 'row', alignItems: 'center', gap: 10 }, inboxButton: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, alignItems: 'center', justifyContent: 'center' }, unreadDot: { position: 'absolute', right: 8, top: 7, width: 8, height: 8, borderRadius: 4 }, bannerActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, connectionCard: { borderLeftWidth: 4 }, connectionHeading: { flexDirection: 'row', alignItems: 'flex-start', gap: 11 }, connectionTitle: { fontSize: 18, lineHeight: 24, fontWeight: '800' }, progressTrack: { height: 8, overflow: 'hidden', borderRadius: 999 }, progressFill: { height: '100%', borderRadius: 999 }, connectionAction: { flexGrow: 1, minWidth: 130 }, totals: { flexDirection: 'row', justifyContent: 'space-between' }, total: { fontSize: 22, fontWeight: '800' }, groupHeading: { flexDirection: 'row', alignItems: 'center', gap: 10 }, groupIcon: { width: 46, height: 46, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' }, groupName: { fontSize: 19, fontWeight: '800' }, sectionTitle: { fontSize: 20, lineHeight: 26, fontWeight: '800' }, sectionHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }, countPill: { minWidth: 28, minHeight: 28, borderRadius: 14, overflow: 'hidden', textAlign: 'center', textAlignVertical: 'center', paddingHorizontal: 8, fontWeight: '800' }, invitationSection: { gap: 12 }, invitationLoading: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 10 }, invitationMetadata: { gap: 4 }, wrapText: { flexShrink: 1 }, invitationActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 }, invitationAction: { flexGrow: 1, minWidth: 130 } });

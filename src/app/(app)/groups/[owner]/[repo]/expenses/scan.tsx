@@ -6,13 +6,16 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Camera, Image as ImageIcon, LockKeyhole, Pencil, ShieldCheck } from 'lucide-react-native';
 import { ActivityIndicator, Image, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { Banner, Body, Button, Screen, Title } from '@/components/ui';
-import { buildReceiptExpensePrefill } from '@/features/receipt-scanning/parse-receipt';
+import { Banner, Body, Button, Screen } from '@/components/ui';
+import { effectiveGroupType } from '@/domain/groups';
+import { groupContextLabel } from '@/features/groups/group-type-ui';
 import { cleanReceiptCache, deleteCapturedReceipt, deletePreparedReceipt, prepareReceiptImage } from '@/features/receipt-scanning/prepare-receipt-image';
 import { ReceiptOcrError, receiptOcr } from '@/features/receipt-scanning/receipt-ocr';
 import { useReceiptDraft } from '@/features/receipt-scanning/receipt-draft-provider';
+import { receiptProfileDefinitionFor } from '@/features/receipt-scanning/receipt-profile-registry';
 import type { CapturedReceiptImage, ReceiptOcrStatus } from '@/features/receipt-scanning/receipt-types';
 import { useGroup } from '@/providers/group-provider';
+import { useSession } from '@/providers/session-provider';
 import { useTheme } from '@/providers/theme-provider';
 
 type Phase = 'capture' | 'preview' | 'preparing' | 'reading';
@@ -22,6 +25,7 @@ export default function ScanReceiptScreen() {
   const { owner, repo } = useLocalSearchParams<{ owner: string; repo: string }>();
   const { colors } = useTheme();
   const { state } = useGroup();
+  const { session } = useSession();
   const { setReceiptDraft } = useReceiptDraft();
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
@@ -33,16 +37,19 @@ export default function ScanReceiptScreen() {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<ReceiptOcrStatus | null>(null);
   const currency = state.data?.group.currency;
+  const groupType = state.data ? effectiveGroupType(state.data.group) : null;
+  const profileDefinition = groupType ? receiptProfileDefinitionFor(groupType) : null;
+  const profile = profileDefinition?.id;
 
   useEffect(() => {
     void cleanReceiptCache().catch(() => undefined);
-    void receiptOcr.getStatus().then(setStatus).catch((cause) => setError(cause instanceof Error ? cause.message : 'Receipt scanning is unavailable.'));
+    if (profile) void receiptOcr.getStatus(profile).then(setStatus).catch((cause) => setError(cause instanceof Error ? cause.message : 'Receipt scanning is unavailable.'));
     return () => {
       if (requestId.current) void receiptOcr.cancel(requestId.current);
       deletePreparedReceipt(preparedUri.current);
       deleteCapturedReceipt(imageRef.current);
     };
-  }, []);
+  }, [profile]);
 
   const openManualEntry = () => {
     deletePreparedReceipt(preparedUri.current);
@@ -88,22 +95,22 @@ export default function ScanReceiptScreen() {
   };
 
   const readReceipt = async () => {
-    if (!image || !currency) return;
+    if (!image || !currency || !profile || !profileDefinition || !state.data || !groupType || !session.account) return;
     setError(null);
     try {
-      const currentStatus = await receiptOcr.getStatus();
+      const currentStatus = await receiptOcr.getStatus(profile);
       setStatus(currentStatus);
-      if (currentStatus.state !== 'ready' || !currentStatus.modelBundleVersion) throw new ReceiptOcrError(currentStatus.state, currentStatus.safeMessage);
+      if (currentStatus.state !== 'ready' || !currentStatus.modelBundleVersion || !currentStatus.profileVersion) throw new ReceiptOcrError(currentStatus.state, currentStatus.safeMessage);
       setPhase('preparing');
       const prepared = await prepareReceiptImage(image);
       preparedUri.current = prepared.uri;
       setPhase('reading');
       const id = Crypto.randomUUID();
       requestId.current = id;
-      const result = await receiptOcr.recognize(id, prepared.uri);
+      const result = await receiptOcr.recognize(id, prepared.uri, profile);
       requestId.current = null;
-      const draft = buildReceiptExpensePrefill(result, currency, currentStatus.modelBundleVersion);
-      setReceiptDraft(draft);
+      const draft = profileDefinition.parse(result, currency, currentStatus.modelBundleVersion, currentStatus.profileVersion);
+      setReceiptDraft(draft, { accountId: session.account.id, groupKey: state.data.key, groupType, attemptId: id });
       deletePreparedReceipt(prepared.uri);
       deleteCapturedReceipt(imageRef.current);
       preparedUri.current = null;
@@ -118,14 +125,14 @@ export default function ScanReceiptScreen() {
 
   const processing = phase === 'preparing' || phase === 'reading';
   const moduleUnavailable = status && status.state !== 'ready';
-  return <Screen scroll={false} contentStyle={styles.screen}>
-    <Title eyebrow={state.data?.group.name ?? 'BranchBalance'}>Scan receipt</Title>
+  return <Screen scroll={false} safeAreaEdges={['left', 'right', 'bottom']} contentStyle={styles.screen}>
+    <Text style={[styles.groupContext, { color: colors.accent }]}>{state.data && groupType ? groupContextLabel(groupType, state.data.group.name).toUpperCase() : (state.data?.group.name ?? 'BranchBalance').toUpperCase()}</Text>
     <View style={styles.localStatus}><View style={[styles.pill, { backgroundColor: colors.surfaceStrong }]}><ShieldCheck color={colors.positive} size={16} /><Text style={[styles.pillText, { color: colors.positive }]}>On-device only</Text></View><Body muted>No receipt upload</Body></View>
-    {moduleUnavailable ? <Banner tone="warning">{status.safeMessage} Manual expense entry remains available.</Banner> : null}
+    {moduleUnavailable && status ? <Banner tone="warning">{status.safeMessage} Manual expense entry remains available.</Banner> : null}
     {error ? <Banner tone="error">{error}</Banner> : null}
-    <View style={[styles.cameraStage, { backgroundColor: colors.surfaceStrong, borderColor: colors.border }]}>
+    <View accessibilityLabel="Portrait receipt camera preview" testID="receipt-camera-stage" style={[styles.cameraStage, { backgroundColor: colors.surfaceStrong, borderColor: colors.border }]}>
       {image ? <Image accessibilityLabel="Receipt photo preview" source={{ uri: image.uri }} resizeMode="contain" style={StyleSheet.absoluteFill} />
-        : permission?.granted ? <CameraView ref={cameraRef} facing="back" style={StyleSheet.absoluteFill} />
+        : permission?.granted ? <CameraView ref={cameraRef} facing="back" ratio="16:9" testID="receipt-camera" style={StyleSheet.absoluteFill} />
           : <View style={styles.permission}><Camera color={colors.muted} size={42} /><Body muted>{permission?.canAskAgain === false ? 'Camera access is disabled in system settings.' : 'Allow camera access to photograph a receipt.'}</Body><Button variant="secondary" onPress={() => permission?.canAskAgain === false ? void Linking.openSettings() : void requestPermission()}>{permission?.canAskAgain === false ? 'Open settings' : 'Allow camera'}</Button></View>}
       {!image ? <><Corner position="topLeft" /><Corner position="topRight" /><Corner position="bottomLeft" /><Corner position="bottomRight" /><View style={styles.guidance}><Text style={styles.guidanceText}>Fit the full receipt inside the guide</Text></View></> : null}
       {processing ? <View style={[StyleSheet.absoluteFill, styles.processing]}><ActivityIndicator color="#FFFFFF" size="large" /><Text style={styles.processingTitle}>{phase === 'preparing' ? 'Preparing photo…' : 'Reading receipt locally…'}</Text><Text style={styles.processingBody}>Nothing leaves this phone.</Text></View> : null}
@@ -150,11 +157,12 @@ function ScanSideAction({ label, icon, disabled, onPress }: { label: string; ico
 }
 
 const styles = StyleSheet.create({
-  screen: { padding: 18, gap: 12 },
+  screen: { paddingHorizontal: 18, paddingTop: 12, paddingBottom: 10, gap: 10 },
+  groupContext: { minHeight: 20, fontSize: 12, lineHeight: 18, fontWeight: '800', letterSpacing: 1.2 },
   localStatus: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   pill: { minHeight: 28, borderRadius: 999, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 6 },
   pillText: { fontSize: 12, fontWeight: '800' },
-  cameraStage: { flex: 1, minHeight: 280, overflow: 'hidden', borderRadius: 24, borderWidth: 1 },
+  cameraStage: { flex: 1, minHeight: 0, overflow: 'hidden', borderRadius: 24, borderWidth: 1 },
   permission: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 28, gap: 14 },
   corner: { position: 'absolute', width: 38, height: 38, borderColor: '#FFF9F2' },
   topLeft: { top: '10%', left: '12%', borderLeftWidth: 3, borderTopWidth: 3, borderTopLeftRadius: 9 },

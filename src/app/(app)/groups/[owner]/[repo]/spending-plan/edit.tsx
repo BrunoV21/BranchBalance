@@ -5,11 +5,14 @@ import { StyleSheet, Text, View } from 'react-native';
 import { Banner, Body, Button, Card, ConfirmDialog, EmptyState, Field, Screen, Title } from '@/components/ui';
 import { AppFailure, DomainValidationError } from '@/domain/errors';
 import { formatMoney } from '@/domain/money';
+import { effectiveGroupType, isTripPlan } from '@/domain/groups';
 import { expenseCategories, expenseCategoryLabels } from '@/domain/spending';
 import type { GroupFile, RemoteGroupSnapshot, SpendingPlan } from '@/domain/types';
 import { DatePickerDialog } from '@/features/expenses/date-picker-dialog';
 import { CategoryIcon } from '@/features/expenses/metadata-icons';
 import { useGroupRefresh } from '@/features/groups/use-group-refresh';
+import { groupContextLabel } from '@/features/groups/group-type-ui';
+import { FuelMonthlyPlanEditor } from '@/features/spending/fuel-plan-form';
 import { buildSpendingPlan, spendingPlanDraftFrom, type SpendingPlanDraft } from '@/features/spending/model';
 import { systemClock, systemLocalCalendar } from '@/infrastructure/runtime';
 import { useGroup } from '@/providers/group-provider';
@@ -25,6 +28,7 @@ export default function SpendingPlanScreen() {
   const snapshot = state.data;
   if (!snapshot || !session.account) return <Screen><EmptyState title="Spending plan unavailable" body="Return to the group and refresh before editing its plan." /></Screen>;
   if (!snapshot.groupFile) return <Screen><Title eyebrow={snapshot.group.name}>Spending plan</Title><EmptyState title="Refresh required" body="The latest group file and SHA are required before the shared plan can be changed." action={<Button onPress={refresh}>Refresh group</Button>} /></Screen>;
+  if (effectiveGroupType(snapshot.group) === 'fuel') return <FuelMonthlyPlanEditor snapshot={snapshot} accountLogin={session.account.login} />;
   return <SpendingPlanEditor initialSnapshot={snapshot} accountLogin={session.account.login} />;
 }
 
@@ -92,7 +96,7 @@ function SpendingPlanEditor({ initialSnapshot: snapshot, accountLogin }: { initi
   };
 
   if (conflict) return <Screen>
-    <Title eyebrow={snapshot.group.name}>Review spending-plan conflict</Title>
+    <Title eyebrow={groupContextLabel('trip', snapshot.group.name)}>Review spending-plan conflict</Title>
     <Banner tone="warning">The plan changed on GitHub. Your submitted values are preserved and will not overwrite the latest version without review.</Banner>
     <View style={styles.comparison}><PlanCard title="Latest on GitHub" plan={conflict.latest.group.spending_plan} currency={snapshot.group.currency} /><PlanCard title="Your submitted plan" plan={conflict.submitted} currency={snapshot.group.currency} /></View>
     <Button loading={saving} onPress={() => void reapply()}>Reapply to latest version</Button>
@@ -100,7 +104,7 @@ function SpendingPlanEditor({ initialSnapshot: snapshot, accountLogin }: { initi
   </Screen>;
 
   return <Screen>
-    <Title eyebrow={snapshot.group.name}>Spending plan</Title>
+    <Title eyebrow={groupContextLabel('trip', snapshot.group.name)}>Trip spending plan</Title>
     {!snapshot.repository.canWrite ? <Banner>You can review this plan, but your GitHub repository permission does not allow updates.</Banner> : !base ? <Banner tone="warning">Refresh must finish before this plan can be changed.</Banner> : null}
     <Card>
       <Text style={[styles.heading, { color: colors.text }]}>Total budget</Text>
@@ -109,8 +113,8 @@ function SpendingPlanEditor({ initialSnapshot: snapshot, accountLogin }: { initi
       <Body muted>Informational only. Going over budget never blocks an expense.</Body>
     </Card>
     <Card>
-      <Text style={[styles.heading, { color: colors.text }]}>Budget period (optional)</Text>
-      <Body muted>Set both inclusive dates for daily guidance. All tracked expenses count even when paid before the period starts.</Body>
+      <Text style={[styles.heading, { color: colors.text }]}>Trip dates</Text>
+      <Body muted>Both inclusive dates are required when this plan is saved. Existing legacy plans remain readable until edited.</Body>
       <DateField label="Budget starts" value={draft.startsOn} enabled={canWrite} onOpen={() => setDateTarget('startsOn')} onClear={() => patch({ startsOn: '' })} />
       <DateField label="Budget ends" value={draft.endsOn} enabled={canWrite} onOpen={() => setDateTarget('endsOn')} onClear={() => patch({ endsOn: '' })} />
       {error?.field === 'dates' || error?.field === 'startsOn' || error?.field === 'endsOn' ? <Banner tone="error">{error.message}</Banner> : null}
@@ -134,7 +138,8 @@ function DateField({ label, value, enabled, onOpen, onClear }: { label: string; 
 }
 
 function PlanCard({ title, plan, currency }: { title: string; plan: SpendingPlan | null | undefined; currency: 'EUR' | 'USD' | 'GBP' }) {
-  return <Card style={styles.compareCard}><Body>{title}</Body>{plan ? <><Body>{plan.budget_minor ? formatMoney(plan.budget_minor, currency) : 'No total budget'}</Body><Body muted>{plan.starts_on && plan.ends_on ? `${plan.starts_on} → ${plan.ends_on}` : 'No budget period'}</Body><Body muted>{Object.keys(plan.category_budgets_minor ?? {}).length} category limits</Body><Body muted>Updated by @{plan.updated_by}</Body></> : <Body muted>No spending plan</Body>}</Card>;
+  const trip = isTripPlan(plan) ? plan : null;
+  return <Card style={styles.compareCard}><Body>{title}</Body>{trip ? <><Body>{trip.budget_minor ? formatMoney(trip.budget_minor, currency) : 'No total budget'}</Body><Body muted>{trip.starts_on && trip.ends_on ? `${trip.starts_on} → ${trip.ends_on}` : 'Legacy plan needs dates before saving'}</Body><Body muted>{Object.keys(trip.category_budgets_minor ?? {}).length} category limits</Body><Body muted>Updated by @{trip.updated_by}</Body></> : <Body muted>No Trip spending plan</Body>}</Card>;
 }
 
 const styles = StyleSheet.create({ heading: { fontSize: 18, fontWeight: '800' }, dateField: { gap: 7 }, dateActions: { flexDirection: 'row', gap: 8, alignItems: 'center' }, comparison: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 }, compareCard: { minWidth: '45%', flexGrow: 1 } });

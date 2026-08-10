@@ -3,6 +3,7 @@ import { useNavigation, useRouter } from 'expo-router';
 import { AccessibilityInfo } from 'react-native';
 
 import { calculateBalances } from '@/domain/balances';
+import { deriveFuelAnalytics } from '@/domain/analytics';
 import { deriveSpendingSummary } from '@/domain/spending';
 import type { Expense, Group, RemoteGroupSnapshot } from '@/domain/types';
 import { useGroup } from '@/providers/group-provider';
@@ -13,6 +14,7 @@ import SpendingScreen from '../../app/(app)/groups/[owner]/[repo]/(tabs)/spendin
 jest.mock('expo-router', () => ({ useNavigation: jest.fn(), useRouter: jest.fn(), useLocalSearchParams: () => ({ owner: 'owner', repo: 'branch-balance-trip' }) }));
 jest.mock('@/features/groups/use-group-refresh', () => ({ useGroupRefresh: () => jest.fn() }));
 jest.mock('@/providers/group-provider', () => ({ useGroup: jest.fn() }));
+jest.mock('@/infrastructure/runtime', () => ({ systemLocalCalendar: { today: () => '2026-08-10' } }));
 
 const members = [
   { login: 'owner', name: null, avatarUrl: null, role: 'owner' as const },
@@ -156,5 +158,23 @@ describe('Spending screen', () => {
     expect(view.getByText('No expenses yet')).toBeTruthy();
     await fireEvent.press(view.getByRole('button', { name: 'Set up spending plan' }));
     expect(pushGroupScreen).toHaveBeenCalledWith('spending-plan/edit');
+  });
+
+  it('renders Fuel month, limit, volume, savings, stations, and coverage instead of Trip mix', async () => {
+    const fuelExpense: Expense = { ...expenses[0]!, id: '44444444-4444-4444-8444-444444444444', description: 'GALP Norte', amount_minor: 3601, category: 'transport', participants: ['owner'], shares_minor: { owner: 3601 }, expense_date: '2026-08-10', type_data: { schema_version: 1, type: 'fuel', volume_millilitres: 24500, unit_price_micros_per_litre: 1633000, gross_amount_minor: 4001, discount_minor: 400, fuel_type: 'diesel' } };
+    const fuelPlan = { kind: 'fuel_monthly' as const, monthly_limits: [{ effective_month: '2026-08' as const, limit_minor: 5000 }], updated_by: 'owner', updated_at: '2026-08-01T00:00:00.000Z' };
+    const fuelGroup = { schema_version: 2 as const, group_type: 'fuel' as const, name: 'Car', currency: 'EUR' as const, spending_plan: fuelPlan, created_by: 'owner', created_at: '2026-07-13T12:00:00.000Z' };
+    const fuelSnapshot: RemoteGroupSnapshot = { ...snapshot, group: fuelGroup, effectiveType: 'fuel', expenses: [{ expense: fuelExpense, blobSha: 'fuel-sha', path: `expenses/${fuelExpense.id}.json`, sourceDocument: { ...fuelExpense } }], balances: calculateBalances([fuelExpense], members), spending: deriveSpendingSummary([fuelExpense], fuelPlan, 'owner', '2026-08-10'), analytics: { type: 'fuel', common: deriveSpendingSummary([fuelExpense], fuelPlan, 'owner', '2026-08-10'), fuel: deriveFuelAnalytics([fuelExpense], fuelPlan, '2026-08-10') } };
+    jest.mocked(useGroup).mockReturnValue({ state: { data: fuelSnapshot, status: 'ready', isRefreshing: false, lastSuccessfulAt: snapshot.syncedAt, error: null } } as never);
+    const view = await render(<ThemeProvider><SpendingScreen /></ThemeProvider>);
+    expect(view.getByText('Fuel spending')).toBeTruthy();
+    expect(view.getByText('Monthly spend versus limit')).toBeTruthy();
+    expect(view.getByText('Fuel volume and unit-price trend')).toBeTruthy();
+    expect(view.getByText('Savings')).toBeTruthy();
+    expect(view.getByText('Stations')).toBeTruthy();
+    expect(view.getByText('Data coverage')).toBeTruthy();
+    expect(view.getAllByText('24.5 L').length).toBeGreaterThan(0);
+    expect(view.getAllByText('€4.00').length).toBeGreaterThan(0);
+    expect(view.queryByText('Category mix')).toBeNull();
   });
 });
