@@ -104,6 +104,11 @@ export function parseReceiptDate(text: string, currency?: CurrencyCode): Calenda
   return isCalendarDate(value) ? value : undefined;
 }
 
+export function parseReceiptTime(text: string): string | undefined {
+  const match = /\b([01]?\d|2[0-3])\s*(?::|[.]|h)\s*([0-5]\d)\b/i.exec(text);
+  return match ? `${match[1]!.padStart(2, '0')}:${match[2]}` : undefined;
+}
+
 function bestLabeledAmount(blocks: OcrBlock[], pattern: RegExp, imageHeight: number, exclude?: RegExp): AmountCandidate | undefined {
   return blocks
     .filter((block) => pattern.test(block.text) && !exclude?.test(block.text))

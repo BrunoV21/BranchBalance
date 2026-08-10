@@ -130,6 +130,7 @@ export interface FuelReceiptReviewDraft {
   description?: string;
   amount?: string;
   expenseDate?: CalendarDate;
+  receiptDateTime?: string;
   litres?: string;
   unitPrice?: string;
   gross?: string;
@@ -165,7 +166,7 @@ export const GenericReceiptReviewDraftSchema = z.object({
 
 export const FuelReceiptReviewDraftSchema = z.object({
   profile: z.literal('fuel_v1'), profileVersion: z.string().min(1).max(120),
-  description: z.string().min(1).max(120).optional(), amount: z.string().min(1).max(32).optional(), expenseDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  description: z.string().min(1).max(120).optional(), amount: z.string().min(1).max(32).optional(), expenseDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), receiptDateTime: z.string().regex(/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d$/).optional(),
   litres: z.string().min(1).max(32).optional(), unitPrice: z.string().min(1).max(32).optional(), gross: z.string().min(1).max(32).optional(), discount: z.string().min(1).max(32).optional(),
   fuelType: z.enum(['petrol', 'diesel', 'lpg', 'other']).optional(), detectedCurrency: z.enum(['EUR', 'USD', 'GBP']).optional(),
   confidence: z.object({ merchant: z.number().min(0).max(1).optional(), date: z.number().min(0).max(1).optional(), total: z.number().min(0).max(1).optional(), litres: z.number().min(0).max(1).optional(), unitPrice: z.number().min(0).max(1).optional(), gross: z.number().min(0).max(1).optional(), discount: z.number().min(0).max(1).optional() }).strict(),

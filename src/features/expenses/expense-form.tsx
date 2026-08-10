@@ -130,6 +130,7 @@ function FuelDetailsPanel({ currency, amount, value, onChange, detected = false 
     <Field label={`Printed price per litre (${currency})${suffix}`} value={value.unitPrice} onChangeText={(unitPrice) => patch({ unitPrice })} keyboardType="decimal-pad" placeholder="1.633" />
     <Field label={`Pre-discount total (${currency})${suffix}`} value={value.gross} onChangeText={(gross) => patch({ gross })} keyboardType="decimal-pad" placeholder="40.01" />
     <Field label={`Discount (${currency})${suffix}`} value={value.discount} onChangeText={(discount) => patch({ discount })} keyboardType="decimal-pad" placeholder="4.00" />
+    {detected || value.receiptDateTime ? <Field label="Receipt date and time · Detected" value={value.receiptDateTime ?? ''} onChangeText={(receiptDateTime) => patch({ receiptDateTime })} placeholder="YYYY-MM-DDTHH:mm" autoCapitalize="none" /> : null}
     <Body>Fuel type (optional)</Body><View accessibilityRole="radiogroup" style={styles.row}>{fuelTypes.map((fuelType) => <Choice key={fuelType} label={fuelType === 'lpg' ? 'LPG' : `${fuelType[0]!.toUpperCase()}${fuelType.slice(1)}`} selected={value.fuelType === fuelType} onPress={() => patch({ fuelType: value.fuelType === fuelType ? null : fuelType })} />)}</View>
     {arithmetic ? <Banner tone={arithmetic.endsWith('consistent.') ? 'info' : 'warning'}>{arithmetic}</Banner> : null}
   </View>;

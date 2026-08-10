@@ -20,6 +20,8 @@ import type {
 
 const isoInstant = z.string().datetime({ offset: true }).refine((value) => value.endsWith('Z'), 'Timestamp must be UTC.');
 const calendarDate = z.string().refine(isCalendarDate, 'Date must be a real YYYY-MM-DD calendar date.');
+const receiptDateTime = z.string().regex(/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d$/, 'Receipt date/time must be YYYY-MM-DDTHH:mm.')
+  .refine((value) => isCalendarDate(value.slice(0, 10)), 'Receipt date/time must contain a real calendar date.');
 const login = z.string().trim().min(1);
 const currency = z.enum(['EUR', 'USD', 'GBP']);
 const positiveSafeInteger = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
@@ -87,6 +89,7 @@ const fuelTypeDataSchema = z.object({
   schema_version: z.literal(1),
   type: z.literal('fuel'),
   volume_millilitres: positiveSafeInteger,
+  receipt_datetime: receiptDateTime.optional(),
   unit_price_micros_per_litre: positiveSafeInteger.optional(),
   gross_amount_minor: positiveSafeInteger.optional(),
   discount_minor: nonnegativeSafeInteger.optional(),
@@ -304,6 +307,7 @@ function pickFuelTypeData(input: z.infer<typeof fuelTypeDataSchema>): FuelExpens
     schema_version: 1,
     type: 'fuel',
     volume_millilitres: input.volume_millilitres,
+    ...(input.receipt_datetime === undefined ? {} : { receipt_datetime: input.receipt_datetime }),
     ...(input.unit_price_micros_per_litre === undefined ? {} : { unit_price_micros_per_litre: input.unit_price_micros_per_litre }),
     ...(input.gross_amount_minor === undefined ? {} : { gross_amount_minor: input.gross_amount_minor }),
     ...(input.discount_minor === undefined ? {} : { discount_minor: input.discount_minor }),

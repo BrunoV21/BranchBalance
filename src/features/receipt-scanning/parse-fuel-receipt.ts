@@ -1,7 +1,7 @@
 import type { CurrencyCode, FuelType } from '@/domain/types';
 
 import { FuelReceiptReviewDraftSchema, type FuelReceiptReviewDraft, type OcrBlock, type OcrResult } from './receipt-types';
-import { maxX, maxY, minX, minY, minorToInput, parseNonnegativeMinorAmount, parseReceiptCurrency, parseReceiptDate } from './parse-receipt';
+import { maxX, maxY, minX, minY, minorToInput, parseNonnegativeMinorAmount, parseReceiptCurrency, parseReceiptDate, parseReceiptTime } from './parse-receipt';
 
 const paidLabel = /\b(amount\s+paid|total\s+paid|valor\s+pago|montante\s+pago|a\s+pagar|paid|pagou)\b/i;
 const grossLabel = /\b(gross|bruto|pre[- ]?discount|antes\s+desconto|valor\s+total|total)\b/i;
@@ -29,7 +29,9 @@ export function buildFuelReceiptExpensePrefill(result: OcrResult, groupCurrency:
   const discount = labeledMoney(blocks, discountLabel, result.height, true);
   const litres = labeledDecimal(blocks, litreLabel, 3);
   const unitPrice = labeledDecimal(blocks, unitPriceLabel, 6);
-  const date = blocks.map((block) => ({ value: parseReceiptDate(block.text, currency.value), confidence: block.confidence })).filter((item): item is { value: string; confidence: number } => Boolean(item.value)).sort((left, right) => right.confidence - left.confidence)[0];
+  const dateCandidates = blocks.map((block) => ({ block, value: parseReceiptDate(block.text, currency.value), confidence: block.confidence })).filter((item): item is { block: OcrBlock; value: string; confidence: number } => Boolean(item.value));
+  const date = dateCandidates.sort((left, right) => right.confidence - left.confidence)[0];
+  const dateTime = extractReceiptDateTime(blocks, date?.value, currency.value);
   const merchant = blocks.filter((block) => maxY(block) / result.height <= 0.34 && block.confidence >= 0.7)
     .map((block) => ({ value: clean(block.text), confidence: block.confidence, y: maxY(block) }))
     .filter((item) => item.value.length >= 2 && /\p{L}/u.test(item.value) && !merchantNoise.test(item.value) && !parseReceiptDate(item.value) && !/\d[,.]\d/.test(item.value))
@@ -60,15 +62,39 @@ export function buildFuelReceiptExpensePrefill(result: OcrResult, groupCurrency:
     description: merchant && merchant.confidence >= threshold ? merchant.value : undefined,
     amount: amountSafe && paidMinor !== undefined ? minorToInput(paidMinor, groupCurrency) : undefined,
     expenseDate: date && date.confidence >= threshold ? date.value : undefined,
+    receiptDateTime: dateTime && dateTime.confidence >= threshold ? dateTime.value : undefined,
     litres: litres && litres.confidence >= threshold ? scaledInput(litres.value, 3) : undefined,
     unitPrice: unitPrice && unitPrice.confidence >= threshold ? scaledInput(unitPrice.value, 6) : undefined,
     gross: gross && gross.confidence >= threshold ? minorToInput(gross.value, groupCurrency) : undefined,
     discount: discount && discount.confidence >= threshold ? minorToInput(discount.value, groupCurrency) : undefined,
     fuelType,
     detectedCurrency: currency.value,
-    confidence: { merchant: merchant?.confidence, date: date?.confidence, total: paid?.confidence, litres: litres?.confidence, unitPrice: unitPrice?.confidence, gross: gross?.confidence, discount: discount?.confidence },
+    confidence: { merchant: merchant?.confidence, date: dateTime?.confidence ?? date?.confidence, total: paid?.confidence, litres: litres?.confidence, unitPrice: unitPrice?.confidence, gross: gross?.confidence, discount: discount?.confidence },
     warnings, modelBundleVersion,
   });
+}
+
+function extractReceiptDateTime(blocks: OcrBlock[], date: string | undefined, currency: CurrencyCode | undefined): { value: string; confidence: number } | undefined {
+  const candidates = blocks.flatMap((block) => {
+    const blockDate = parseReceiptDate(block.text, currency);
+    const time = parseReceiptTime(block.text);
+    if (blockDate && time) return [{ value: `${blockDate}T${time}`, confidence: block.confidence }];
+    return [];
+  });
+  if (date) {
+    const dateBlock = blocks.find((block) => parseReceiptDate(block.text, currency) === date);
+    if (dateBlock) {
+      const dateCenter = (minY(dateBlock) + maxY(dateBlock)) / 2;
+      for (const block of blocks) {
+        const time = parseReceiptTime(block.text);
+        const center = (minY(block) + maxY(block)) / 2;
+        if (time && Math.abs(center - dateCenter) <= Math.max(maxY(block) - minY(block), maxY(dateBlock) - minY(dateBlock), 1) * 2.5) {
+          candidates.push({ value: `${date}T${time}`, confidence: Math.min(dateBlock.confidence, block.confidence) });
+        }
+      }
+    }
+  }
+  return candidates.sort((left, right) => right.confidence - left.confidence)[0];
 }
 
 function labeledMoney(blocks: OcrBlock[], pattern: RegExp, imageHeight: number, allowZero = false): Candidate | undefined {

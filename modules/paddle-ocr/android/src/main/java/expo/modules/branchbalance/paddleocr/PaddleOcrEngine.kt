@@ -20,10 +20,20 @@ import org.opencv.core.Size
 import org.opencv.imgproc.Imgproc
 import java.io.Closeable
 import java.nio.FloatBuffer
+import kotlin.math.atan2
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+
+internal fun orderQuadrilateralPoints(points: List<Point>): List<Point> {
+  require(points.size == 4)
+  val centerX = points.sumOf { it.x } / points.size
+  val centerY = points.sumOf { it.y } / points.size
+  val clockwise = points.sortedBy { atan2(it.y - centerY, it.x - centerX) }
+  val start = clockwise.indices.minBy { clockwise[it].x + clockwise[it].y }
+  return clockwise.indices.map { clockwise[(start + it) % clockwise.size] }
+}
 
 internal class PaddleOcrEngine(
   private val context: Context,
@@ -62,11 +72,12 @@ internal class PaddleOcrEngine(
         try {
           if (shouldRotate(crop, isCancelled)) Core.rotate(crop, crop, Core.ROTATE_180)
           val recognized = recognizeLine(crop, profile, isCancelled)
-          if (recognized.text.isNotBlank()) {
+          val points = serializedPoints(box, original.cols(), original.rows())
+          if (recognized.text.isNotBlank() && recognized.confidence.isFinite() && points != null) {
             blocks += mapOf(
               "text" to recognized.text.take(256),
               "confidence" to recognized.confidence.coerceIn(0.0, 1.0),
-              "points" to box.map { point -> mapOf("x" to point.x.coerceIn(0.0, original.cols().toDouble()), "y" to point.y.coerceIn(0.0, original.rows().toDouble())) },
+              "points" to points,
             )
           }
         } finally {
@@ -119,7 +130,7 @@ internal class PaddleOcrEngine(
           val expanded = RotatedRect(rect.center, Size(rect.size.width + 2 * distance, rect.size.height + 2 * distance), rect.angle)
           val rawPoints = arrayOf(Point(), Point(), Point(), Point())
           expanded.points(rawPoints)
-          orderPoints(rawPoints.map { Point(it.x * scaleX, it.y * scaleY) })
+          orderQuadrilateralPoints(rawPoints.map { Point(it.x * scaleX, it.y * scaleY) })
         } finally {
           contour.release()
         }
@@ -219,7 +230,7 @@ internal class PaddleOcrEngine(
   }
 
   private fun perspectiveCrop(image: Mat, raw: List<Point>): Mat {
-    val points = orderPoints(raw)
+    val points = orderQuadrilateralPoints(raw)
     val width = max(distance(points[0], points[1]), distance(points[2], points[3])).roundToInt().coerceAtLeast(1)
     val height = max(distance(points[0], points[3]), distance(points[1], points[2])).roundToInt().coerceAtLeast(1)
     val source = MatOfPoint2f(*points.toTypedArray())
@@ -231,12 +242,18 @@ internal class PaddleOcrEngine(
     return crop
   }
 
-  private fun orderPoints(points: List<Point>): List<Point> {
-    val topLeft = points.minBy { it.x + it.y }
-    val bottomRight = points.maxBy { it.x + it.y }
-    val topRight = points.maxBy { it.x - it.y }
-    val bottomLeft = points.minBy { it.x - it.y }
-    return listOf(topLeft, topRight, bottomRight, bottomLeft)
+  private fun serializedPoints(points: List<Point>, imageWidth: Int, imageHeight: Int): List<Map<String, Double>>? {
+    val clipped = orderQuadrilateralPoints(points).map { point ->
+      Point(point.x.coerceIn(0.0, imageWidth.toDouble()), point.y.coerceIn(0.0, imageHeight.toDouble()))
+    }
+    if (clipped.any { !it.x.isFinite() || !it.y.isFinite() }) return null
+    val doubledArea = kotlin.math.abs(clipped.indices.sumOf { index ->
+      val point = clipped[index]
+      val next = clipped[(index + 1) % clipped.size]
+      point.x * next.y - next.x * point.y
+    })
+    if (doubledArea < 2.0) return null
+    return clipped.map { point -> mapOf("x" to point.x, "y" to point.y) }
   }
 
   private fun distance(left: Point, right: Point) = kotlin.math.hypot(left.x - right.x, left.y - right.y)

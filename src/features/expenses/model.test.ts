@@ -37,7 +37,7 @@ describe('expense form model', () => {
   });
 
   it('builds integer Fuel enrichment and fixes category to Transport', () => {
-    const expense = buildNewExpense({ description: 'Station', amount: '36.01', category: null, paymentMethod: 'card', paidBy: 'alice', splitType: 'just_me', participants: ['alice'], expenseDate: '2026-07-15', fuelDetails: { litres: '24.500', unitPrice: '1.633', gross: '40.01', discount: '4.00', fuelType: 'diesel' } }, '00000000-0000-4000-8000-000000000011', 'EUR', members, 'alice', clock, 'fuel');
-    expect(expense).toMatchObject({ category: 'transport', amount_minor: 3601, shares_minor: { alice: 3601 }, type_data: { volume_millilitres: 24500, unit_price_micros_per_litre: 1633000, gross_amount_minor: 4001, discount_minor: 400, fuel_type: 'diesel' } });
+    const expense = buildNewExpense({ description: 'Station', amount: '36.01', category: null, paymentMethod: 'card', paidBy: 'alice', splitType: 'just_me', participants: ['alice'], expenseDate: '2026-07-15', fuelDetails: { litres: '24.500', unitPrice: '1.633', gross: '40.01', discount: '4.00', fuelType: 'diesel', receiptDateTime: '2026-07-15T12:14' } }, '00000000-0000-4000-8000-000000000011', 'EUR', members, 'alice', clock, 'fuel');
+    expect(expense).toMatchObject({ category: 'transport', amount_minor: 3601, shares_minor: { alice: 3601 }, type_data: { volume_millilitres: 24500, receipt_datetime: '2026-07-15T12:14', unit_price_micros_per_litre: 1633000, gross_amount_minor: 4001, discount_minor: 400, fuel_type: 'diesel' } });
   });
 });

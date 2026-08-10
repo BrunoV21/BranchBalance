@@ -22,7 +22,7 @@ export const receiptProfileRegistry = {
   fuel_v1: {
     id: 'fuel_v1',
     label: 'Fuel receipt',
-    scope: 'Station, amount paid, date, litres, printed price, gross total, discount, and fuel type',
+    scope: 'Station, amount paid, receipt date/time, litres, printed price, gross total, discount, and fuel type',
     parse: buildFuelReceiptExpensePrefill,
   },
 } as const satisfies Record<ReceiptProfileId, ReceiptProfileDefinition>;

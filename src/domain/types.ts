@@ -118,6 +118,8 @@ export interface FuelExpenseDataV1 {
   schema_version: 1;
   type: 'fuel';
   volume_millilitres: number;
+  /** Local wall-clock date/time printed on the receipt; no timezone is implied. */
+  receipt_datetime?: string;
   unit_price_micros_per_litre?: number;
   gross_amount_minor?: number;
   discount_minor?: number;

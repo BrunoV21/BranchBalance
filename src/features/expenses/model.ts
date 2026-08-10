@@ -34,6 +34,7 @@ export interface FuelExpenseDraft {
   gross: string;
   discount: string;
   fuelType: FuelType | null;
+  receiptDateTime?: string;
 }
 
 function validateDraft(draft: ExpenseDraft, currency: CurrencyCode, members: Member[], groupType: KnownGroupType = 'trip') {
@@ -96,13 +97,14 @@ export function buildLineItems(rows: readonly ExpenseLineItemDraft[], currency: 
 }
 
 export function buildFuelTypeData(draft: FuelExpenseDraft, currency: CurrencyCode, amountMinor: number): FuelExpenseDataV1 | undefined {
-  const hasDetails = [draft.litres, draft.unitPrice, draft.gross, draft.discount].some((value) => value.trim()) || draft.fuelType !== null;
+  const hasDetails = [draft.litres, draft.unitPrice, draft.gross, draft.discount].some((value) => value.trim()) || draft.fuelType !== null || Boolean(draft.receiptDateTime);
   if (!hasDetails) return undefined;
   if (!draft.litres.trim()) throw new DomainValidationError('Enter litres or clear all optional Fuel details.', 'litres');
   const data: FuelExpenseDataV1 = {
     schema_version: 1,
     type: 'fuel',
     volume_millilitres: parseScaledPositiveDecimal(draft.litres, 3, 'Litres'),
+    ...(draft.receiptDateTime ? { receipt_datetime: validateReceiptDateTime(draft.receiptDateTime) } : {}),
     ...(draft.unitPrice.trim() ? { unit_price_micros_per_litre: parseScaledPositiveDecimal(draft.unitPrice, 6, 'Printed price per litre') } : {}),
     ...(draft.gross.trim() ? { gross_amount_minor: parseAmountToMinor(draft.gross, currency) } : {}),
     ...(draft.discount.trim() ? { discount_minor: parseNonnegativeMinor(draft.discount, currency, 'Discount') } : {}),
@@ -121,7 +123,14 @@ export function fuelDraftFromData(data: FuelExpenseDataV1 | undefined, currency:
     gross: data.gross_amount_minor === undefined ? '' : minorForInput(data.gross_amount_minor, currency),
     discount: data.discount_minor === undefined ? '' : minorForInput(data.discount_minor, currency),
     fuelType: data.fuel_type ?? null,
+    ...(data.receipt_datetime ? { receiptDateTime: data.receipt_datetime } : {}),
   };
+}
+
+function validateReceiptDateTime(value: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) throw new DomainValidationError('Receipt date and time must use YYYY-MM-DDTHH:mm.', 'receiptDateTime');
+  if (!isCalendarDate(value.slice(0, 10))) throw new DomainValidationError('Receipt date and time must contain a real date.', 'receiptDateTime');
+  return value;
 }
 
 export function lineItemDraftsFrom(items: readonly ExpenseLineItem[] | undefined, currency: CurrencyCode): ExpenseLineItemDraft[] | undefined {
