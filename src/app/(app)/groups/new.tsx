@@ -36,7 +36,7 @@ export default function NewGroupScreen() {
     <Card><Body muted>Private repository</Body><Body>{repository}</Body></Card>
     <Body>Currency</Body>
     <View style={{ flexDirection: 'row', gap: 8 }}>{(Object.keys(currencies) as CurrencyCode[]).map((code) => <Pressable key={code} accessibilityRole="radio" accessibilityState={{ selected: currency === code }} onPress={() => setCurrency(code)} style={{ flex: 1, minHeight: 48, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: currency === code ? colors.accent : colors.surface, borderColor: colors.border, borderWidth: 1 }}><Text style={{ color: currency === code ? colors.accentText : colors.text, fontWeight: '800' }}>{code}</Text></Pressable>)}</View>
-    <Body muted>The currency cannot be changed after creation in Phase 1.</Body>
+    <Body muted>Choose carefully—you won’t be able to change the currency later.</Body>
     {error ? <Banner tone="error">{error}</Banner> : null}
     <Button disabled={!canCreateGroups} loading={loading} onPress={() => void submit()}>Create private group</Button>
   </Screen>;
