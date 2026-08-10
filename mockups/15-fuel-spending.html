@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>BranchBalance — Fuel spending</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<main class="app-page">
+  <section class="phone">
+    <div class="statusbar"><span>9:41</span><div class="status-icons"><span>5G</span><span class="status-dot"></span><span class="battery"></span></div></div>
+    <header class="app-header">
+      <a class="icon-button" href="03-groups.html" aria-label="Back to groups"><svg class="icon" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"></path></svg></a>
+      <div class="header-main" style="flex:1"><div class="group-context"><svg class="icon" viewBox="0 0 24 24"><path d="M5 21V4h10v17M7 7h6v5H7z"></path></svg><span>Fuel</span><span class="group-context-separator">·</span><span class="group-context-name">Family car fuel</span></div><h1 class="app-title">Spending</h1></div>
+      <div class="header-actions"><a class="icon-button" href="16-fuel-spending-plan.html" aria-label="Edit monthly fuel plan"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6M4.6 15a1.7 1.7 0 0 0-.6-1v-4a1.7 1.7 0 0 0 .6-1A1.7 1.7 0 0 0 4.26 7l2.83-2.83A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6h4a1.7 1.7 0 0 0 1 .6A1.7 1.7 0 0 0 17 4.26L19.74 7A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 .6 1v4a1.7 1.7 0 0 0-.6 1Z"></path></svg></a><button class="icon-button" data-theme-toggle></button></div>
+    </header>
+
+    <div class="content flush">
+      <div class="card month-selector">
+        <button class="icon-button" type="button" data-toast-message="July 2026 selected" aria-label="Previous month"><svg class="icon" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"></path></svg></button>
+        <div class="month-current"><strong>August 2026</strong><span>10 expenses · current month</span></div>
+        <button class="icon-button" type="button" disabled aria-label="Next month unavailable"><svg class="icon" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"></path></svg></button>
+      </div>
+
+      <section class="section">
+        <div class="fuel-summary-grid">
+          <div class="fuel-stat"><div class="fuel-stat-label">Paid this month</div><div class="fuel-stat-value">€138.80</div><div class="fuel-stat-note">€111.20 under limit</div></div>
+          <div class="fuel-stat"><div class="fuel-stat-label">Litres represented</div><div class="fuel-stat-value">71.98 L</div><div class="fuel-stat-note">8 of 10 expenses</div></div>
+          <div class="fuel-stat"><div class="fuel-stat-label">Weighted paid price</div><div class="fuel-stat-value">€1.606/L</div><div class="fuel-stat-note">Not an average of labels</div></div>
+          <div class="fuel-stat"><div class="fuel-stat-label">Explicit savings</div><div class="fuel-stat-value">€10.20</div><div class="fuel-stat-note">7 eligible receipts</div></div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-header"><span class="section-title">Monthly spend vs limit</span><a class="section-link" href="16-fuel-spending-plan.html">Edit limit</a></div>
+        <div class="card analytics-card">
+          <div class="analytics-head"><div><div class="analytics-kicker">March–August 2026 · EUR</div><div class="analytics-conclusion positive">August is €111.20 under its €250 limit</div><div class="analytics-copy">Each month stands alone; unused limit never rolls over.</div></div><span class="pill success">56% used</span></div>
+          <div class="mini-chart" role="img" aria-label="Monthly paid spending and applicable limit from March through August 2026. April was over limit. August spending is 138 euros and 80 cents against a 250 euro limit.">
+            <div class="mini-chart-column"><div class="mini-chart-bars"><i style="--bar:70%"></i><i class="limit" style="--bar:79%"></i></div><span>Mar</span></div>
+            <div class="mini-chart-column"><div class="mini-chart-bars"><i style="--bar:83%"></i><i class="limit" style="--bar:79%"></i></div><span>Apr</span></div>
+            <div class="mini-chart-column"><div class="mini-chart-bars"><i style="--bar:61%"></i><i class="limit" style="--bar:79%"></i></div><span>May</span></div>
+            <div class="mini-chart-column"><div class="mini-chart-bars"><i style="--bar:74%"></i><i class="limit" style="--bar:79%"></i></div><span>Jun</span></div>
+            <div class="mini-chart-column"><div class="mini-chart-bars"><i style="--bar:62%"></i><i class="limit" style="--bar:79%"></i></div><span>Jul</span></div>
+            <div class="mini-chart-column selected"><div class="mini-chart-bars"><i style="--bar:50%"></i><i class="limit" style="--bar:90%"></i></div><span>Aug</span></div>
+          </div>
+          <div class="fuel-chart-legend"><span><i></i>Paid</span><span><i class="limit"></i>Applicable limit</span></div>
+          <table class="data-table" aria-label="Monthly spend and limit values"><thead><tr><th>Month</th><th>Paid</th><th>Limit</th><th>Status</th></tr></thead><tbody><tr><td><strong>Jun</strong></td><td>€205.10</td><td>€220</td><td>€14.90 left</td></tr><tr><td><strong>Jul</strong></td><td>€171.25</td><td>€220</td><td>€48.75 left</td></tr><tr><td><strong>Aug</strong></td><td>€138.80</td><td>€250</td><td>€111.20 left</td></tr></tbody></table>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-header"><span class="section-title">Fuel volume</span><span class="help">Eligible expenses only</span></div>
+        <div class="card analytics-card">
+          <div class="analytics-head"><div><div class="analytics-kicker">Volume by month · litres</div><div class="analytics-conclusion">71.98 L recorded in August</div><div class="analytics-copy">Two amount-only expenses are excluded from volume.</div></div></div>
+          <div class="daily-chart" style="grid-template-columns:repeat(6,1fr);height:104px" role="img" aria-label="Recorded volume from March through August: 103, 118, 96, 110, 91 and 71.98 litres.">
+            <div class="daily-column"><div class="daily-bar-area"><span style="--bar:87%"></span></div><div class="daily-amount">103 L</div><div class="daily-date">Mar</div></div>
+            <div class="daily-column"><div class="daily-bar-area"><span style="--bar:100%"></span></div><div class="daily-amount">118 L</div><div class="daily-date">Apr</div></div>
+            <div class="daily-column"><div class="daily-bar-area"><span style="--bar:81%"></span></div><div class="daily-amount">96 L</div><div class="daily-date">May</div></div>
+            <div class="daily-column"><div class="daily-bar-area"><span style="--bar:93%"></span></div><div class="daily-amount">110 L</div><div class="daily-date">Jun</div></div>
+            <div class="daily-column"><div class="daily-bar-area"><span style="--bar:77%"></span></div><div class="daily-amount">91 L</div><div class="daily-date">Jul</div></div>
+            <div class="daily-column today"><div class="daily-bar-area"><span style="--bar:61%"></span></div><div class="daily-amount">72 L</div><div class="daily-date">Aug</div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-header"><span class="section-title">Unit-price trend</span><span class="help">EUR per litre</span></div>
+        <div class="card analytics-card">
+          <div class="analytics-head"><div><div class="analytics-kicker">Eligible August fill-ups</div><div class="analytics-conclusion">Discounts lowered the weighted price by €0.142/L</div><div class="analytics-copy">Printed pump price and effective paid price are weighted separately.</div></div></div>
+          <svg class="fuel-line-chart" viewBox="0 0 320 128" role="img" aria-label="Printed and effective price per litre for six eligible August fill-ups. Effective prices are below printed prices on discounted receipts.">
+            <line class="fuel-line-grid" x1="30" y1="20" x2="306" y2="20"></line><line class="fuel-line-grid" x1="30" y1="60" x2="306" y2="60"></line><line class="fuel-line-grid" x1="30" y1="100" x2="306" y2="100"></line>
+            <text x="1" y="23">1.85</text><text x="1" y="63">1.65</text><text x="1" y="103">1.45</text>
+            <path class="fuel-line-printed" d="M36 71 L87 54 L138 64 L189 39 L240 52 L291 63"></path>
+            <path class="fuel-line-effective" d="M36 94 L87 66 L138 81 L189 40 L240 76 L291 91"></path>
+            <circle class="fuel-point printed" cx="36" cy="71" r="3"></circle><circle class="fuel-point printed" cx="87" cy="54" r="3"></circle><circle class="fuel-point printed" cx="138" cy="64" r="3"></circle><circle class="fuel-point printed" cx="189" cy="39" r="3"></circle><circle class="fuel-point printed" cx="240" cy="52" r="3"></circle><circle class="fuel-point printed" cx="291" cy="63" r="3"></circle>
+            <circle class="fuel-point effective" cx="36" cy="94" r="3"></circle><circle class="fuel-point effective" cx="87" cy="66" r="3"></circle><circle class="fuel-point effective" cx="138" cy="81" r="3"></circle><circle class="fuel-point effective" cx="189" cy="40" r="3"></circle><circle class="fuel-point effective" cx="240" cy="76" r="3"></circle><circle class="fuel-point effective" cx="291" cy="91" r="3"></circle>
+            <text x="30" y="122">1 Aug</text><text x="272" y="122">10 Aug</text>
+          </svg>
+          <div class="fuel-chart-legend"><span><i style="background:var(--accent)"></i>Printed</span><span><i></i>Effective paid</span></div>
+          <table class="data-table" aria-label="Recent eligible unit prices"><thead><tr><th>Fill-up</th><th>Printed</th><th>Effective</th><th>Discount</th></tr></thead><tbody><tr><td><strong>Pingo Doce</strong></td><td>€1.633</td><td>€1.470</td><td>€4.00</td></tr><tr><td><strong>Galp</strong></td><td>€1.779</td><td>€1.779</td><td>€0.00</td></tr></tbody></table>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-header"><span class="section-title">Savings</span><span class="help">7 explicit receipts</span></div>
+        <div class="card">
+          <div class="metric-grid"><div class="metric"><div class="metric-label">Gross before discounts</div><div class="metric-value">€125.81</div></div><div class="metric"><div class="metric-label">Actually paid</div><div class="metric-value">€115.61</div></div></div>
+          <div class="divider"></div>
+          <div class="budget-foot"><span>Explicit discount total</span><strong style="color:var(--positive)">€10.20 saved</strong></div>
+          <p class="help" style="margin:10px 0 0">The other 3 expenses are excluded; missing discount data is never assumed to mean zero.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-header"><span class="section-title">Stations</span><span class="help">Normalized description</span></div>
+        <div class="card">
+          <table class="data-table" aria-label="August station totals"><thead><tr><th>Station</th><th>Paid</th><th>Litres</th><th>Fills</th></tr></thead><tbody><tr><td><strong>Pingo Doce</strong></td><td>€58.51</td><td>39.00</td><td>3</td></tr><tr><td><strong>Galp</strong></td><td>€42.70</td><td>24.00</td><td>2</td></tr><tr><td><strong>BP Restelo</strong></td><td>€23.20</td><td>8.98</td><td>2</td></tr><tr><td><strong>Other</strong></td><td>€14.39</td><td>—</td><td>3</td></tr></tbody></table>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-header"><span class="section-title">Data coverage</span><span class="pill">No estimates</span></div>
+        <div class="card coverage-list">
+          <div class="coverage-row"><span>Monthly spend &amp; limit</span><strong>10 / 10</strong><small>Every valid amount is included.</small></div>
+          <div class="coverage-row"><span>Volume &amp; effective price</span><strong>8 / 10</strong><small>2 expenses are missing litres.</small></div>
+          <div class="coverage-row"><span>Printed unit price trend</span><strong>6 / 10</strong><small>2 eligible fills are missing printed unit price.</small></div>
+          <div class="coverage-row"><span>Discount savings</span><strong>7 / 10</strong><small>3 receipts do not state a trustworthy discount.</small></div>
+        </div>
+      </section>
+
+      <section class="section" id="expenses">
+        <div class="section-header"><span class="section-title">Expense explorer</span><span class="pill">August</span></div>
+        <div class="card">
+          <div class="filter-grid">
+            <div class="field"><label for="fuel-filter-station">Station</label><select id="fuel-filter-station" class="select"><option>All stations</option><option>Pingo Doce</option><option>Galp</option><option>BP Restelo</option></select></div>
+            <div class="field"><label for="fuel-filter-details">Fuel details</label><select id="fuel-filter-details" class="select"><option>Complete &amp; incomplete</option><option>Includes litres</option><option>Missing litres</option></select></div>
+          </div>
+        </div>
+        <div class="card" style="margin-top:10px">
+          <a class="expense-row" href="18-fuel-expense.html"><div class="date-chip"><b>10</b><span>Aug</span></div><div class="expense-main"><div class="expense-title">Pingo Doce</div><div class="expense-meta">24.50 L · Diesel · Alex paid</div></div><div class="expense-price">€36.01</div></a>
+          <a class="expense-row" href="18-fuel-expense.html"><div class="date-chip"><b>07</b><span>Aug</span></div><div class="expense-main"><div class="expense-title">Galp</div><div class="expense-meta">24.00 L · Petrol · Maya paid</div></div><div class="expense-price">€42.70</div></a>
+          <a class="expense-row" href="18-fuel-expense.html"><div class="date-chip"><b>03</b><span>Aug</span></div><div class="expense-main"><div class="expense-title">BP Restelo</div><div class="expense-meta">Amount only · details incomplete</div></div><div class="expense-price">€18.40</div></a>
+        </div>
+      </section>
+    </div>
+
+    <a class="floating-add" href="18-fuel-expense.html" aria-label="Add fuel expense"><svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg></a>
+    <nav class="bottom-nav group-nav" aria-label="Group navigation">
+      <a class="nav-item" href="14-fuel-overview.html"><svg class="icon" viewBox="0 0 24 24"><path d="M3 12 12 3l9 9"></path><path d="M5 10v10h14V10"></path></svg><span>Overview</span></a>
+      <a class="nav-item active" href="15-fuel-spending.html" aria-current="page"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 3v9l7.5 4.5"></path></svg><span>Spending</span></a>
+      <a class="nav-item" href="09-balances.html?group=fuel"><svg class="icon" viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"></path></svg><span>Balances</span></a>
+      <a class="nav-item" href="08-members.html?group=fuel"><svg class="icon" viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"></circle><path d="M3 21v-2a6 6 0 0 1 12 0v2M16 3.13a4 4 0 0 1 0 7.75M21 21v-2a6 6 0 0 0-4.5-5.8"></path></svg><span>Members</span></a>
+    </nav>
+  </section>
+</main>
+<script src="script.js"></script>
+</body>
+</html>

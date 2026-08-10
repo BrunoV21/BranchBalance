@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>BranchBalance — Fuel monthly plan</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<main class="app-page">
+  <section class="phone">
+    <div class="statusbar"><span>9:41</span><div class="status-icons"><span>5G</span><span class="status-dot"></span><span class="battery"></span></div></div>
+    <header class="app-header">
+      <a class="icon-button" href="15-fuel-spending.html" aria-label="Back to fuel spending"><svg class="icon" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"></path></svg></a>
+      <div class="header-main" style="flex:1"><div class="group-context"><svg class="icon" viewBox="0 0 24 24"><path d="M5 21V4h10v17M7 7h6v5H7z"></path></svg><span>Fuel</span><span class="group-context-separator">·</span><span class="group-context-name">Family car fuel</span></div><h1 class="app-title">Monthly plan</h1></div>
+      <button class="icon-button" data-theme-toggle></button>
+    </header>
+
+    <div class="content">
+      <form class="form">
+        <section class="settings-section">
+          <div class="settings-title-row"><h2 class="settings-section-title">Recurring monthly limit</h2><span class="group-type-label fuel"><svg class="icon" viewBox="0 0 24 24"><path d="M5 21V4h10v17M7 7h6v5H7z"></path></svg>Fuel</span></div>
+          <p class="settings-section-copy">Set informational limits by calendar month. A new value starts in its effective month and remains active until another entry replaces it.</p>
+          <div class="field-pair">
+            <div class="field"><label for="effective-month">Effective month</label><input id="effective-month" class="input" type="month" value="2026-08"></div>
+            <div class="field"><label for="monthly-limit">Monthly limit</label><div class="input-row" style="grid-template-columns:1fr 68px"><input id="monthly-limit" class="input" value="250.00" inputmode="decimal"><select class="select" aria-label="Limit currency"><option>EUR</option></select></div></div>
+          </div>
+          <div class="consistency-card"><svg class="icon" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"></path></svg><span><strong>August is using €250.</strong><br>€138.80 is recorded, leaving €111.20 this month.</span></div>
+        </section>
+
+        <section class="settings-section">
+          <div class="settings-title-row"><h2 class="settings-section-title">Limit schedule</h2><span class="pill">2 entries</span></div>
+          <p class="settings-section-copy">Past months keep the limit members saw at the time. Updating August replaces August; choosing a future month adds a new entry.</p>
+          <div class="monthly-schedule">
+            <div class="monthly-limit-row"><div><strong>August 2026 onward</strong><span>Current entry · created by Alex</span></div><input class="input" value="€250.00" aria-label="August 2026 monthly limit"></div>
+            <div class="monthly-limit-row"><div><strong>November 2026 onward</strong><span>Scheduled future change</span></div><input class="input" value="€300.00" aria-label="November 2026 monthly limit"></div>
+          </div>
+          <div class="schedule-history" style="margin-top:13px">March–July 2026 used the previous €220 limit. Historical applicability remains visible in Spending analytics.</div>
+        </section>
+
+        <div class="callout accent"><svg class="icon" viewBox="0 0 24 24"><path d="M8 2v3M16 2v3M3 9h18M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2Z"></path></svg><span><strong>Calendar months, no rollover.</strong><br>Unused August limit does not increase September’s limit. Expenses count in the month of their stored date.</span></div>
+
+        <div class="callout"><svg class="icon" viewBox="0 0 24 24"><path d="M12 8v4l3 3"></path><circle cx="12" cy="12" r="9"></circle></svg><span>Last updated by Alex today at 09:36. Limits guide spending but never block an expense.</span></div>
+
+        <a class="btn btn-primary btn-block" href="15-fuel-spending.html">Save monthly plan</a>
+
+        <div class="danger-zone"><h3>Remove monthly plan</h3><p>Expenses, fuel details, balances, and derived analytics stay intact. Monthly limit comparisons disappear.</p><button type="button" class="btn btn-danger btn-block" data-toast-message="Removal confirmation would open here">Remove plan</button></div>
+      </form>
+    </div>
+    <div class="toast"></div>
+  </section>
+</main>
+<script src="script.js"></script>
+</body>
+</html>

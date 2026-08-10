@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>BranchBalance — Review fuel expense</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<main class="app-page">
+  <section class="phone">
+    <div class="statusbar"><span>9:41</span><div class="status-icons"><span>5G</span><span class="status-dot"></span><span class="battery"></span></div></div>
+    <header class="app-header">
+      <a class="icon-button" href="14-fuel-overview.html" aria-label="Cancel fuel expense"><svg class="icon" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"></path></svg></a>
+      <div class="header-main" style="flex:1"><div class="group-context"><svg class="icon" viewBox="0 0 24 24"><path d="M5 21V4h10v17M7 7h6v5H7z"></path></svg><span>Fuel</span><span class="group-context-separator">·</span><span class="group-context-name">Family car fuel</span></div><h1 class="app-title" data-fuel-expense-title>Review extracted fuel</h1></div>
+      <button class="icon-button" data-theme-toggle></button>
+    </header>
+
+    <div class="content">
+      <form class="form" data-segment-scope data-fuel-expense-form>
+        <div class="callout scan-result-notice" data-fuel-scan-notice>
+          <svg class="icon" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path><path d="m9 12 2 2 4-4"></path></svg>
+          <span class="scan-result-copy"><strong>Fuel receipt read on this device.</strong><br>Seven fields were detected by Fuel profile v1.0. Review every value before saving.<span class="scan-result-meta">EUR matches this group · photo will not be attached</span></span>
+          <a class="scan-result-retake" href="17-fuel-scan-receipt.html">Retake</a>
+        </div>
+
+        <section class="extraction-preview-panel fuel-extraction-preview" data-fuel-extraction-preview aria-labelledby="fuel-extraction-title">
+          <div class="extraction-preview-head"><div><h2 id="fuel-extraction-title" data-fuel-extraction-title>Editable Fuel OCR preview</h2><p data-fuel-extraction-copy>All seven extracted values are grouped here. Correct anything that looks wrong before saving.</p></div><span class="group-type-label fuel"><svg class="icon" viewBox="0 0 24 24"><path d="M5 21V4h10v17M7 7h6v5H7z"></path></svg>Fuel v1.0</span></div>
+
+        <div class="field detected-field">
+          <label for="fuel-description">Station <span class="detected-badge">Detected · 96%</span></label>
+          <input id="fuel-description" class="input" value="Pingo Doce" placeholder="Station or merchant">
+        </div>
+
+        <div class="field detected-field">
+          <label for="fuel-paid">Amount paid <span class="detected-badge">Detected · 99%</span></label>
+          <div class="input-row"><input id="fuel-paid" class="input amount-input" value="36.01" inputmode="decimal"><select class="select" aria-label="Currency"><option>EUR</option></select></div>
+          <div class="help"><strong>This is the shared expense amount.</strong> Balances never use the larger pre-discount total.</div>
+        </div>
+
+        <div class="field detected-field">
+          <label for="fuel-date">Date <span class="detected-badge">Detected · 97%</span></label>
+          <input id="fuel-date" class="input" type="date" value="2026-08-10">
+        </div>
+
+        <section class="fuel-fields">
+          <div class="fuel-fields-title"><h2>Extracted fuel details</h2><span class="pill success" data-fuel-consistency-pill><span class="dot"></span>Arithmetic matches</span></div>
+          <p class="fuel-fields-copy">Optional enrichment for volume, price, savings, and station analytics. Saving without it remains possible.</p>
+
+          <div class="field-pair">
+            <div class="field detected-field"><label for="fuel-litres">Litres <span class="detected-badge">98%</span></label><div class="input-with-unit"><input id="fuel-litres" class="input" value="24.500" inputmode="decimal"><span class="input-unit">L</span></div></div>
+            <div class="field detected-field"><label for="fuel-unit-price">Printed price <span class="detected-badge">98%</span></label><div class="input-with-unit"><input id="fuel-unit-price" class="input" value="1.633" inputmode="decimal"><span class="input-unit">€/L</span></div></div>
+          </div>
+
+          <div class="field-pair">
+            <div class="field detected-field"><label for="fuel-gross">Pre-discount total <span class="detected-badge">97%</span></label><div class="input-with-unit"><input id="fuel-gross" class="input" value="40.01" inputmode="decimal"><span class="input-unit">EUR</span></div></div>
+            <div class="field detected-field"><label for="fuel-discount">Discount <span class="detected-badge">99%</span></label><div class="input-with-unit"><input id="fuel-discount" class="input" value="4.00" inputmode="decimal"><span class="input-unit">EUR</span></div></div>
+          </div>
+
+          <div class="field" style="margin-top:13px"><label for="fuel-type">Fuel type</label><select id="fuel-type" class="select"><option>Petrol</option><option selected>Diesel</option><option>LPG</option><option>Other</option></select><div class="help">Review this classification; receipt evidence does not save it automatically.</div></div>
+
+          <div class="consistency-card" data-fuel-consistency><svg class="icon" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"></path></svg><span><strong>Totals are consistent.</strong><br>€40.01 gross − €4.00 discount = €36.01 paid. Litres × €1.633/L rounds within €0.01 of gross.</span></div>
+        </section>
+        </section>
+
+        <div class="callout scan-manual-note"><svg class="icon" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01"></path><circle cx="12" cy="12" r="9"></circle></svg><span><strong>Now finish the manual choices.</strong><br>Payment method, payer, and split remain your choices.</span></div>
+
+        <div class="field">
+          <span class="field-label">Category</span>
+          <div class="fixed-category"><span class="category-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M5 17h14M6 17l1-9h10l1 9M8 20h.01M16 20h.01M7 12h10"></path></svg></span><div><strong>Transport</strong><span>Fixed for Fuel groups</span></div></div>
+        </div>
+
+        <fieldset class="field"><legend>Payment method</legend><div class="choice-grid payment">
+          <label class="choice-card"><input type="radio" name="fuel-payment"><span class="choice-body"><span class="choice-icon"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M3 10h18"></path></svg></span><span>Card</span></span></label>
+          <label class="choice-card"><input type="radio" name="fuel-payment"><span class="choice-body"><span class="choice-icon"><svg class="icon" viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="2"></rect><circle cx="12" cy="12" r="2"></circle></svg></span><span>Cash</span></span></label>
+          <label class="choice-card"><input type="radio" name="fuel-payment"><span class="choice-body"><span class="choice-icon"><svg class="icon" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle></svg></span><span>Other</span></span></label>
+        </div></fieldset>
+
+        <div class="field"><label for="fuel-payer">Paid by</label><select id="fuel-payer" class="select"><option selected>Alex Kim (you)</option><option>Maya Brown</option></select></div>
+
+        <fieldset class="field"><legend>Split</legend><div class="segmented" data-segment-group><button class="segment active" type="button" data-segment data-target="equal" aria-pressed="true">Equally</button><button class="segment" type="button" data-segment data-target="full" aria-pressed="false">Just me</button></div></fieldset>
+
+        <div class="check-list" data-split-panel="equal">
+          <label class="check-row"><input type="checkbox" checked><span class="avatar sm">AK</span><span class="grow"><strong>Alex Kim</strong><small>€18.01 share</small></span></label>
+          <label class="check-row"><input type="checkbox" checked><span class="avatar sm green">MB</span><span class="grow"><strong>Maya Brown</strong><small>€18.00 share</small></span></label>
+        </div>
+        <div class="callout hidden" data-split-panel="full"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path></svg><span>The full €36.01 is assigned to you. It still counts toward August’s fuel limit.</span></div>
+
+        <div class="callout"><svg class="icon" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path></svg><span>OCR never chooses payer, split, participants, or Save. Fuel details with validation warnings are excluded only from fuel-specific analytics.</span></div>
+
+        <a class="btn btn-primary btn-block" href="14-fuel-overview.html">Save reviewed fuel expense</a>
+      </form>
+    </div>
+  </section>
+</main>
+<script src="script.js"></script>
+</body>
+</html>

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>BranchBalance — Fuel overview</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<main class="app-page">
+  <section class="phone">
+    <div class="statusbar"><span>9:41</span><div class="status-icons"><span>5G</span><span class="status-dot"></span><span class="battery"></span></div></div>
+    <header class="app-header">
+      <a class="icon-button" href="03-groups.html" aria-label="Back to groups"><svg class="icon" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"></path></svg></a>
+      <div class="header-main" style="flex:1">
+        <div class="group-context"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 21V4h10v17M7 7h6v5H7z"></path></svg><span>Fuel</span><span class="group-context-separator">·</span><span class="group-context-name">Family car fuel</span></div>
+        <h1 class="app-title">Group overview</h1>
+      </div>
+      <div class="header-actions"><button class="icon-button" data-toast-message="Refreshing from GitHub…" aria-label="Refresh group"><svg class="icon" viewBox="0 0 24 24"><path d="M20 7h-5V2M4 17h5v5"></path><path d="M5.6 9A8 8 0 0 1 19 5.3L20 7M4 17l1-1.7A8 8 0 0 0 18.4 15"></path></svg></button><button class="icon-button" data-theme-toggle></button></div>
+    </header>
+
+    <div class="content flush">
+      <div class="card month-selector" aria-label="Selected month August 2026">
+        <button class="icon-button" type="button" data-toast-message="July 2026 selected" aria-label="Previous month"><svg class="icon" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"></path></svg></button>
+        <div class="month-current"><strong>August 2026</strong><span>Current calendar month</span></div>
+        <button class="icon-button" type="button" disabled aria-label="Next month unavailable"><svg class="icon" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"></path></svg></button>
+      </div>
+
+      <div class="card hero-card fuel-hero section">
+        <div style="display:flex;justify-content:space-between;align-items:center"><span class="group-type-label fuel"><svg class="icon" viewBox="0 0 24 24"><path d="M5 21V4h10v17M7 7h6v5H7z"></path></svg>Fuel monthly</span><span class="help">EUR</span></div>
+        <div class="hero-label" style="margin-top:18px">Paid this month</div>
+        <div class="hero-amount">€138.80</div>
+        <div class="hero-note">€111.20 remaining of your €250 limit</div>
+        <div class="budget-progress" role="img" aria-label="56 percent of August fuel limit used" style="--progress:55.52%"><span></span></div>
+        <div class="fuel-limit-head"><span>10 expenses count toward the limit</span><strong>56% used</strong></div>
+      </div>
+
+      <section class="section">
+        <div class="section-header"><span class="section-title">Fuel snapshot</span><a class="section-link" href="15-fuel-spending.html">View analytics</a></div>
+        <div class="fuel-summary-grid">
+          <div class="fuel-stat"><div class="fuel-stat-label">Fill-ups</div><div class="fuel-stat-value">10</div><div class="fuel-stat-note">All August expenses</div></div>
+          <div class="fuel-stat"><div class="fuel-stat-label">Litres recorded</div><div class="fuel-stat-value">71.98 L</div><div class="fuel-stat-note">8 eligible expenses</div></div>
+          <div class="fuel-stat"><div class="fuel-stat-label">Weighted paid price</div><div class="fuel-stat-value">€1.606/L</div><div class="fuel-stat-note">Eligible paid ÷ litres</div></div>
+          <div class="fuel-stat"><div class="fuel-stat-label">Explicit discounts</div><div class="fuel-stat-value">€10.20</div><div class="fuel-stat-note">7 receipts reported it</div></div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="coverage-statement">
+          <div class="coverage-ring" style="--coverage:80%"><strong>80%</strong></div>
+          <div class="coverage-copy"><strong>8 of 10 expenses include litres</strong><span>Amount-only expenses still count toward monthly spending and balances.</span></div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-header"><span class="section-title">Recent fill-ups</span><a class="section-link" href="15-fuel-spending.html#expenses">See all</a></div>
+        <div class="card">
+          <a class="expense-row" href="18-fuel-expense.html"><div class="date-chip"><b>10</b><span>Aug</span></div><div class="expense-main"><div class="expense-title">Pingo Doce</div><div class="expense-meta">Diesel · 24.50 L · €1.633/L printed</div></div><div class="expense-price">€36.01<small style="color:var(--positive)">saved €4.00</small></div></a>
+          <a class="expense-row" href="18-fuel-expense.html"><div class="date-chip"><b>07</b><span>Aug</span></div><div class="expense-main"><div class="expense-title">Galp</div><div class="expense-meta">Petrol · 24.00 L · €1.779/L</div></div><div class="expense-price">€42.70<small style="color:var(--muted)">no discount</small></div></a>
+          <a class="expense-row" href="18-fuel-expense.html"><div class="date-chip"><b>03</b><span>Aug</span></div><div class="expense-main"><div class="expense-title">BP Restelo</div><div class="expense-meta">Amount only · details incomplete</div></div><div class="expense-price">€18.40<small style="color:var(--warning)">review details</small></div></a>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-header"><span class="section-title">Common group totals</span><a class="section-link" href="09-balances.html?group=fuel">Balances</a></div>
+        <div class="metric-grid"><div class="metric"><div class="metric-label">You paid</div><div class="metric-value">€96.71</div></div><div class="metric"><div class="metric-label">Your balance</div><div class="metric-value" style="color:var(--positive)">+€27.31</div></div></div>
+      </section>
+    </div>
+
+    <div class="floating-expense-split" role="group" aria-label="Add fuel expense options">
+      <a class="floating-expense-main" href="18-fuel-expense.html" aria-label="Add fuel expense manually"><svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg><span>Add fuel</span></a>
+      <a class="floating-expense-scan" href="17-fuel-scan-receipt.html" aria-label="Scan fuel receipt on this device" title="Scan fuel receipt"><svg class="icon" viewBox="0 0 24 24"><path d="M14.5 5 13 3h-2L9.5 5H6a3 3 0 0 0-3 3v9a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3Z"></path><circle cx="12" cy="13" r="4"></circle></svg></a>
+    </div>
+
+    <nav class="bottom-nav group-nav" aria-label="Group navigation">
+      <a class="nav-item active" href="14-fuel-overview.html" aria-current="page"><svg class="icon" viewBox="0 0 24 24"><path d="M3 12 12 3l9 9"></path><path d="M5 10v10h14V10"></path></svg><span>Overview</span></a>
+      <a class="nav-item" href="15-fuel-spending.html"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 3v9l7.5 4.5"></path></svg><span>Spending</span></a>
+      <a class="nav-item" href="09-balances.html?group=fuel"><svg class="icon" viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"></path></svg><span>Balances</span></a>
+      <a class="nav-item" href="08-members.html?group=fuel"><svg class="icon" viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"></circle><path d="M3 21v-2a6 6 0 0 1 12 0v2M16 3.13a4 4 0 0 1 0 7.75M21 21v-2a6 6 0 0 0-4.5-5.8"></path></svg><span>Members</span></a>
+    </nav>
+    <div class="toast"></div>
+  </section>
+</main>
+<script src="script.js"></script>
+</body>
+</html>

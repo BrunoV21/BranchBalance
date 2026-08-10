@@ -21,10 +21,7 @@
       </div>
       <div class="header-actions">
         <a class="icon-button notification-button" href="12-activity.html" aria-label="Activity inbox, new activity">
-          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M4 4h16v13H4z"></path>
-            <path d="M4 13h4l2 3h4l2-3h4"></path>
-          </svg>
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v13H4z"></path><path d="M4 13h4l2 3h4l2-3h4"></path></svg>
           <span class="notification-badge" aria-hidden="true"></span>
         </a>
         <button class="icon-button" data-theme-toggle></button>
@@ -36,8 +33,8 @@
       <div class="card accent hero-card">
         <span class="pill success"><span class="dot"></span>Synced just now</span>
         <div class="hero-label" style="margin-top:18px">Across all groups, you are owed</div>
-        <div class="hero-amount">€127.40</div>
-        <div class="hero-note"><span data-active-group-count>3</span> active groups · 8 people</div>
+        <div class="hero-amount">€41.85</div>
+        <div class="hero-note"><span data-active-group-count>2</span> active groups · Trip and Fuel</div>
       </div>
 
       <div class="section create-group-action">
@@ -56,27 +53,16 @@
         <article class="invitation-card" data-invitation data-group-name="Lisbon weekend">
           <div class="invitation-top">
             <div class="group-icon invitation-icon">
-              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M4 5h16v14H4z"></path>
-                <path d="m4 7 8 6 8-6"></path>
-              </svg>
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z"></path><path d="m4 7 8 6 8-6"></path></svg>
             </div>
             <div class="invitation-heading">
               <div class="group-name">Lisbon weekend</div>
-              <div class="group-meta">GitHub repository invitation</div>
+              <div class="group-meta">@maya-brown · private repository</div>
             </div>
             <span class="pill pending"><span class="dot"></span>Pending</span>
           </div>
 
-          <div class="invitation-details">
-            <div><span>Invited by</span><strong>@maya-brown</strong></div>
-            <div><span>Repository</span><strong>maya-brown/branch-balance-lisbon-weekend</strong></div>
-            <div><span>Access</span><strong>Write · 19 Jul 2026</strong></div>
-          </div>
-
-          <p class="invitation-note">Accept to collaborate on the private repository. BranchBalance will verify the group before adding it to your list.</p>
-
-          <div class="btn-row invitation-actions">
+          <div class="btn-row invitation-actions" style="margin-top:14px">
             <button type="button" class="btn btn-secondary" data-invitation-action="decline" aria-label="Decline invitation to Lisbon weekend">Decline</button>
             <button type="button" class="btn btn-primary" data-invitation-action="accept" aria-label="Accept invitation to Lisbon weekend">Accept</button>
           </div>
@@ -84,56 +70,45 @@
       </section>
 
       <section class="section">
-        <div class="section-header"><span class="section-title">Active groups</span></div>
+        <div class="section-header"><span class="section-title">Active groups</span><span class="help">Grouped by purpose</span></div>
         <div data-active-groups>
           <a class="group-card" href="05-group-overview.html">
             <div class="group-top">
-              <div class="group-icon">
-                <svg class="icon" viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v10H3z"></path><path d="M3 7V5h6l2 2"></path></svg>
+              <div class="group-icon trip" aria-hidden="true">
+                <svg class="icon" viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="13" rx="2"></rect><path d="M9 7V5a3 3 0 0 1 6 0v2M4 12h16M9 12v2M15 12v2"></path></svg>
               </div>
-              <div style="flex:1">
-                <div class="group-name">Road trip 2026</div>
-                <div class="group-meta">4 members · EUR · updated 2m ago</div>
+              <div class="group-card-copy">
+                <div class="group-name">croatia-2026</div>
+                <div class="group-meta">2 members · 76 expenses · EUR</div>
               </div>
-              <span class="pill success"><span class="dot"></span>Synced</span>
+              <span class="group-type-label">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="7" width="16" height="13" rx="2"></rect><path d="M9 7V5a3 3 0 0 1 6 0v2"></path></svg>
+                Trip
+              </span>
             </div>
-            <div class="group-balance">
-              <div><div class="value" style="color:var(--positive)">+€84.20</div><div class="caption">You are owed</div></div>
-              <div style="display:flex"><div class="avatar xs">AK</div><div class="avatar xs green" style="margin-left:-6px">MB</div><div class="avatar xs blue" style="margin-left:-6px">JS</div><div class="avatar xs gold" style="margin-left:-6px">+1</div></div>
-            </div>
-          </a>
-
-          <a class="group-card" href="05-group-overview.html">
-            <div class="group-top">
-              <div class="group-icon" style="background:var(--positive-soft);color:var(--positive)">
-                <svg class="icon" viewBox="0 0 24 24"><path d="M4 19h16M7 16l5-12 5 12M8 12h8"></path></svg>
-              </div>
-              <div style="flex:1">
-                <div class="group-name">Apartment</div>
-                <div class="group-meta">3 members · EUR · updated yesterday</div>
-              </div>
-              <span class="pill success"><span class="dot"></span>Synced</span>
-            </div>
-            <div class="group-balance">
-              <div><div class="value" style="color:var(--positive)">+€56.00</div><div class="caption">You are owed</div></div>
-              <div style="display:flex"><div class="avatar xs">AK</div><div class="avatar xs green" style="margin-left:-6px">LC</div><div class="avatar xs blue" style="margin-left:-6px">RM</div></div>
+            <div class="group-card-summary">
+              <div><strong>14 Jul → 20 Jul</strong><span>€412.60 of €1,000 plan</span></div>
+              <div class="summary-value negative">−€42.35<span>You owe</span></div>
             </div>
           </a>
 
-          <a class="group-card" href="05-group-overview.html">
+          <a class="group-card" href="14-fuel-overview.html">
             <div class="group-top">
-              <div class="group-icon" style="background:var(--warning-soft);color:var(--warning)">
-                <svg class="icon" viewBox="0 0 24 24"><path d="M4 21h16M6 21V9l6-6 6 6v12M9 21v-6h6v6"></path></svg>
+              <div class="group-icon fuel" aria-hidden="true">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M5 21V4h10v17M3 21h14M7 7h6v5H7zM15 8h2l2 2v7a2 2 0 0 0 2 2V9l-2-2"></path></svg>
               </div>
-              <div style="flex:1">
-                <div class="group-name">Family</div>
-                <div class="group-meta">5 members · EUR · updated 3d ago</div>
+              <div class="group-card-copy">
+                <div class="group-name">Family car fuel</div>
+                <div class="group-meta">2 members · 10 expenses · EUR</div>
               </div>
-              <span class="pill pending"><span class="dot"></span>1 pending</span>
+              <span class="group-type-label fuel">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 21V4h10v17M7 7h6v5H7z"></path></svg>
+                Fuel
+              </span>
             </div>
-            <div class="group-balance">
-              <div><div class="value" style="color:var(--negative)">−€12.80</div><div class="caption">You owe</div></div>
-              <div style="display:flex"><div class="avatar xs">AK</div><div class="avatar xs green" style="margin-left:-6px">MA</div><div class="avatar xs blue" style="margin-left:-6px">PA</div><div class="avatar xs gold" style="margin-left:-6px">+2</div></div>
+            <div class="group-card-summary">
+              <div><strong>€138.80 this month</strong><span>€111.20 remaining of €250</span></div>
+              <div class="summary-value">44%<span>remaining</span></div>
             </div>
           </a>
         </div>
@@ -141,7 +116,7 @@
 
       <div class="section callout">
         <svg class="icon" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"></path></svg>
-        <span>Groups and invitations refresh automatically when you open the app. Pull down at any time to check GitHub again.</span>
+        <span>Existing groups open as Trip groups. Their stored data is only migrated after an intentional edit.</span>
       </div>
     </div>
 
