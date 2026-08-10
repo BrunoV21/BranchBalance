@@ -40,6 +40,8 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+/modules/paddle-ocr/android/build/
+/modules/paddle-ocr/android/src/main/assets/paddle_ocr/profile-manifest.json
 
 # editor and assistant state
 .vscode/*
@@ -49,6 +51,11 @@ yarn-error.*
 
 # tests and local builds
 coverage/
+/ocr-dataset/
+/invoices/*.jpg
+/invoices/*.jpeg
+/invoices/*.png
+/invoices/extracted-data.txt
 docs/official/.vitepress/cache/
 *.apk
 *.aab

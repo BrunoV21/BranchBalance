@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "profile": "fuel",
+  "base_checkpoints": {
+    "detection": "PP-OCRv5_mobile_det",
+    "recognition": "latin_PP-OCRv5_mobile_rec",
+    "orientation": "PP-LCNet_x1_0_textline_ori"
+  },
+  "benchmark_candidates": [
+    {
+      "name": "baseline-960",
+      "long_edge": 960,
+      "detection_threshold": 0.3,
+      "box_threshold": 0.6,
+      "unclip_ratio": 1.5,
+      "max_regions": 160
+    },
+    {
+      "name": "detail-1280",
+      "long_edge": 1280,
+      "detection_threshold": 0.3,
+      "box_threshold": 0.6,
+      "unclip_ratio": 1.5,
+      "max_regions": 160
+    },
+    {
+      "name": "qr-resistant-1280",
+      "long_edge": 1280,
+      "detection_threshold": 0.35,
+      "box_threshold": 0.65,
+      "unclip_ratio": 1.35,
+      "max_regions": 128
+    }
+  ],
+  "training": {
+    "seed": 20260810,
+    "detection_annotations": "reviewed full-transcription polygons",
+    "recognition_annotations": "reviewed perspective crops with exact transcriptions",
+    "split_unit": "merchant/layout group"
+  }
+}

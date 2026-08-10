@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "model_assets": {
+    "maximum_bundle_bytes": 19676564
+  },
+  "quality_gates": {
+    "generic": {
+      "minimum_receipts": 3,
+      "minimum_core_recall": 0.8333,
+      "minimum_task_recall": 0.875,
+      "minimum_heldout_core_recall": 0.8333,
+      "minimum_heldout_task_recall": 0.875,
+      "maximum_mean_latency_ms": 2500
+    },
+    "fuel": {
+      "minimum_receipts": 11,
+      "minimum_core_recall": 0.9773,
+      "minimum_task_recall": 0.9545,
+      "minimum_heldout_core_recall": 0.9773,
+      "minimum_heldout_task_recall": 0.9545,
+      "maximum_mean_latency_ms": 3000
+    }
+  },
+  "training_readiness": {
+    "minimum_groups_per_profile": {
+      "train": 1,
+      "validation": 1,
+      "test": 1
+    }
+  }
+}
