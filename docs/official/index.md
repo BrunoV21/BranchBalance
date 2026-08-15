@@ -1,7 +1,7 @@
 ---
 layout: page
-title: Shared expenses. Your data.
-description: BranchBalance is an open-source, GitHub-backed expense splitter. Your group data stays in a private repository you control.
+title: Split costs. Stay even.
+description: Split shared Trip and Fuel expenses with group-specific planning and insights while keeping your data private and under your control.
 sidebar: false
 aside: false
 editLink: false

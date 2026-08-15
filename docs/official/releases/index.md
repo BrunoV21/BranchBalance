@@ -1,7 +1,7 @@
 ---
 layout: page
 title: Releases
-description: BranchBalance release notes and Android preview readiness.
+description: Download the current stable BranchBalance Android release and review what changed.
 sidebar: false
 aside: false
 editLink: false

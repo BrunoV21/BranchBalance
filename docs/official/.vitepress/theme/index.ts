@@ -4,6 +4,7 @@ import { useData } from 'vitepress'
 import VitePressTheme from 'vitepress/theme'
 import DocsHub from '../components/DocsHub.vue'
 import HomePage from '../components/HomePage.vue'
+import InstallPage from '../components/InstallPage.vue'
 import ReleasesList from '../components/ReleasesList.vue'
 import './style.css'
 
@@ -16,7 +17,7 @@ export default {
 
     const RawMarkdownLink = () => {
       if (page.value.isNotFound || !page.value.relativePath) return null
-      if (['index.md', 'documentation/index.md', 'releases/index.md'].includes(page.value.relativePath)) return null
+      if (['index.md', 'install.md', 'documentation/index.md', 'releases/index.md'].includes(page.value.relativePath)) return null
 
       return h('div', { class: 'raw-markdown-link' }, [
         h(
@@ -39,6 +40,7 @@ export default {
   enhanceApp({ app }) {
     app.component('DocsHub', DocsHub)
     app.component('HomePage', HomePage)
+    app.component('InstallPage', InstallPage)
     app.component('ReleasesList', ReleasesList)
   }
 } satisfies Theme

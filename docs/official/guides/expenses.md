@@ -1,24 +1,24 @@
 ---
 title: Add and split expenses
-description: Record shared or personal expenses with exact deterministic shares.
+description: Record who paid, choose who shared the cost, and keep every balance up to date.
 ---
 
 # Add and split expenses
 
-Every expense has a description, positive amount, calendar date, payer, category, payment method, and split.
+Add the description, amount, date, category, payment method, and who paid. Then choose how the group shared the cost.
 
 ## Equal split
 
-Choose one or more accepted members. BranchBalance converts the amount to integer minor units and distributes any remainder deterministically by username so every device produces the same shares.
+Choose the people who shared the expense. BranchBalance divides it as evenly as possible and handles any leftover cent automatically.
 
-## Full-to-one
+## One person
 
-Choose exactly one member other than the payer. That person owes the complete amount.
+Choose one person when the whole expense belongs to them, even if somebody else paid.
 
 ## Just me
 
-Just me is an equal split whose only participant is the payer. It creates no debt, but remains visible to the group and counts toward spending totals and budgets.
+Choose **Just me** for a personal cost. It creates no debt, but remains visible to the group and counts toward spending totals and budgets.
 
 ## Editing and deleting
 
-Any accepted member with write access may edit or delete an expense. Both operations use the latest GitHub blob identifier; a concurrent change opens a review flow instead of being silently overwritten.
+Any accepted member can edit or delete an expense. If somebody else changed it at the same time, BranchBalance shows the newer information and asks you to review it instead of overwriting their work.

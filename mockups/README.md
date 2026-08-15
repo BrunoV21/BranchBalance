@@ -2,7 +2,7 @@
 
 Open `index.html` in a browser to view all screens. Each screen is also a standalone HTML file and shares `styles.css` and `script.js`.
 
-The responsive product website and documentation prototype starts at `website/index.html`. It includes a product landing page, searchable documentation hub, data-ownership article, and truthful `v1.0.0 Preview` releases page. The website shares its own `website/styles.css` and `website/script.js` while reusing the current brand assets and mobile mockups.
+The responsive product website and documentation prototype starts at `website/index.html`. It includes a user-focused product landing page, a plain-language overview of the available Trip and Fuel group types with a link to request another type, a guided Android install page with direct v1.2.0 downloads for modern and older Android phones, a searchable help hub that separates everyday and developer guidance, a data-ownership article, and a stable-release page. The website shares its own `website/styles.css` and `website/script.js` while reusing the current brand assets and mobile mockups.
 
 ## Included screens
 

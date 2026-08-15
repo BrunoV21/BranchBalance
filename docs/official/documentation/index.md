@@ -1,7 +1,7 @@
 ---
 layout: page
-title: Documentation
-description: Start using BranchBalance, understand its GitHub-backed data model, and contribute to the open-source app.
+title: Help & guides
+description: Simple help for installing and using BranchBalance, with separate technical documentation for contributors.
 sidebar: false
 aside: false
 editLink: false

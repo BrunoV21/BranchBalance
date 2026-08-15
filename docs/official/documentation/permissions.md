@@ -1,23 +1,25 @@
 ---
-title: Membership and permissions
-description: How repository ownership, accepted collaborators, and pending invitations define a BranchBalance group.
+title: Owners, members, and invitations
+description: Who controls a group, who can see its expenses, and how invitations work.
 ---
 
-# Membership and permissions
+# Owners, members, and invitations
 
-GitHub is the source of truth for who belongs to a BranchBalance group. The app does not persist a duplicate member list in `group.json`.
+The group creator chooses who can join. Only the creator and people who accept an invitation can see and change the shared group information.
 
-## Repository owner
+## Group creator
 
-The person who creates the group owns its private repository and is always a group member. The owner manages collaborator invitations because that operation requires repository administration permission.
+The person who creates the group controls its private space and is always a member. They are the only person who can send group invitations.
 
-## Accepted members
+## Group members
 
-Accepted collaborators with write access are group members. They can read the shared data; add, edit, or delete expenses; update the shared spending plan; and record or delete settlement payments based on current suggestions. A new settlement payment remains pending until the named recipient confirms receipt. No other member—including the sender, recorder, or repository owner—can confirm on that recipient's behalf.
+After accepting an invitation, a member can see the shared data; add, edit, or delete expenses; update the spending plan; and record settlement payments. A new payment stays pending until the person receiving the money confirms it arrived. Nobody else can confirm on their behalf.
 
 ## Pending invitations
 
-Pending invitees are displayed separately and do not participate in expenses or balances until they accept. Eligible invitees can accept or decline from **Your groups** in BranchBalance; GitHub remains authoritative for the decision. Invited collaborators authorize BranchBalance, but do not need to install the GitHub App on their own account to access a repository covered by the owner’s installation.
+People with a pending invitation are shown separately and do not participate in expenses or balances until they accept. They can accept or decline from **Your groups** in BranchBalance.
+
+BranchBalance uses GitHub’s private-repository access list behind the scenes. Invited members authorize BranchBalance with their GitHub account, but they do not need to set up a GitHub App themselves.
 
 ## Historical usernames
 

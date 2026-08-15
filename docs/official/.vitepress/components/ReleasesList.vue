@@ -133,7 +133,13 @@ const releases = Object.entries(releaseFiles)
 
 const latest = releases[0]
 const stableReleases = computed(() => releases.filter((release) => release.status === 'stable'))
+const previousStableReleases = computed(() => stableReleases.value.filter((release) => release.tag !== latest?.tag))
 const latestIsStable = computed(() => latest?.status === 'stable')
+const installUrl = withBase('/install')
+
+function primaryApkUrl(tag: string) {
+  return `https://github.com/BrunoV21/BranchBalance/releases/download/${tag}/BranchBalance-${tag}-arm64-v8a.apk`
+}
 
 function readableDate(value: string) {
   if (!value) return 'Date pending'
@@ -143,28 +149,34 @@ function readableDate(value: string) {
 
 <template>
   <div v-if="latest" class="bb-releases">
-    <section class="release-hero">
+    <section class="release-hero release-hero-friendly">
       <div class="shell release-hero-grid">
-        <div><p class="eyebrow">Releases</p><h1 class="display-title">Built in public.<br>Released with care.</h1><p class="section-lede">Follow what is implemented, what still needs proving, and when BranchBalance is ready for everyday use.</p></div>
-        <div class="release-channel"><span>Current channel</span><strong>{{ latest.channel }}</strong></div>
+        <div><p class="eyebrow">Current Android release</p><h1 class="display-title">A stable version, ready to install.</h1><p class="section-lede">{{ latest.title }} is the newest public BranchBalance download. Start the APK download here or use the guided install page if this is your first time.</p></div>
+        <aside class="release-download-card">
+          <span class="status-pill" :class="{ stable: latestIsStable }"><span class="dot" />{{ latest.status }}</span>
+          <strong>BranchBalance {{ latest.tag }}</strong>
+          <small>Android · most phones<br>Published {{ readableDate(latest.date) }}</small>
+          <a class="button button-primary" :href="primaryApkUrl(latest.tag)" download>Download APK</a>
+          <a class="text-link" :href="installUrl">Open the install guide instead</a>
+        </aside>
       </div>
     </section>
 
     <div class="shell release-layout">
       <article class="release-card">
         <header class="release-card-head">
-          <div class="release-badges"><span class="status-pill"><span class="dot" />Latest {{ latest.status }}</span><span class="status-pill neutral">Updated {{ readableDate(latest.date) }}</span></div>
-          <h1>{{ latest.title }}</h1>
+          <div class="release-badges"><span class="status-pill" :class="{ stable: latestIsStable }"><span class="dot" />Latest {{ latest.status }}</span><span class="status-pill neutral">{{ readableDate(latest.date) }}</span></div>
+          <h1>What is new in {{ latest.tag }}</h1>
           <p>{{ latest.description }}</p>
         </header>
 
         <div class="release-body">
-          <h2>What is in this release</h2>
+          <h2>Highlights</h2>
           <div class="highlight-grid">
-            <section class="highlight"><div class="point-icon">▣</div><h3>GitHub-backed groups</h3><p>Private repositories, collaborator invitations, and no BranchBalance application backend.</p></section>
-            <section class="highlight"><div class="point-icon">▤</div><h3>Private receipt scanning</h3><p>Read receipt photos on the device and review detected expense details before saving.</p></section>
-            <section class="highlight"><div class="point-icon">▥</div><h3>Payments and balances</h3><p>Record, confirm, and review settlement payments alongside deterministic balances.</p></section>
-            <section class="highlight"><div class="point-icon">◷</div><h3>Spending analytics</h3><p>Understand pace, daily and category mix, personal scope, and expense funding fairness.</p></section>
+            <section class="highlight"><div class="point-icon">▤</div><h3>Private receipt scanning</h3><p>Read receipt photos on your phone and review every detected detail before saving.</p></section>
+            <section class="highlight"><div class="point-icon">✓</div><h3>You stay in control</h3><p>Choose the category, payment method, payer, and split instead of letting a scan decide.</p></section>
+            <section class="highlight"><div class="point-icon">↺</div><h3>Easy to correct</h3><p>Edit uncertain values, retake the photo, or continue with manual entry at any time.</p></section>
+            <section class="highlight"><div class="point-icon">▣</div><h3>Existing groups still work</h3><p>Your groups, expenses, payments, activity, and spending views remain compatible.</p></section>
           </div>
           <div class="release-notes" v-html="latest.html" />
         </div>
@@ -172,30 +184,29 @@ function readableDate(value: string) {
 
       <aside class="release-aside" aria-label="Release summary">
         <section class="aside-card">
-          <h2>Readiness</h2>
+          <h2>At a glance</h2>
           <div class="status-list">
-            <div class="status-row"><span>Phase 1 implementation</span><strong>Complete</strong></div>
-            <div class="status-row"><span>Spending increment</span><strong>Complete</strong></div>
-            <div class="status-row"><span>Physical-device acceptance</span><strong :class="{ pending: !latestIsStable }">{{ latestIsStable ? 'Complete' : 'Pending' }}</strong></div>
-            <div class="status-row"><span>Stable Git tag</span><strong :class="{ pending: !latestIsStable }">{{ latestIsStable ? 'Published' : 'Not published' }}</strong></div>
+            <div class="status-row"><span>Version</span><strong>{{ latest.tag }}</strong></div>
+            <div class="status-row"><span>Platform</span><strong>Android</strong></div>
+            <div class="status-row"><span>Status</span><strong>{{ latestIsStable ? 'Stable' : 'Preview' }}</strong></div>
+            <div class="status-row"><span>Download</span><strong>APK</strong></div>
           </div>
         </section>
 
         <section class="aside-card">
           <h2>Release history</h2>
-          <div v-if="stableReleases.length" class="release-history-list">
-            <a v-for="release in stableReleases" :key="release.tag" class="release-history-link" :href="withBase(`/releases/${release.tag}`)"><span>{{ release.title }}</span><small>{{ readableDate(release.date) }}</small></a>
+          <div v-if="previousStableReleases.length" class="release-history-list">
+            <a v-for="release in previousStableReleases" :key="release.tag" class="release-history-link" :href="withBase(`/releases/${release.tag}`)"><span>{{ release.title }}</span><small>{{ readableDate(release.date) }}</small></a>
           </div>
           <div v-else class="history-empty"><strong>No stable releases yet.</strong><br>The first tagged release will appear here after the Android acceptance loop passes.</div>
         </section>
 
         <section class="aside-card">
-          <h2>Follow progress</h2>
+          <h2>Download help</h2>
+          <p class="aside-copy">First time installing an APK, or using an older 32-bit phone? Start with the guided page.</p>
           <div class="aside-actions">
-            <a class="button button-primary button-small" href="https://github.com/BrunoV21/BranchBalance">View source on GitHub</a>
-            <a class="button button-secondary button-small" :href="withBase('/releases/releasing')">Release process</a>
-            <a class="button button-secondary button-small" :href="withBase('/documentation/')">Explore documentation</a>
-            <a class="button button-secondary button-small" :href="withBase('/')">Back to product</a>
+            <a class="button button-primary button-small" :href="installUrl">Open install guide</a>
+            <a class="button button-secondary button-small" :href="withBase('/documentation/')">Help &amp; guides</a>
           </div>
         </section>
       </aside>

@@ -4,7 +4,7 @@ const siteBase = process.env.VITEPRESS_BASE ?? '/BranchBalance/'
 
 export default defineConfig({
   title: 'BranchBalance',
-  description: 'Open-source shared expenses backed by private GitHub repositories.',
+  description: 'Split shared Trip and Fuel expenses with clear balances, private groups, and direct Android downloads.',
   base: siteBase,
   cleanUrls: true,
   lastUpdated: true,
@@ -21,9 +21,9 @@ export default defineConfig({
 
     nav: [
       { text: 'Product', link: '/' },
-      { text: 'Documentation', link: '/documentation/' },
-      { text: 'Releases', link: '/releases/' },
-      { text: 'Data ownership', link: '/documentation/data-ownership' }
+      { text: 'Install', link: '/install' },
+      { text: 'Help & guides', link: '/documentation/' },
+      { text: 'Releases', link: '/releases/' }
     ],
 
     sidebar: {
@@ -32,16 +32,17 @@ export default defineConfig({
           text: 'Getting started',
           items: [
             { text: 'Overview', link: '/getting-started/' },
-            { text: 'GitHub App setup', link: '/getting-started/github-app' },
-            { text: 'Android over USB', link: '/getting-started/android-usb' }
+            { text: 'Install on Android', link: '/install' },
+            { text: 'Create or join a group', link: '/guides/groups' }
           ]
         },
         {
           text: 'Next steps',
           items: [
-            { text: 'Create and invite a group', link: '/guides/groups' },
+            { text: 'Create or join a group', link: '/guides/groups' },
             { text: 'Add and split expenses', link: '/guides/expenses' },
-            { text: 'Plan group spending', link: '/guides/spending' }
+            { text: 'Plan group spending', link: '/guides/spending' },
+            { text: 'Settle what people owe', link: '/guides/settlements' }
           ]
         }
       ],
@@ -49,9 +50,10 @@ export default defineConfig({
         {
           text: 'Using BranchBalance',
           items: [
-            { text: 'Create and invite a group', link: '/guides/groups' },
+            { text: 'Create or join a group', link: '/guides/groups' },
             { text: 'Add and split expenses', link: '/guides/expenses' },
-            { text: 'Plan group spending', link: '/guides/spending' }
+            { text: 'Plan group spending', link: '/guides/spending' },
+            { text: 'Settle what people owe', link: '/guides/settlements' }
           ]
         },
         {
@@ -76,6 +78,9 @@ export default defineConfig({
         {
           text: 'Product reference',
           items: [
+            { text: 'Run from source', link: '/reference/development' },
+            { text: 'GitHub App setup', link: '/getting-started/github-app' },
+            { text: 'Android over USB', link: '/getting-started/android-usb' },
             { text: 'Product requirements', link: '/reference/PRD' },
             { text: 'Architecture', link: '/reference/architecture' },
             { text: 'Testing', link: '/reference/testing' }
@@ -86,6 +91,9 @@ export default defineConfig({
         {
           text: 'Product reference',
           items: [
+            { text: 'Run from source', link: '/reference/development' },
+            { text: 'GitHub App setup', link: '/getting-started/github-app' },
+            { text: 'Android over USB', link: '/getting-started/android-usb' },
             { text: 'Product requirements', link: '/reference/PRD' },
             { text: 'Architecture', link: '/reference/architecture' },
             { text: 'Testing', link: '/reference/testing' }
@@ -112,7 +120,7 @@ export default defineConfig({
     },
 
     footer: {
-      message: 'Shared expenses, backed by a repository your group controls.',
+      message: 'Shared expenses made clear, private, and easy to install.',
       copyright: 'MIT licensed and built in the open.'
     },
 

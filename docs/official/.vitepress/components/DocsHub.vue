@@ -19,43 +19,43 @@ const query = ref('')
 
 const groups: GuideGroup[] = [
   {
-    title: 'Getting started',
-    detail: 'From source checkout to your first private group.',
+    title: 'Start here',
+    detail: 'From download to your first private group.',
     icon: '✓',
     guides: [
-      { title: 'Install and run the preview', detail: 'Requirements, npm setup, Expo, and local development.', link: '/getting-started/' },
-      { title: 'Configure the GitHub App', detail: 'Device flow, permissions, installation coverage, and secrets.', link: '/getting-started/github-app' },
-      { title: 'Connect an Android device', detail: 'Run Metro through USB when the phone cannot reach your Mac.', link: '/getting-started/android-usb' }
+      { title: 'Install BranchBalance on Android', detail: 'Direct download, Android safety messages, and first launch.', link: '/install' },
+      { title: 'Sign in for the first time', detail: 'Why BranchBalance uses GitHub and what you will be asked to approve.', link: '/getting-started/' },
+      { title: 'Create or join a group', detail: 'Choose Trip or Fuel, start a group, or accept an invitation.', link: '/guides/groups' }
     ]
   },
   {
     title: 'Using BranchBalance',
-    detail: 'Common workflows for owners and group members.',
+    detail: 'Everyday tasks for everyone in the group.',
     icon: '♙',
     guides: [
-      { title: 'Create and invite a group', detail: 'Private repositories, currencies, collaborators, and invitations.', link: '/guides/groups' },
-      { title: 'Add and split expenses', detail: 'Equal, full-to-one, and Just me expenses explained.', link: '/guides/expenses' },
-      { title: 'Plan and understand spending', detail: 'Budgets, trip dates, categories, methods, and filters.', link: '/guides/spending' }
+      { title: 'Add and split an expense', detail: 'Record who paid, who shared the cost, and whether it was personal.', link: '/guides/expenses' },
+      { title: 'Understand group spending', detail: 'Budgets, categories, trip dates, fuel limits, and daily guidance.', link: '/guides/spending' },
+      { title: 'Settle what people owe', detail: 'Suggested payments, sent money, confirmation, and history.', link: '/guides/settlements' }
     ]
   },
   {
-    title: 'Data & ownership',
-    detail: 'Plain-language answers about trust and control.',
+    title: 'Privacy & access',
+    detail: 'Plain-language answers about your group and its data.',
     icon: '▣',
     guides: [
-      { title: 'How BranchBalance stores your data', detail: 'What lives on GitHub, what stays on-device, and who can see it.', link: '/documentation/data-ownership' },
-      { title: 'Membership and permissions', detail: 'Owners, accepted collaborators, pending invites, and access.', link: '/documentation/permissions' },
-      { title: 'Credential security', detail: 'Rotating GitHub tokens, SecureStore, and safe configuration.', link: '/documentation/security' }
+      { title: 'Where your expenses are stored', detail: 'What is shared, what stays on your phone, and who can see it.', link: '/documentation/data-ownership' },
+      { title: 'Owners, members, and invitations', detail: 'Who controls a group and what invited members can do.', link: '/documentation/permissions' },
+      { title: 'What “private” means', detail: 'The protection BranchBalance provides and the limits you should know.', link: '/documentation/data-ownership#what-the-ownership-promise-does-and-does-not-mean' }
     ]
   },
   {
-    title: 'Build & contribute',
-    detail: 'The product and engineering decisions behind the app.',
+    title: 'For developers',
+    detail: 'Source code, local setup, architecture, and testing.',
     icon: '⟨/⟩',
     guides: [
-      { title: 'Architecture guide', detail: 'Boundaries, state, GitHub operations, storage, and compatibility.', link: '/reference/architecture' },
-      { title: 'Testing guide', detail: 'Automated checks and physical-device acceptance scenarios.', link: '/reference/testing' },
-      { title: 'Product requirements', detail: 'Phase 1, spending intelligence, constraints, and acceptance.', link: '/reference/PRD' }
+      { title: 'Run the app from source', detail: 'Node.js, npm, Expo, local configuration, and Android development.', link: '/reference/development' },
+      { title: 'Architecture guide', detail: 'System boundaries, storage, GitHub operations, and compatibility.', link: '/reference/architecture' },
+      { title: 'Testing and validation', detail: 'Automated checks and physical-device acceptance scenarios.', link: '/reference/testing' }
     ]
   }
 ]
@@ -81,17 +81,22 @@ const guideHref = (link: string) => withBase(link)
     <section class="page-hero">
       <div class="shell page-hero-grid">
         <div>
-          <p class="eyebrow">Documentation</p>
-          <h1 class="display-title">Know what happens to every cent.</h1>
-          <p class="section-lede">Start using BranchBalance, understand the GitHub-backed model, or explore the decisions behind the open-source app.</p>
+          <p class="eyebrow">Help &amp; guides</p>
+          <h1 class="display-title">Find the next step, without the jargon.</h1>
+          <p class="section-lede">Install BranchBalance, join your first group, and learn the everyday features. Technical build documentation has its own clearly marked section.</p>
           <div class="search-wrap">
             <svg class="icon search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>
-            <label class="sr-only" for="docs-hub-search">Filter documentation guides</label>
-            <input id="docs-hub-search" v-model="query" class="doc-search" type="search" placeholder="Filter guides, concepts, and workflows…" autocomplete="off">
+            <label class="sr-only" for="docs-hub-search">Search help and guides</label>
+            <input id="docs-hub-search" v-model="query" class="doc-search" type="search" placeholder="Search installation, invitations, expenses…" autocomplete="off">
             <span class="search-key" aria-hidden="true">{{ resultCount }}</span>
           </div>
         </div>
-        <aside class="preview-note"><strong>Preview documentation</strong>The Android build is still awaiting physical-device acceptance. These guides describe the current implemented product.</aside>
+        <aside class="quick-start-card">
+          <div class="point-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 20h14" /></svg></div>
+          <strong>New to BranchBalance?</strong>
+          <span>Start with the guided Android download. It explains every warning and sign-in step.</span>
+          <a class="button button-primary button-small" :href="guideHref('/install')">Install on Android</a>
+        </aside>
       </div>
     </section>
 
@@ -99,7 +104,7 @@ const guideHref = (link: string) => withBase(link)
       <div class="shell">
         <div class="docs-status" aria-live="polite">{{ query ? `${resultCount} ${resultCount === 1 ? 'guide' : 'guides'} found for “${query}”` : 'Browse 12 guides across four topics.' }}</div>
         <div v-if="filteredGroups.length" class="docs-grid">
-          <section v-for="group in filteredGroups" :key="group.title" class="docs-group">
+          <section v-for="group in filteredGroups" :id="group.title === 'For developers' ? 'developers' : undefined" :key="group.title" class="docs-group" :class="{ 'developer-group': group.title === 'For developers' }">
             <div class="docs-group-head">
               <div class="point-icon" aria-hidden="true">{{ group.icon }}</div>
               <div><h2>{{ group.title }}</h2><p>{{ group.detail }}</p></div>
@@ -112,19 +117,14 @@ const guideHref = (link: string) => withBase(link)
             </div>
           </section>
         </div>
-        <div v-else class="search-empty is-visible">No guide matches that search yet. Try “GitHub”, “expense”, “budget”, or “testing”.</div>
+        <div v-else class="search-empty is-visible">No guide matches that search yet. Try “install”, “invitation”, “expense”, or “privacy”.</div>
       </div>
     </section>
 
     <section class="section-tight section-rule">
-      <div class="shell open-source-panel">
-        <div>
-          <p class="eyebrow">Documentation is part of the product</p>
-          <h2>See a gap? Improve it in the open.</h2>
-          <p>The PRD, architecture guide, tests, and implementation live together in the repository so product promises can be checked against the code.</p>
-          <div class="hero-actions"><a class="button button-primary" href="https://github.com/BrunoV21/BranchBalance">Browse the repository</a><a class="button button-secondary" :href="guideHref('/releases/')">View release status</a></div>
-        </div>
-        <div class="license-seal" aria-label="Documentation backed by source"><div><strong>{ }</strong><span>Source first</span></div></div>
+      <div class="shell help-panel">
+        <div><p class="eyebrow">Recommended first step</p><h2>Not sure where to begin?</h2><p>Use the guided Android install page. It includes direct app downloads, safety prompts, GitHub sign-in, and separate directions for creators and invited members.</p></div>
+        <a class="button button-primary" :href="guideHref('/install')">Install BranchBalance</a>
       </div>
     </section>
     <div class="bb-page-footer-space" />

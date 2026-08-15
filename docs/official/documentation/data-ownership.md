@@ -1,18 +1,18 @@
 ---
-title: How BranchBalance stores your data
-description: What lives in your private GitHub repository, what stays on your phone, and who can access it.
+title: Where BranchBalance stores your data
+description: A plain-language explanation of what is shared, what stays on your phone, and who can see it.
 outline: deep
 ---
 
-# How BranchBalance stores your data
+# Where BranchBalance stores your data
 
-Every group has a concrete home: a private GitHub repository. Here is what goes there, what stays on your phone, and what “your data” means in practice.
+Your shared expenses live in a private group space controlled by the creator. Here is the plain-language overview, followed by the technical details for anyone who wants them.
 
 ::: tip The short version
-BranchBalance has no application backend in Phase 1. The Android app reads and writes your group’s private GitHub repository directly.
+Only accepted group members can see the shared expenses. BranchBalance does not keep a separate copy of that history on its own data server.
 :::
 
-## One group, one repository
+## One group, one private space
 
 When you create a group, BranchBalance creates a private repository named `branch-balance-<group-name>` under your personal GitHub account. The repository owner controls it and invites the other group members as collaborators.
 

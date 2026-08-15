@@ -16,12 +16,12 @@
       <a class="brand" href="index.html" aria-label="BranchBalance home"><img class="brand-mark" src="../../assets/brand/branch-balance-icon.svg" alt=""><span class="brand-word">BranchBalance</span></a>
       <nav class="site-nav" id="main-navigation" data-site-nav aria-label="Main navigation">
         <a class="nav-link" href="index.html">Product</a>
-        <a class="nav-link" href="docs.html" aria-current="page">Documentation</a>
+        <a class="nav-link" href="install.html">Install</a>
+        <a class="nav-link" href="docs.html" aria-current="page">Help &amp; guides</a>
         <a class="nav-link" href="releases.html">Releases</a>
-        <a class="nav-link" href="index.html#open-source">Open source</a>
       </nav>
       <div class="nav-actions">
-        <a class="button button-secondary button-small github-nav" href="https://github.com/BrunoV21/BranchBalance" target="_blank" rel="noreferrer"><svg class="icon-fill" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .7a11.5 11.5 0 0 0-3.64 22.4c.58.1.79-.25.79-.56v-2.2c-3.22.7-3.9-1.36-3.9-1.36-.52-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.71.08-.71 1.17.08 1.78 1.2 1.78 1.2 1.04 1.78 2.72 1.27 3.39.97.1-.75.4-1.27.74-1.56-2.57-.29-5.27-1.29-5.27-5.72 0-1.27.45-2.3 1.2-3.11-.12-.3-.52-1.48.11-3.07 0 0 .98-.31 3.16 1.19a10.9 10.9 0 0 1 5.75 0c2.18-1.5 3.16-1.19 3.16-1.19.63 1.59.23 2.77.11 3.07.75.81 1.2 1.84 1.2 3.11 0 4.45-2.71 5.42-5.29 5.71.42.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .7Z"></path></svg>GitHub</a>
+        <a class="button button-primary button-small nav-install" href="install.html">Install</a>
         <button class="icon-button" type="button" data-theme-toggle aria-label="Switch theme"></button>
         <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-controls="main-navigation" aria-label="Open navigation"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"></path></svg></button>
       </div>
@@ -29,27 +29,27 @@
   </header>
 
   <main>
-    <div class="shell breadcrumbs" aria-label="Breadcrumb"><a href="docs.html">Documentation</a><span>/</span><span>Data &amp; ownership</span><span>/</span><span aria-current="page">How your data is stored</span></div>
+    <div class="shell breadcrumbs" aria-label="Breadcrumb"><a href="docs.html">Help &amp; guides</a><span>/</span><span>Privacy &amp; access</span><span>/</span><span aria-current="page">Where your data is stored</span></div>
     <div class="shell docs-layout">
       <aside class="docs-sidebar" aria-label="Documentation sections">
-        <div class="side-group"><div class="side-label">Getting started</div><nav class="side-nav"><a href="../../README.md#install-and-run">Install and run</a><a href="../../README.md#github-app-setup">GitHub App setup</a><a href="../../README.md#android-device-over-usb">Android over USB</a></nav></div>
-        <div class="side-group"><div class="side-label">Data &amp; ownership</div><nav class="side-nav"><a class="active" href="docs-data.html" aria-current="page">How data is stored</a><a href="../../docs/PRD.md#5-users-membership-and-permissions">Membership</a><a href="../../README.md#security">Credential security</a></nav></div>
-        <div class="side-group"><div class="side-label">Contribute</div><nav class="side-nav"><a href="../../docs/ARCHITECTURE.md">Architecture</a><a href="../../docs/TESTING.md">Testing</a><a href="../../docs/PRD.md">Product requirements</a></nav></div>
+        <div class="side-group"><div class="side-label">Start here</div><nav class="side-nav"><a href="install.html">Install on Android</a><a href="../01-sign-in.html">First sign-in</a><a href="../03-groups.html">Create or join</a></nav></div>
+        <div class="side-group"><div class="side-label">Privacy &amp; access</div><nav class="side-nav"><a class="active" href="docs-data.html" aria-current="page">Where data is stored</a><a href="../../docs/PRD.md#5-users-membership-and-permissions">Owners and members</a><a href="#limits">What private means</a></nav></div>
+        <div class="side-group"><div class="side-label">For developers</div><nav class="side-nav"><a href="../../README.md#run-from-source">Run from source</a><a href="../../docs/ARCHITECTURE.md">Architecture</a><a href="../../docs/TESTING.md">Testing</a></nav></div>
       </aside>
 
       <article class="doc-article" id="article">
-        <div class="article-kicker">Data &amp; ownership</div>
-        <h1>How BranchBalance stores your data</h1>
-        <p class="article-lede">Every group has a concrete home: a private GitHub repository. Here is what goes there, what stays on your phone, and what “your data” means in practice.</p>
-        <div class="article-meta"><span>8 minute read</span><span>Updated 18 July 2026</span><span>Applies to v1.0.0 Preview</span></div>
+        <div class="article-kicker">Privacy &amp; access</div>
+        <h1>Where BranchBalance stores your data</h1>
+        <p class="article-lede">Your shared expenses live in a private group space controlled by the creator. Here is the plain-language overview, followed by the technical details for anyone who wants them.</p>
+        <div class="article-meta"><span>8 minute read</span><span>Updated 15 August 2026</span><span>Applies to v1.2.0</span></div>
 
         <div class="article-content">
           <div class="callout">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"></path></svg>
-            <div><strong>The short version</strong><p>BranchBalance has no application backend in Phase 1. The Android app reads and writes your group’s private GitHub repository directly.</p></div>
+            <div><strong>The short version</strong><p>Only accepted group members can see the shared expenses. BranchBalance does not keep a separate copy of that history on its own data server.</p></div>
           </div>
 
-          <h2 id="one-repository">One group, one repository</h2>
+          <h2 id="one-repository">One group, one private space</h2>
           <p>When you create a group, BranchBalance creates a private repository named <strong>branch-balance-&lt;group-name&gt;</strong> under your personal GitHub account. The repository owner controls it and invites the other group members as collaborators.</p>
 
           <div class="ownership-diagram" role="img" aria-label="The Android app exchanges data directly with a private GitHub repository using the GitHub API.">
@@ -122,8 +122,8 @@
           <p>That boundary is intentional: BranchBalance’s promise is a transparent and inspectable data model, not a claim that infrastructure disappears.</p>
 
           <div class="article-pager">
-            <a class="pager-link" href="docs.html"><small>Back to</small><strong>Documentation home</strong></a>
-            <a class="pager-link" href="releases.html"><small>Next</small><strong>Release status</strong></a>
+            <a class="pager-link" href="docs.html"><small>Back to</small><strong>Help &amp; guides</strong></a>
+            <a class="pager-link" href="install.html"><small>Next</small><strong>Install on Android</strong></a>
           </div>
         </div>
       </article>
@@ -143,7 +143,7 @@
   <footer class="site-footer">
     <div class="shell footer-grid">
       <div class="footer-brand"><a class="brand" href="index.html"><img class="brand-mark" src="../../assets/brand/branch-balance-icon.svg" alt=""><span class="brand-word">BranchBalance</span></a><p>Clear documentation for data you can inspect.</p></div>
-      <nav class="footer-links" aria-label="Footer navigation"><a href="docs.html">Documentation</a><a href="releases.html">Releases</a><a href="../../docs/ARCHITECTURE.md">Architecture</a><a href="../../LICENSE">MIT License</a><a href="https://github.com/BrunoV21/BranchBalance">GitHub</a></nav>
+      <nav class="footer-links" aria-label="Footer navigation"><a href="index.html">Product</a><a href="install.html">Install</a><a href="docs.html">Help</a><a href="releases.html">Releases</a><a href="https://github.com/BrunoV21/BranchBalance">GitHub</a></nav>
     </div>
   </footer>
 </body>

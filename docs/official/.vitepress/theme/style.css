@@ -105,6 +105,18 @@
   background: var(--surface-soft);
 }
 
+.VPNavBarMenuLink[href$='/install'] {
+  background: var(--accent);
+  color: #fffaf5 !important;
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.VPNavBarMenuLink[href$='/install']:hover,
+.VPNavBarMenuLink[href$='/install'].active {
+  background: var(--accent-bright);
+  color: #fffaf5 !important;
+}
+
 .VPNavBarAppearance .VPSwitchAppearance,
 .VPNavBarHamburger .container,
 .VPSocialLink {
@@ -276,6 +288,7 @@
 }
 
 .bb-home,
+.bb-install,
 .bb-docs-hub,
 .bb-releases {
   min-height: 100vh;
@@ -712,6 +725,12 @@
 
   .VPNavScreen > .container {
     max-width: 420px;
+  }
+
+  .VPNavScreenMenuLink[href$='/install'] {
+    border-radius: 12px;
+    background: var(--accent);
+    color: #fffaf5 !important;
   }
 
   .bb-home .hero {
