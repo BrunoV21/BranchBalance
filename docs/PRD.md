@@ -1,14 +1,14 @@
 # BranchBalance — Phase 1 Product Requirements Document
 
-**Status:** Phase 1 and CR-001 through CR-007 implemented; CR-003 physical-device acceptance remains blocked by a known GitHub App token limitation, CR-004/CR-005 physical-device acceptance is pending, and the CR-006/CR-007 OCR quality and complete physical-device acceptance matrix remains pending
+**Status:** Phase 1 and CR-001 through CR-008 implemented; CR-003 physical-device acceptance remains blocked by a known GitHub App token limitation, CR-004/CR-005/CR-008 physical-device acceptance is pending, and the CR-006/CR-007 OCR quality and complete physical-device acceptance matrix remains pending
 
-**Last updated:** 2026-08-10
+**Last updated:** 2026-08-15
 
 **Platform:** Android
 
 **Repository prefix:** `branch-balance`
 
-**Active change requests:** CR-006 and CR-007 implemented with their OCR acceptance matrix still open; CR-004 and CR-005 await physical-device acceptance
+**Active change requests:** CR-008 implemented with physical-device browser/accessibility acceptance pending; CR-006 and CR-007 implemented with their OCR acceptance matrix still open; CR-004 and CR-005 await physical-device acceptance
 
 ## 1. Product summary
 
@@ -2601,7 +2601,142 @@ The manual physical-device test uses two sessions and both group types. Verify l
 
 These capabilities require separate product and data-model decisions rather than additions to the initial Fuel type.
 
-## 23. Technical references
+## 23. Change request CR-008 — Request a new group type
+
+**Status:** Implemented; dedicated GitHub Issue Form, app handoff, failure recovery, tests, and interactive mockup are complete; physical-device browser/accessibility acceptance remains pending
+
+**Requested:** 2026-08-15
+
+**Target:** Current Android group-creation UX increment
+
+### 23.1 Context and motivation
+
+CR-007 introduces Trip and Fuel as the first supported group types and deliberately defers household, event, subscription, vehicle maintenance, recurring-budget, and other specialized workflows. A member whose use case does not fit Trip or Fuel currently sees no productive next step on the Create group screen and has to discover the repository's general issue tracker independently.
+
+CR-008 adds an explicit feedback path at the point where that gap is clearest. A member can open a dedicated public GitHub feature-request form from the group-type selector, explain what they want to track, and submit the proposal to the BranchBalance issue tracker for product review.
+
+This change gathers structured proposals; it does not let members define executable schemas, add an unsupported type to a repository, or imply that a request will be accepted or delivered.
+
+### 23.2 Product outcome
+
+1. The Create group screen presents **Request another group type** immediately after the supported Trip and Fuel choices.
+2. The action is visually distinct from the selectable type cards and cannot become the form's selected group type.
+3. Activating it opens the device browser at the dedicated BranchBalance **New group type request** GitHub Issue Form.
+4. The form gathers consistent product context and creates a public feature-request issue only after the member reviews and submits it on GitHub.
+5. Returning to BranchBalance preserves the entered group name, selected currency, and selected supported type while the app remains mounted.
+
+### 23.3 Confirmed product decisions
+
+| Area | Decision |
+|---|---|
+| Placement | Directly after the supported group-type choices and before the immutable-type guidance on Create group |
+| Label | **Request another group type** |
+| Presentation | A secondary external action, not a radio option or disabled future type |
+| Destination | `https://github.com/BrunoV21/BranchBalance/issues/new?template=group_type_request.yml` |
+| Submission | GitHub owns authentication, validation, preview, cancellation, and final issue creation |
+| Visibility | The UI and Issue Form state that submitted issues are public |
+| Data safety | Members are told not to include private repository names, expense details, credentials, access tokens, or other sensitive data |
+| App permissions | No new GitHub App permission, backend, app token, or direct Issues API write |
+| Form state | Opening or cancelling the external flow does not change the selected supported type or submit Create group |
+| Delivery expectation | The flow does not promise acceptance, priority, response time, or implementation |
+
+### 23.4 Create-group experience
+
+The request action contains:
+
+- A visually distinct suggestion icon.
+- The label **Request another group type**.
+- Supporting copy: **Tell us what you want to track. Opens a public GitHub issue form.**
+- An external-link icon and an accessible label that announces GitHub and the external browser destination.
+
+The action uses the same horizontal inset as the group-type cards and a minimum 48 dp touch target. It remains understandable without colour, supports large text without clipping, and follows the screen's light and dark themes. It must not use a hidden radio input, checked state, **Select**, or **Selected** treatment.
+
+Trip remains selected by default. Tapping the request action does not change Trip/Fuel selection, repository preview, or **Create &lt;type&gt; group** call to action. If the member returns from GitHub, their locally entered Create group values remain unchanged unless the operating system has discarded the screen.
+
+### 23.5 GitHub Issue Form
+
+The repository provides `.github/ISSUE_TEMPLATE/group_type_request.yml` with the display name **New group type request**, an `enhancement` label, and a `Group type: ` title prefix. It gathers:
+
+- Proposed group-type name.
+- The real-world tracking need and who shares it.
+- The workflow that Trip and Fuel do not cover.
+- Planning cadence.
+- Type-specific expense details or fields.
+- Useful summaries and insights.
+- Whether receipt-assisted entry would help and what it should extract.
+- Existing workaround or additional context.
+- Required acknowledgement that the issue is public and contains no sensitive or private group data.
+
+The form should ask for product needs rather than a complete technical schema. Maintainers retain normal issue-triage control and may ask follow-up questions, close duplicates, decline proposals, or move accepted work into a separate change request.
+
+The app opens this canonical URL:
+
+```text
+https://github.com/BrunoV21/BranchBalance/issues/new?template=group_type_request.yml
+```
+
+The template filename is explicit so GitHub does not route the member through the general template chooser. The app must not prefill private group state into the URL, issue title, or body. GitHub may require the member to sign in before submission; cancellation or browser closure creates no issue.
+
+### 23.6 External navigation, privacy, and failure states
+
+- Use the platform's secure external URL opener and permit only the fixed HTTPS URL above; no member-controlled URL component is interpolated.
+- The request action remains available whether or not the BranchBalance GitHub App installation can access the current user's repositories because normal browser authentication owns this flow.
+- BranchBalance does not inspect GitHub cookies, observe whether an issue was submitted, or claim success after merely opening the browser.
+- No group name, repository owner, repository name, currency, member, expense, balance, or receipt data is transmitted by BranchBalance.
+- If the browser cannot open, keep the Create group form intact and show a plain-language error with **Try again** and a copyable link.
+- If the device is offline, the browser or GitHub may show its normal network error; returning to the app preserves the Create group state.
+- The Issue Form repeats the public-visibility and sensitive-data warning before submission.
+
+### 23.7 User stories
+
+#### US-CR008-01 — Discover the request path
+
+As a member whose use case is neither Trip nor Fuel, I want to find a request action beside the supported types so that I do not have to search for the project issue tracker.
+
+#### US-CR008-02 — Submit useful product context
+
+As a requester, I want a dedicated form that asks about cadence, expense details, and insights so that maintainers can understand the workflow consistently.
+
+#### US-CR008-03 — Keep group creation intact
+
+As a member considering another type, I want my current Create group entries to remain intact when I visit or cancel the GitHub form so that exploration does not discard my work.
+
+#### US-CR008-04 — Understand the privacy boundary
+
+As a privacy-conscious member, I want to know that the request becomes a public issue before I type it so that I do not expose private group or financial information.
+
+### 23.8 Acceptance criteria
+
+- [ ] Create group shows **Request another group type** immediately after Trip and Fuel on supported screen sizes and themes.
+- [ ] The action is semantically and visually an external link, never a selectable, checked, or persisted group type.
+- [ ] Activating it opens the dedicated `group_type_request.yml` Issue Form in the external browser.
+- [ ] The destination uses the fixed BranchBalance HTTPS URL and includes no Create group or repository data.
+- [ ] Trip/Fuel selection, repository preview, and create CTA remain unchanged when the link is activated.
+- [ ] Returning from the browser preserves locally mounted Create group values.
+- [ ] The action and Issue Form disclose that submitted requests are public and must not contain sensitive or private group data.
+- [ ] The Issue Form requires group-type name, unmet tracking need, missing workflow, planning cadence, desired insights, and the privacy acknowledgement.
+- [ ] GitHub sign-in, validation, cancellation, and submission remain browser-owned; the app neither requests Issues permission nor reports an unverified success.
+- [ ] Browser-open failure leaves the form intact and exposes retry plus a copyable destination.
+- [ ] The action meets 48 dp touch-target, TalkBack, keyboard/focus, large-text, light/dark, and colour-independence requirements.
+
+### 23.9 Test requirements
+
+Component and integration tests must cover the fixed destination, external-link semantics, no selection mutation, no Create group submission, state preservation after app foregrounding, browser-open rejection, retry, and copied-link fallback. Tests must assert that no form value or group/repository identifier is appended to the outbound URL.
+
+Issue-template validation must parse the YAML, confirm its required fields and public-data acknowledgement, and confirm that the production URL selects `group_type_request.yml`. Manual Android verification covers GitHub signed-in and signed-out browser states, browser cancellation, offline behavior, TalkBack announcement, keyboard/focus navigation where available, font scaling, light/dark themes, and returning to finish either a Trip or Fuel group.
+
+### 23.10 Explicitly deferred from CR-008
+
+- Creating, voting on, commenting on, or tracking GitHub issues inside BranchBalance.
+- Automatically attaching device, account, group, repository, expense, receipt, log, or diagnostic data.
+- A private feedback backend or anonymous request submission.
+- User-defined group types, schemas, fields, formulas, dashboards, plugins, or runtime-downloaded type definitions.
+- A delivery commitment, roadmap vote count, notification subscription, or in-app request status.
+- Group-type conversion or migration for an existing group.
+
+Any proposed group type still requires separate product, persistence, compatibility, privacy, analytics, and acceptance decisions before implementation.
+
+## 24. Technical references
 
 - [Generating a user access token for a GitHub App](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)
 - [Refreshing GitHub App user access tokens](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/refreshing-user-access-tokens)

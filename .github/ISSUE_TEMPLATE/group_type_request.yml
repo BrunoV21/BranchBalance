@@ -1,0 +1,89 @@
+name: New group type request
+description: Propose a new purpose-built group type for a shared spending workflow that Trip and Fuel do not cover.
+title: "Group type: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping shape BranchBalance. This request will be public. Describe the workflow in general terms and do not include private repository names, expense details, credentials, access tokens, or other sensitive data.
+  - type: input
+    id: group-type-name
+    attributes:
+      label: Proposed group-type name
+      description: Use a short name that describes what the group tracks.
+      placeholder: Household, event, subscriptions, vehicle maintenance, ...
+    validations:
+      required: true
+  - type: textarea
+    id: tracking-need
+    attributes:
+      label: What do you need to track, and who shares it?
+      description: Explain the real-world purpose and the people who would use this group without sharing private financial details.
+    validations:
+      required: true
+  - type: textarea
+    id: missing-workflow
+    attributes:
+      label: Why do Trip and Fuel not fit?
+      description: Describe the planning, expense-entry, or review workflow that the current types cannot represent well.
+    validations:
+      required: true
+  - type: dropdown
+    id: planning-cadence
+    attributes:
+      label: Planning cadence
+      description: How should limits, budgets, or progress normally be organized?
+      options:
+        - One-time or fixed date range
+        - Weekly
+        - Monthly
+        - Quarterly
+        - Yearly
+        - Ongoing with no fixed period
+        - Another cadence or no plan
+    validations:
+      required: true
+  - type: textarea
+    id: expense-details
+    attributes:
+      label: Type-specific expense details
+      description: Which optional details would make expenses more useful beyond amount, date, payer, participants, category, and payment method?
+      placeholder: Quantity, renewal date, usage, vendor, odometer reading, ...
+  - type: textarea
+    id: insights
+    attributes:
+      label: Useful summaries and insights
+      description: What questions should Overview or Spending answer for this group type?
+    validations:
+      required: true
+  - type: dropdown
+    id: receipt-assistance
+    attributes:
+      label: Receipt-assisted entry
+      description: Would on-device receipt scanning help this workflow?
+      options:
+        - Not needed
+        - Helpful using the existing generic fields
+        - Helpful with type-specific fields
+        - Unsure
+    validations:
+      required: true
+  - type: textarea
+    id: receipt-fields
+    attributes:
+      label: Receipt fields to recognize
+      description: If type-specific receipt assistance would help, list the fields it should extract for member review.
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Current workaround or additional context
+      description: Describe how you handle this today or add sanitized examples that clarify the request.
+  - type: checkboxes
+    id: public-data
+    attributes:
+      label: Public request and sensitive data
+      options:
+        - label: I understand this issue is public and I have not included private group or repository details, financial data, credentials, access tokens, or other sensitive information.
+          required: true

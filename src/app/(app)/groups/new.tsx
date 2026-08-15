@@ -10,6 +10,7 @@ import { createRepositoryName } from '@/domain/slug';
 import { groupTypeDefinition } from '@/domain/groups';
 import type { CurrencyCode, KnownGroupType } from '@/domain/types';
 import { GroupTypeIcon } from '@/features/groups/group-type-ui';
+import { GroupTypeRequestAction } from '@/features/groups/group-type-request';
 import { useGroups } from '@/providers/groups-provider';
 import { useTheme } from '@/providers/theme-provider';
 
@@ -51,6 +52,7 @@ export default function NewGroupScreen() {
         </Card>
       </Pressable>;
     })}</View>
+    <GroupTypeRequestAction />
     <Body muted>Group type and currency are permanent. Trip is the default for holiday and shared-trip expenses.</Body>
     {error ? <Banner tone="error">{error}</Banner> : null}
     <Button disabled={!canCreateGroups || !name.trim()} loading={loading} onPress={() => setConfirming(true)}>Create {groupTypeDefinition[groupType].label} group</Button>

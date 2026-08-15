@@ -4,6 +4,7 @@ export const githubAppSlug = process.env.EXPO_PUBLIC_GITHUB_APP_SLUG?.trim() ?? 
 export const githubInstallationUrl = githubAppSlug ? `https://github.com/apps/${githubAppSlug}/installations/new` : 'https://github.com/settings/installations';
 export const githubAuthorizationSettingsUrl = 'https://github.com/settings/apps/authorizations';
 export const githubDeviceUrl = 'https://github.com/login/device';
+export const githubGroupTypeRequestUrl = 'https://github.com/BrunoV21/BranchBalance/issues/new?template=group_type_request.yml';
 
 export function configurationErrorFor(clientId: string, appSlug: string): string | null {
   if (!clientId) return 'Set EXPO_PUBLIC_GITHUB_CLIENT_ID to the client ID from your GitHub App.';

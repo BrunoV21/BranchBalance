@@ -1,13 +1,13 @@
-# BranchBalance — Phase 1 Architecture and CR-001 through CR-007
+# BranchBalance — Phase 1 Architecture and CR-001 through CR-008
 
-**Status:** Phase 1 implementation guide; CR-001 through CR-007 implemented; CR-003 physical-device acceptance remains blocked by a known GitHub App token limitation, CR-004/CR-005 physical-device acceptance is pending, and the CR-006/CR-007 OCR quality and complete physical-device acceptance matrix remains open
-**Applies to:** Phase 1 Android application, CR-001 trip and group spending intelligence, CR-002 settlement payment recording, CR-003 in-app group invitation decisions, CR-004 on-device activity inbox, CR-005 pace, mix, and fairness analytics, CR-006 private on-device receipt scanning, and CR-007 typed groups and Fuel tracking
+**Status:** Phase 1 implementation guide; CR-001 through CR-008 implemented; CR-003 physical-device acceptance remains blocked by a known GitHub App token limitation, CR-004/CR-005 physical-device acceptance is pending, and the CR-006/CR-007 OCR quality and complete physical-device acceptance matrix remains open
+**Applies to:** Phase 1 Android application, CR-001 trip and group spending intelligence, CR-002 settlement payment recording, CR-003 in-app group invitation decisions, CR-004 on-device activity inbox, CR-005 pace, mix, and fairness analytics, CR-006 private on-device receipt scanning, CR-007 typed groups and Fuel tracking, and CR-008 external group-type requests
 **Companion specification:** [`PRD.md`](PRD.md)
-**Last updated:** 2026-08-10
+**Last updated:** 2026-08-15
 
 ## 1. Purpose and decision precedence
 
-This document turns the Phase 1 product requirements and the screens in `mockups/` into an implementation blueprint. Together with the PRD, the implemented increments are intended to be sufficient to implement, test, and package the application without making additional architectural decisions. Sections 21 and 22 define the implemented CR-006/CR-007 boundaries and the remaining OCR quality and physical-device acceptance work.
+This document turns the Phase 1 product requirements and the screens in `mockups/` into an implementation blueprint. Together with the PRD, the implemented increments are intended to be sufficient to implement, test, and package the application without making additional architectural decisions. Sections 21 and 22 define the implemented CR-006/CR-007 boundaries and the remaining OCR quality and physical-device acceptance work; section 23 defines CR-008's intentionally narrow external-request handoff.
 
 Use this precedence when sources disagree:
 
@@ -31,6 +31,7 @@ The following clarifications are intentional:
 | Receipt scanning | CR-006 is a local-only review path. It may persist only member-confirmed ordinary expense fields, including optional normalized generic line items; it never saves automatically or retains receipt pixels/raw OCR. |
 | Typed groups | CR-007 adds immutable `trip` and `fuel` group types. Every schema-v1 group has effective type Trip, while new typed groups use schema-v2 `group.json`. |
 | Type-specific UI | One shared group shell owns membership, expenses, balances, settlements, activity, and synchronization. A validated group-type registry selects planning, OCR review, Overview, and Spending strategies. |
+| Group-type requests | CR-008 exposes one fixed public GitHub Issue Form from Create group. The handoff is UI-owned, sends no group state, requests no new GitHub permission, and never treats opening the browser as confirmed issue creation. |
 
 ## 2. System context and constraints
 
@@ -193,7 +194,7 @@ The `(auth)` layout redirects an authenticated user to `/groups`. The `(app)` la
 ### 5.2 Group screens
 
 - **Groups** follows mockup 03 without its global bottom tabs. It shows cached currency-separated owed/owing totals, group cards, their last successful sync time, member preview, current-user balance, pull-to-refresh, account avatar, and create action.
-- **Create group** follows mockup 04. It previews the slug and private repository, locks the supported currency list, checks installation prerequisites, and owns partial-creation recovery.
+- **Create group** follows mockup 04. It previews the slug and private repository, locks the supported currency list, checks installation prerequisites, owns partial-creation recovery, and exposes CR-008's separate external action for requesting another group type without changing or submitting the form.
 - **Account modal** is reached from the avatar. It shows the authenticated GitHub account, theme preference, installation management link, and sign-out confirmation.
 
 ### 5.3 Selected-group screens
@@ -3157,3 +3158,103 @@ Do not enable Fuel creation in a release that can write schema v2 before unsuppo
 - Automatic group-type inference, automatic payer/split/category decisions, or automatic save
 
 These require new product, privacy, schema, and architecture decisions rather than additions to the initial typed-group registry.
+
+## 23. CR-008 architecture delta — External group-type requests
+
+**Increment status:** Implemented; physical-device browser and accessibility acceptance remains part of the normal Android release matrix
+
+CR-008 adds a structured feedback exit from Create group while deliberately avoiding a new application data flow. BranchBalance does not create the issue through Octokit, does not request Issues permission, and does not add issue state to a provider or cache. It opens one fixed public GitHub Issue Form and leaves authentication, editing, cancellation, and submission to GitHub.
+
+```text
+Create group screen
+  └── GroupTypeRequestAction (ephemeral UI state only)
+        ├── fixed githubGroupTypeRequestUrl
+        ├── Linking.openURL(url) ────────────────┐
+        └── open failure → Retry / Copy link    │
+                                                ▼
+                              public GitHub Issue Form
+                              group_type_request.yml
+                                                │
+                                      user reviews/submits
+                                                ▼
+                              BranchBalance public issue tracker
+```
+
+There is no return callback and no success mutation. Returning from the browser simply foregrounds the still-mounted Create group screen, whose React state continues to own name, currency, selected supported type, confirmation, and creation errors.
+
+### 23.1 Source ownership and dependency direction
+
+The implementation is split across existing layers:
+
+- `src/config/app.ts` owns `githubGroupTypeRequestUrl` as the exact HTTPS destination. It contains no interpolated account, group, repository, or form value.
+- `src/features/groups/group-type-request.tsx` owns the request row, external open attempt, duplicate-tap guard, failure state, retry, selectable fallback URL, and clipboard feedback.
+- `src/app/(app)/groups/new.tsx` composes the action immediately after the Trip/Fuel radio group. It does not pass Create group state into the action.
+- `.github/ISSUE_TEMPLATE/group_type_request.yml` owns GitHub-side field validation and the public/sensitive-data acknowledgement.
+
+The feature component may depend on React Native, `expo-linking`, `expo-clipboard`, shared UI, theme tokens, and the fixed config value. It must not depend on `GroupsProvider`, `SessionProvider`, the GitHub gateway/client, SecureStore, AsyncStorage, analytics, or repository schemas. No new runtime dependency is required.
+
+### 23.2 Navigation and local state contract
+
+The external action is not a router route and never enters the group-type registry. It uses `accessibilityRole="link"`, calls the platform URL opener with the fixed destination, and has this local state machine:
+
+| State | UI and allowed transition |
+|---|---|
+| Idle | Request row enabled; activation enters Opening |
+| Opening | Row reports busy and rejects duplicate activation; successful handoff returns to Idle |
+| Failed | Create group remains untouched; show plain error, **Try again**, **Copy link**, and a selectable canonical URL |
+| Copied | Keep the failure recovery visible and announce that the canonical URL was copied |
+
+Retry uses the same fixed opener and state machine. Clipboard failure is contained locally and leaves the selectable URL visible. The app does not show **Request submitted**, because a resolved open call proves only that the operating system accepted the handoff.
+
+The action remains available when repository creation is unavailable or GitHub App installation coverage is incomplete. Browser authentication is independent from the GitHub App user token and must not trigger installation recheck, group refresh, token refresh, or sign-out behavior.
+
+### 23.3 Privacy and security boundary
+
+- Only `https://github.com/BrunoV21/BranchBalance/issues/new?template=group_type_request.yml` may be opened.
+- Do not append query parameters from group name, currency, selected type, account, repository, installation, device, logs, receipts, expenses, balances, or diagnostics.
+- Do not read GitHub cookies, inject a BranchBalance token, call the Issues REST/GraphQL API, or request a result callback.
+- Do not log the open attempt with Create group state or persist request/open/copy state.
+- The request row says that the destination is a public GitHub issue form before navigation.
+- The Issue Form repeats the public visibility warning and requires confirmation that private financial, repository, credential, and token data is absent.
+- Browser cancellation, GitHub authentication failure, GitHub validation failure, or network failure creates no app-side error beyond a rejected platform open call that BranchBalance can observe.
+
+Because the destination is a literal owned by configuration rather than input, the feature has no open-redirect or URL-construction surface. Future destination changes require a reviewed source change plus matching config, component, PRD, mockup, and Issue Form tests.
+
+### 23.4 Presentation and accessibility
+
+The request action follows mockup 04 but is deliberately not a third type card:
+
+- render it after the supported-type radio group and before permanent-type guidance;
+- use a suggestion icon, **Request another group type**, public-form supporting copy, and external-link icon;
+- use dashed/secondary treatment without **Select**, **Selected**, radio semantics, or accent selection fill;
+- preserve at least a 48 dp target and permit supporting text to wrap under font scaling;
+- announce that it opens a public GitHub issue form in the browser;
+- expose busy, failure, retry, copied, and manual-copy states to TalkBack without relying on colour; and
+- retain legible contrast and hierarchy in light and dark themes.
+
+Pressing the row must not change the Trip/Fuel accessibility selection, repository preview, confirmation copy, or Create group button label. The failure recovery appears in document order directly below the request row so keyboard and TalkBack users encounter it in context.
+
+### 23.5 Test architecture
+
+Configuration tests assert the exact canonical URL and its dedicated template filename. Component/screen tests mock `expo-linking` and `expo-clipboard` and cover:
+
+- presence and external-link semantics immediately after the two supported radio options;
+- exact URL opening with no state-derived query data;
+- duplicate-tap protection while the open promise is unresolved;
+- unchanged group name, currency, selected type, preview, and create CTA after activation;
+- open rejection with retry, copy action, and selectable URL;
+- successful and failed clipboard feedback; and
+- continued ordinary Trip/Fuel creation after returning from the handoff.
+
+No test opens GitHub or depends on live authentication. Manual Android acceptance covers signed-in/signed-out GitHub browser states, cancellation, offline/browser failure, returning to finish creation, TalkBack, large text, keyboard/focus behavior where available, and light/dark themes. Network/log inspection confirms that BranchBalance sends no Create group data and performs no Issues API call.
+
+### 23.6 Explicitly outside the CR-008 architecture
+
+- Creating, reading, voting on, commenting on, or tracking issues inside BranchBalance
+- A provider, reducer, cache record, activity item, notification, or success callback for issue state
+- Prefilled issue content derived from application, account, repository, expense, receipt, or device data
+- A private/anonymous feedback backend or BranchBalance-managed form
+- User-defined group schemas, dynamic registry entries, plugins, runtime type downloads, or group conversion
+- Roadmap promises, vote totals, service-level expectations, or in-app request status
+
+An accepted proposal still begins a separate product/architecture change; CR-008 itself never makes an unsupported type executable.

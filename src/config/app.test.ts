@@ -1,4 +1,4 @@
-import { configurationErrorFor } from './app';
+import { configurationErrorFor, githubGroupTypeRequestUrl } from './app';
 
 describe('GitHub configuration', () => {
   it('rejects OAuth App credentials because BranchBalance requires a GitHub App', () => {
@@ -9,5 +9,11 @@ describe('GitHub configuration', () => {
 
   it('accepts a GitHub App client ID and slug', () => {
     expect(configurationErrorFor('Iv23li0123456789abcd', 'branch-balance-dev')).toBeNull();
+  });
+
+  it('uses the fixed dedicated public Issue Form for group-type requests', () => {
+    expect(githubGroupTypeRequestUrl).toBe(
+      'https://github.com/BrunoV21/BranchBalance/issues/new?template=group_type_request.yml',
+    );
   });
 });
